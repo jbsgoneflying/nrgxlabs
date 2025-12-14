@@ -1,0 +1,197 @@
+VERSION: v1.0
+DESIGN GOAL:
+Refactor the existing ORATS Earnings Breach web app UI into an
+Apple-style, professional, tactical analytics tool.
+
+This is NOT a marketing site.
+This is a decision instrument for a quant / options trader.
+
+Design references:
+- Apple Stocks app
+- Xcode panels
+- Apple Activity / Fitness stats
+- Bloomberg Terminal (visual restraint, not density)
+
+KEY PRINCIPLES:
+- Data-first, decoration-last
+- Neutral background, elevated surfaces
+- Clear hierarchy and legibility
+- Minimal color, meaningful color
+- No visual noise
+
+--------------------------------
+GLOBAL VISUAL SYSTEM
+--------------------------------
+
+BACKGROUND:
+- Use a single dark neutral background.
+- Acceptable:
+  - solid #0f1115
+  - OR subtle radial gradient (top lighter → bottom darker)
+- Do NOT use multi-band gradients or repeating patterns.
+
+Example:
+background: #0f1115;
+
+--------------------------------
+TYPOGRAPHY
+--------------------------------
+
+Font stack (in order):
+- -apple-system
+- BlinkMacSystemFont
+- "SF Pro Text"
+- Inter
+- system-ui
+- sans-serif
+
+Font usage:
+- App title: 22–24px, font-weight 600
+- Section headers: 15–16px, font-weight 600
+- Labels / captions: 12–13px, font-weight 500, opacity ~0.7
+- Metric numbers: 28–36px, font-weight 600
+- Table text: 13–14px, font-weight 400
+- Numeric table columns: use monospace font
+
+--------------------------------
+COLOR SYSTEM
+--------------------------------
+
+Base colors:
+- Background: #0f1115
+- Surface: #151922
+- Border: rgba(255,255,255,0.06)
+- Primary text: #e6e8eb
+- Secondary text: rgba(230,232,235,0.65)
+
+Semantic accents (used sparingly):
+- Green (favorable): rgba(76, 217, 100, 0.9)
+- Amber (caution): rgba(255, 191, 0, 0.9)
+- Red (risk): rgba(255, 69, 58, 0.9)
+
+Accent usage rules:
+- Only use color for meaning (never decoration)
+- Prefer badges or small indicators over full backgrounds
+
+--------------------------------
+LAYOUT STRUCTURE
+--------------------------------
+
+Page layout order:
+
+1. Header
+   - App title: "ORATS Earnings Breach Analysis"
+   - Subtitle: "Implied vs realized earnings moves · Last 20 events"
+
+2. Control Bar (toolbar-style)
+   - Inline inputs:
+       [Ticker] [Breach Multiple Dropdown] [Calculate Button]
+   - Single rounded container
+   - No stacked form layout
+
+3. Results Surface (only visible after calculation)
+   - Summary Metrics (cards)
+   - Quarter Seasonality (cards or compact table)
+   - Earnings Events Table
+
+--------------------------------
+CONTROL BAR
+--------------------------------
+
+Style:
+- Background: surface color
+- Border-radius: 14px
+- Height ~56px
+- Inputs aligned horizontally
+- Button aligned right
+
+Behavior:
+- Uppercase ticker input automatically
+- Enter key triggers calculation
+- Disabled state + spinner while loading
+
+--------------------------------
+CARDS (SURFACES)
+--------------------------------
+
+Card style:
+- Background: #151922
+- Border-radius: 16px
+- Border: 1px solid rgba(255,255,255,0.06)
+- Subtle shadow:
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35)
+
+--------------------------------
+SUMMARY METRICS SECTION
+--------------------------------
+
+Layout:
+- Horizontal row of metric cards (3–5 max)
+- Each card shows:
+   - Label
+   - Large numeric value
+   - Small contextual caption
+
+Metrics to highlight:
+- Breach Rate (%)
+- Avg Overshoot If Breached (%)
+- Avg Realized / Implied (x)
+- Events Used / Total
+
+--------------------------------
+QUARTER SEASONALITY SECTION
+--------------------------------
+
+Preferred layout:
+- Four quarter cards (Q1–Q4)
+
+Each quarter card shows:
+- Quarter label (Q1, Q2, Q3, Q4)
+- Recommendation badge:
+   Tight | Standard | Wide | Avoid
+- Key stats:
+   - Breach Δ vs baseline (pp)
+   - Avg realized / implied
+   - Max realized / implied (if relevant)
+
+Badge styles:
+- Tight: muted green pill
+- Standard: gray pill
+- Wide: amber pill
+- Avoid: red outlined pill
+
+--------------------------------
+EARNINGS EVENTS TABLE
+--------------------------------
+
+Table style:
+- No vertical grid lines
+- Subtle horizontal separators
+- Sticky header
+- Hover highlight per row
+- Numeric columns in monospace font
+
+Row highlighting:
+- Breach rows: subtle red-tinted background (very low opacity)
+- Near-breach rows: subtle amber-tinted background
+
+--------------------------------
+INTERACTION POLISH
+--------------------------------
+
+Required:
+- Loading spinner on Calculate
+- Disabled inputs during request
+- Tooltips (ⓘ) explaining:
+   - Breach definition
+   - Above-breach %
+   - Seasonality score
+
+NOT ALLOWED:
+- Neon colors
+- Heavy gradients
+- Excessive animation
+- Marketing-style hero sections
+- Decorative charts without purpose
+
+END UX SPEC

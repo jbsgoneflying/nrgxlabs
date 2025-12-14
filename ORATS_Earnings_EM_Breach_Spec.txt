@@ -1,0 +1,258 @@
+VERSION: v1.0
+PURPOSE:
+Build a small web app where a user enters a US equity ticker and gets:
+(1) breach rate (%) over the last 20 earnings (cap to ~5 years)
+(2) “average above breach %” (how far beyond implied it tends to go, conditional on breach)
+(3) a table of the last 20 earnings with all intermediate numbers
+
+HIGH-LEVEL APPROACH:
+- Use ORATS Delayed Data API (v2) for:
+  - earnings history: /datav2/hist/earnings
+  - historical “core” snapshot (for implied earnings move): /datav2/hist/cores
+  - historical daily prices (for realized move calc): /datav2/hist/dailies
+- Compute implied move from ORATS “impErnMv” (aka implied earnings move) on the correct “pricing date”
+- Compute realized earnings move using daily open/close around the earnings timestamp (AMC vs BMO)
+- Compute breach = abs(realized_move_pct) > abs(implied_move_pct) * breach_multiple (default 1.0)
+
+WHY THESE ORATS FIELDS / ENDPOINTS:
+- ORATS defines “earnings moves studies” using implied earnings moves and actual post-earnings moves (ernMv*, impErnMv). We’ll use impErnMv and compute realized ourselves to reach 20 earnings (ORATS publishes ernMv1..ernMv12, but we want 20). :contentReference[oaicite:0]{index=0}
+- Delayed Data API base URL is https://api.orats.io/datav2 and uses token query param. :contentReference[oaicite:1]{index=1}
+- Request limit is 1000 requests per minute (plan batching/caching). :contentReference[oaicite:2]{index=2}
+- /datav2/hist/earnings exists and returns earnings history. :contentReference[oaicite:3]{index=3}
+- /datav2/hist/cores exists and supports requesting fields. :contentReference[oaicite:4]{index=4}
+- /datav2/hist/dailies exists for daily open/close, etc. :contentReference[oaicite:5]{index=5}
+
+API DOCS TO REFERENCE:
+- Delayed Data API docs: https://orats.com/docs/delayed-data-api :contentReference[oaicite:6]{index=6}
+- Authentication docs: https://orats.com/docs/authentication :contentReference[oaicite:7]{index=7}
+- Data API endpoint reference (v2): https://docs.orats.io/datav2-api-guide/data.html :contentReference[oaicite:8]{index=8}
+- Field definitions: https://orats.com/docs/definitions :contentReference[oaicite:9]{index=9}
+
+-----------------------------------------
+CORE DEFINITIONS WE RELY ON (ORATS):
+-----------------------------------------
+
+1) Earnings history fields:
+- earnDate: the earnings date
+- anncTod: announcement time-of-day flag (used to decide AMC vs BMO alignment)
+
+(We will use anncTod to infer event timing; ORATS returns earnings history via /datav2/hist/earnings.) :contentReference[oaicite:10]{index=10}
+
+2) Implied earnings move:
+- impErnMv: “percentage stock move in the implied earnings effect…” (use as implied move %) :contentReference[oaicite:11]{index=11}
+
+3) Daily price:
+- open: opening stock price adjusted for splits/dividends
+- clsPx: closing stock price adjusted for splits/dividends :contentReference[oaicite:12]{index=12}
+
+-----------------------------------------
+ENDPOINTS (v2 Delayed Data API)
+-----------------------------------------
+All calls are to:
+  https://api.orats.io/datav2/...
+Auth:
+  token=YOUR_TOKEN (query param) :contentReference[oaicite:13]{index=13}
+
+A) Earnings history
+GET /datav2/hist/earnings
+Params:
+  ticker= (required)
+Returns:
+  list of earnings events with earnDate, anncTod (and possibly other metadata) :contentReference[oaicite:14]{index=14}
+
+B) Historical cores (to get implied earnings move on pricing date)
+GET /datav2/hist/cores
+Params:
+  ticker= (required; can be multiple tickers but we’ll use one)
+  tradeDate=YYYY-MM-DD (required in v2 hist endpoints) :contentReference[oaicite:15]{index=15}
+  fields=... (optional)
+Fields needed (minimum):
+  ticker, tradeDate, stockPrice, impErnMv
+
+Example pattern from ORATS docs for hist/cores usage. :contentReference[oaicite:16]{index=16}
+
+C) Historical dailies (to compute realized move and “prior day close”)
+GET /datav2/hist/dailies
+Params:
+  ticker=... and tradeDate=YYYY-MM-DD (required unless using alt mode)
+  fields=clsPx,open,tradeDate,ticker
+(We’ll call this for specific dates we need: earnings day, prior day, next day.) :contentReference[oaicite:17]{index=17}
+
+-----------------------------------------
+BUSINESS LOGIC
+-----------------------------------------
+
+INPUTS:
+- ticker (string, uppercase)
+- lookback_earnings = 20
+- max_years = 5 (filter earnings events to last ~5y)
+- breach_multiple (float, default 1.0; later expose 1.0/1.5/2.0 toggles)
+
+STEP 1 — Get earnings events
+- Call /datav2/hist/earnings?ticker=XYZ
+- Sort by earnDate descending
+- Filter to last max_years (approx by date)
+- Take first lookback_earnings events (20)
+- If fewer than 20 exist, use whatever is available and display “N events found”.
+
+STEP 2 — Determine event type and pricing date
+We need “pricing date” = the date we grab implied earnings move (impErnMv).
+
+Rules:
+- If anncTod indicates “after close” (AMC):
+    pricing_date = earnDate
+    realized window = close(earnDate) -> open(next trading day)
+- If anncTod indicates “before open” (BMO):
+    pricing_date = prior trading day to earnDate
+    realized window = close(prior trading day) -> open(earnDate)
+- If anncTod is unknown:
+    fallback to close(prior) -> open(next) around earnDate OR mark event “unknown timing” and skip in breach calc (but still show row)
+
+NOTE:
+We will not assume weekends/holidays; we must find the nearest prior/next trading day by probing /hist/dailies for dates until data exists.
+
+STEP 3 — Pull implied move (impErnMv) for each pricing_date
+For each event:
+- Call /datav2/hist/cores?ticker=XYZ&tradeDate=pricing_date&fields=ticker,tradeDate,stockPrice,impErnMv
+- implied_move_pct = abs(impErnMv)
+- If cores data is missing for that date, retry with nearest prior trading day (max 5 attempts) and record actual used date.
+
+STEP 4 — Pull realized move using dailies
+For each event, get the needed dailies:
+- For AMC:
+    A = dailies(earnDate).clsPx
+    B = dailies(next_trading_day).open
+    realized_move_pct = abs(B - A) / A
+- For BMO:
+    A = dailies(prior_trading_day).clsPx
+    B = dailies(earnDate).open
+    realized_move_pct = abs(B - A) / A
+
+Store:
+- ref_close_date_used (the date for A)
+- ref_open_date_used (the date for B)
+- ref_close_px (A), ref_open_px (B)
+
+STEP 5 — Breach flag + “above breach %”
+For each event where we have implied + realized:
+- breach = realized_move_pct > implied_move_pct * breach_multiple
+
+If breach:
+- above_breach_pct = (realized_move_pct - implied_move_pct) / implied_move_pct
+  (example: implied 5%, realized 7% => above_breach_pct = 40%)
+
+Also store:
+- implied_move_pct
+- realized_move_pct
+- ratio_realized_to_implied = realized_move_pct / implied_move_pct
+
+STEP 6 — Summary outputs for UI
+Compute across valid events:
+- breach_rate = mean(breach) * 100
+- avg_above_breach_pct = mean(above_breach_pct for breached events) * 100
+- avg_realized_pct_if_breach = mean(realized_move_pct for breached events) * 100
+- avg_realized_pct_all = mean(realized_move_pct) * 100
+- avg_implied_pct_all = mean(implied_move_pct) * 100
+- count_events, count_valid_events, count_breaches
+
+DISPLAY NOTES:
+- Show how many events were usable vs skipped
+- Show which events were skipped and why (missing core data / missing dailies / unknown timing)
+
+-----------------------------------------
+APP ARCHITECTURE
+-----------------------------------------
+
+Frontend (HTML in browser):
+- Single page: ticker input, submit button
+- Results area:
+  - “Breach Rate (last 20 earnings)”
+  - “Avg Above Breach % (conditional)”
+  - (optional) toggle breach_multiple (1.0 / 1.5 / 2.0)
+  - Table of events (last 20):
+      earnDate | anncTod | type (AMC/BMO/UNK)
+      pricing_date_used | impErnMv (%)
+      close_date_used | close_px
+      open_date_used | open_px
+      realized_move (%)
+      breach (Y/N)
+      above_breach (%)
+- Basic styling (clean, readable); no heavy frameworks required.
+
+Backend (recommended):
+- Python FastAPI (or Flask) providing:
+  GET /api/breach?ticker=XYZ&n=20&years=5&k=1.0
+
+Why backend:
+- Keep ORATS token secret (don’t embed token in frontend JS)
+- Add caching + retry logic
+- Normalize and return clean JSON
+
+Caching:
+- In-memory cache keyed by (ticker, n, years, k) with TTL (e.g., 6 hours)
+- Also cache ORATS raw responses by (endpoint, ticker, date) with TTL to reduce request volume
+- Respect ORATS 1000 req/min limit by:
+  - small concurrency
+  - exponential backoff on 429/rate-limit
+
+Errors / validation:
+- Validate ticker as uppercase A-Z, 1–6 chars (allow dot/dash optionally if needed)
+- Handle ORATS API errors gracefully and surface message to UI
+- If no earnings history returned, show “No earnings data found.”
+
+-----------------------------------------
+OUTPUT JSON CONTRACT (backend -> frontend)
+-----------------------------------------
+{
+  "ticker": "AAPL",
+  "params": { "n": 20, "years": 5, "k": 1.0 },
+  "summary": {
+    "events_found": 20,
+    "events_used": 19,
+    "breaches": 6,
+    "breach_rate_pct": 31.6,
+    "avg_above_breach_pct": 42.3,
+    "avg_realized_if_breach_pct": 7.8,
+    "avg_realized_all_pct": 4.9,
+    "avg_implied_all_pct": 4.6
+  },
+  "events": [
+    {
+      "earnDate": "2025-10-30",
+      "anncTod": "1630",
+      "timing": "AMC",
+      "pricingDateUsed": "2025-10-30",
+      "impErnMv": 0.045,                 // raw decimal or pct - be consistent
+      "impliedMovePct": 4.5,
+      "closeDateUsed": "2025-10-30",
+      "closePx": 182.12,
+      "openDateUsed": "2025-10-31",
+      "openPx": 175.40,
+      "realizedMovePct": 3.69,
+      "breach": false,
+      "aboveBreachPct": null,
+      "notes": []
+    }
+  ],
+  "skipped": [
+    { "earnDate": "...", "reason": "missing cores for pricing date after retries" }
+  ]
+}
+
+DECIMAL VS PERCENT CONVENTION:
+- Internally store decimals (0.045) and convert to percent in UI OR
+- Store percents (4.5) everywhere.
+Pick one and be consistent.
+
+-----------------------------------------
+ACCEPTANCE CRITERIA
+-----------------------------------------
+- Enter ticker, click “Calculate”, within a few seconds you see:
+  - breach rate over last 20 earnings
+  - average above breach %
+  - table of last 20 events with implied + realized + breach flags
+- Handles AMC/BMO correctly using anncTod
+- Robust to weekends/holidays using dailies existence checks
+- Token never appears in frontend source
+- Caching prevents repeated ORATS calls for the same ticker within TTL
+END SPEC

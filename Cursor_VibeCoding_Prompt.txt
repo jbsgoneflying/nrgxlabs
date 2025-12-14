@@ -1,0 +1,63 @@
+You are a senior full-stack engineer + quant dev. Build the system described in the local spec file:
+  ORATS_Earnings_EM_Breach_Spec.txt
+
+GOAL:
+A small web app (HTML frontend) + Python backend that:
+- Accepts a US equity ticker input
+- Computes earnings implied-move breach stats over last 20 earnings (~5 years):
+  (1) breach rate %
+  (2) avg “above breach %” conditional on breach
+- Displays a detailed per-earnings table with implied vs realized and breach flags
+
+HARD REQUIREMENTS:
+1) Follow the spec exactly for endpoints and calculations.
+2) Use ORATS Delayed Data API v2 (base https://api.orats.io/datav2) with token query parameter.
+3) Backend must keep ORATS token secret (env var ORATS_TOKEN). Do not put token in frontend code.
+4) Implement robust trading-day alignment by probing ORATS /hist/dailies for prior/next trading days.
+5) Implement caching + rate-limit awareness (1000 req/min): TTL cache and small concurrency.
+6) No code generation shortcuts: build maintainable modules, logging, and error handling.
+
+REFERENCE DOCS (for your own deep dive if needed):
+- ORATS Delayed Data API: https://orats.com/docs/delayed-data-api
+- ORATS Authentication: https://orats.com/docs/authentication
+- ORATS v2 endpoint guide: https://docs.orats.io/datav2-api-guide/data.html
+- ORATS field definitions: https://orats.com/docs/definitions
+
+DELIVERABLES:
+A) Backend (Python):
+- Prefer FastAPI
+- Endpoint: GET /api/breach?ticker=XYZ&n=20&years=5&k=1.0
+- Return JSON contract exactly as in spec
+- Modules:
+  - orats_client.py (requests, retries, caching primitives)
+  - earnings_logic.py (event alignment, implied + realized move calc, breach stats)
+  - app.py (FastAPI server + routes)
+- Use .env / environment variables:
+  - ORATS_TOKEN required
+  - PORT optional
+- Include README.md with run steps.
+
+B) Frontend (plain HTML + minimal JS):
+- index.html served statically (either via FastAPI StaticFiles or separate simple server)
+- UI: ticker input, calculate button, optional dropdown for k (1.0/1.5/2.0), results cards, table
+- Call backend /api/breach and render results, including skipped events with reasons
+- Ensure token is never exposed.
+
+IMPLEMENTATION NOTES:
+- Use ORATS endpoints listed in spec:
+  - /datav2/hist/earnings
+  - /datav2/hist/cores (fields: ticker,tradeDate,stockPrice,impErnMv)
+  - /datav2/hist/dailies (fields: ticker,tradeDate,clsPx,open)
+- Use anncTod to classify AMC/BMO and set pricingDate + realized window dates.
+- If anncTod unknown, follow the spec fallback behavior.
+- Must handle weekends/holidays by searching prior/next date with dailies available (cap retries).
+
+TESTING:
+- Add a minimal test script or pytest for:
+  - trading-day search helper
+  - a single ticker end-to-end (mock ORATS responses if needed)
+
+NOW BUILD IT:
+- Create the files and implement the system.
+- If any ORATS field names differ in actual responses, reconcile using the official definitions page and update the code accordingly without changing the output contract.
+END PROMPT

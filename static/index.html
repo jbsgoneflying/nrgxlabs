@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ORATS Earnings Breach Analysis</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appHeaderText">
+          <div class="appTitle">ORATS Earnings Breach Analysis</div>
+          <div class="appSubtitle">Implied vs realized earnings moves · Last 20 events</div>
+        </div>
+      </header>
+
+      <section class="controlBar" aria-label="Controls">
+        <form id="form" class="controlBarForm">
+          <div class="controlGroup">
+            <label class="controlLabel" for="ticker">Ticker</label>
+            <input id="ticker" name="ticker" class="controlInput" inputmode="text" placeholder="AAPL" autocomplete="off" />
+          </div>
+
+          <div class="controlGroup">
+            <label class="controlLabel" for="k">
+              Breach multiple
+              <span class="info" title="Breach = |realized move| > k × |implied move|">ⓘ</span>
+            </label>
+            <select id="k" name="k" class="controlSelect">
+              <option value="1.0" selected>1.0×</option>
+              <option value="1.5">1.5×</option>
+              <option value="2.0">2.0×</option>
+            </select>
+          </div>
+
+          <div class="controlSpacer"></div>
+
+          <button id="submit" type="submit" class="primaryButton">
+            <span class="btnSpinner" aria-hidden="true"></span>
+            <span class="btnLabel">Calculate</span>
+          </button>
+        </form>
+
+        <div id="status" class="status" aria-live="polite"></div>
+      </section>
+
+      <section id="results" class="results hidden" aria-label="Results">
+        <section class="surface">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Summary
+              <span class="info" title="Summary computed over usable events only (must have implied + realized, and timing AMC/BMO).">ⓘ</span>
+            </h2>
+            <div id="breachMeta" class="sectionMeta">—</div>
+          </div>
+
+          <div class="metricGrid">
+            <div class="metricCard">
+              <div class="metricLabel">Breach Rate</div>
+              <div id="breachRate" class="metricValue">—</div>
+              <div class="metricCaption">Share of usable events that breached</div>
+            </div>
+
+            <div class="metricCard">
+              <div class="metricLabel">
+                Avg Overshoot If Breached
+                <span class="info" title="Overshoot = (realized − implied) / implied, conditional on breach.">ⓘ</span>
+              </div>
+              <div id="avgAbove" class="metricValue">—</div>
+              <div class="metricCaption">Tail severity conditional on breach</div>
+            </div>
+
+            <div class="metricCard">
+              <div class="metricLabel">Avg Realized / Implied</div>
+              <div id="avgRatio" class="metricValue mono">—</div>
+              <div class="metricCaption">Baseline ratio across usable events</div>
+            </div>
+
+            <div class="metricCard">
+              <div class="metricLabel">Events Used</div>
+              <div id="eventsUsed" class="metricValue mono">—</div>
+              <div class="metricCaption">Usable / Found in lookback window</div>
+            </div>
+          </div>
+
+          <div id="actionSummary" class="actionSummary muted" aria-live="polite">—</div>
+        </section>
+
+        <div id="finalTradeRead" class="tradeReadStrip" aria-live="polite">—</div>
+
+        <section class="surface">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Regime Overlay
+              <span class="info" title="Inputs: SPY 20D realized vol percentile, ticker 30D IV percentile, and SPY 5D move percentile. Combined into a tail multiplier (0.7–2.0×).">ⓘ</span>
+            </h2>
+            <div class="sectionMeta muted" id="regimeAsOf">—</div>
+          </div>
+
+          <div class="metricGrid">
+            <div class="metricCard">
+              <div class="metricLabel">Regime</div>
+              <div id="regimeLabel" class="metricValue">—</div>
+              <div class="metricCaption">Market + single-name stress</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Tail Multiplier</div>
+              <div id="tailMultiplier" class="metricValue mono">—</div>
+              <div class="metricCaption">Scales wing width guidance</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Trade Gate</div>
+              <div id="tradeGate" class="metricValue">—</div>
+              <div class="metricCaption">OK / Caution / No Trade</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">
+                Suggested Adjustment
+                <span class="info" title="Adjustment derived from quarter seasonality baseline and current regime inputs (SPY realized volatility percentile + single-name IV expansion + correlation proxy).">ⓘ</span>
+              </div>
+              <div id="regimeMessage" class="metricValue">—</div>
+              <div class="metricCaption">Based on quarter + regime</div>
+            </div>
+          </div>
+
+          <div id="strikeBuffer" class="execNote">
+            <div class="execNoteTitle">
+              Strike Placement Buffer (execution)
+              <span class="info" title="This is an execution buffer to improve open-exit fills and reduce wing-touch risk; it does not modify model math.">ⓘ</span>
+            </div>
+            <div id="strikeBufferBody" class="execNoteBody muted">—</div>
+            <div id="strikeBufferRule" class="execNoteRule muted">Execution guidance (not part of model). Does not affect breach stats / regime / seasonality.</div>
+          </div>
+        </section>
+
+        <section class="surface">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Regime Validation
+              <span class="info" title="Regime at Event is computed as-of pricingDateUsed using trailing SPY realized vol, ticker IV30 percentile, and SPY 5D move percentile (no lookahead).">ⓘ</span>
+            </h2>
+            <div class="sectionMeta muted" id="regimeValidationMeta">—</div>
+          </div>
+          <div class="regimeValidationGrid">
+            <div class="rvLine" id="rvFlagged">—</div>
+            <div class="rvLine" id="rvMissed">—</div>
+            <div class="rvLine" id="rvRates">—</div>
+          </div>
+        </section>
+
+        <section class="surface">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Quarter Seasonality
+              <span class="info" title="Seasonality compares each quarter vs baseline behavior using deltas in breach rate and ratios.">ⓘ</span>
+            </h2>
+            <div class="sectionMeta muted">Breach Δ shown in percentage points (pp)</div>
+          </div>
+
+          <div id="quarterCards" class="quarterGrid" aria-label="Quarter cards"></div>
+          <div class="finePrint muted">
+            Recommendation uses a heuristic; quarters with &lt;3 usable events are labeled “Avoid (low sample)”.
+          </div>
+        </section>
+
+        <div class="sectionDivider" aria-hidden="true"></div>
+
+        <section class="surface">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">Earnings Events</h2>
+            <div class="sectionMeta muted">
+              <button id="earningsToggle" class="linkButton" type="button">Show earnings history</button>
+              <span class="spacerDot">·</span>
+              <span id="skippedSummary"></span>
+            </div>
+          </div>
+
+          <div class="tableWrap">
+            <table class="dataTable">
+              <thead>
+                <tr>
+                  <th>earnDate</th>
+                  <th class="ref">anncTod</th>
+                  <th class="ref">timing</th>
+                  <th class="ref">pricingDate</th>
+                  <th class="num">impErnMv</th>
+                  <th class="num">implied</th>
+                  <th>closeDate</th>
+                  <th class="num">close</th>
+                  <th>openDate</th>
+                  <th class="num">open</th>
+                  <th class="num">realized</th>
+                  <th>breach</th>
+                  <th>regime</th>
+                  <th>gate</th>
+                  <th class="num">overshoot</th>
+                  <th>notes</th>
+                </tr>
+              </thead>
+              <tbody id="tbody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
+
+
