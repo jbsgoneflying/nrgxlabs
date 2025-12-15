@@ -7,9 +7,18 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from backend.orats_client import OratsClient, OratsError
 from backend.regime_overlay import compute_regime_backtest_view, compute_regime_overlay
+from backend.skew_overlay import compute_skew_overlay
+from backend.wing_recommendation import compute_wing_recommendation
 
 
 LOG = logging.getLogger(__name__)
+
+# Phase 1 (Directional Breach) constants
+# Spec: moveDirection is FLAT if abs(signedMovePct) < ~0.01
+DIR_FLAT_EPSILON_PCT = 0.01
+TAIL_BIAS_RATE_THRESHOLD_PP = 5.0
+# "significantly larger" overshoot: use a conservative pp threshold
+TAIL_BIAS_OVERSHOOT_THRESHOLD_PP = 10.0
 
 
 class BreachInputError(ValueError):
@@ -159,6 +168,43 @@ def _round2(v: Optional[float]) -> Optional[float]:
     return round(float(v), 2)
 
 
+def _move_direction(signed_move_pct: Optional[float]) -> Optional[str]:
+    """Return UP/DOWN/FLAT for a signed move (percent), else None if missing."""
+    if signed_move_pct is None:
+        return None
+    if abs(float(signed_move_pct)) < DIR_FLAT_EPSILON_PCT:
+        return "FLAT"
+    return "UP" if signed_move_pct > 0 else "DOWN"
+
+
+def _tail_bias(
+    *,
+    up_breach_rate_pct: Optional[float],
+    down_breach_rate_pct: Optional[float],
+    avg_up_overshoot_pct: Optional[float],
+    avg_down_overshoot_pct: Optional[float],
+) -> str:
+    """Classify tail bias as DOWN/UP/NEUTRAL using spec heuristics."""
+    if up_breach_rate_pct is None or down_breach_rate_pct is None:
+        return "NEUTRAL"
+
+    diff_pp = float(down_breach_rate_pct) - float(up_breach_rate_pct)
+    if diff_pp > TAIL_BIAS_RATE_THRESHOLD_PP:
+        return "DOWN"
+    if diff_pp < -TAIL_BIAS_RATE_THRESHOLD_PP:
+        return "UP"
+
+    # Overshoot tiebreaker if rates are close.
+    if avg_up_overshoot_pct is None or avg_down_overshoot_pct is None:
+        return "NEUTRAL"
+    os_diff_pp = float(avg_down_overshoot_pct) - float(avg_up_overshoot_pct)
+    if os_diff_pp > TAIL_BIAS_OVERSHOOT_THRESHOLD_PP:
+        return "DOWN"
+    if os_diff_pp < -TAIL_BIAS_OVERSHOOT_THRESHOLD_PP:
+        return "UP"
+    return "NEUTRAL"
+
+
 def _quarter_key(d: dt.date) -> str:
     q = ((d.month - 1) // 3) + 1
     return f"Q{q}"
@@ -228,6 +274,55 @@ def compute_breach_stats(
     years: int = 5,
     k: float = 1.0,
 ) -> Dict[str, Any]:
+    """
+    Compute ORATS earnings implied-move breach stats and overlays.
+
+    Response shape is backwards compatible: existing keys are preserved, and new keys are appended.
+
+    Minimal example (new keys only; many existing keys omitted for brevity):
+
+        {
+          "summary": {
+            "upBreachRatePct": 25.0,
+            "downBreachRatePct": 25.0,
+            "avgUpOvershootPct": 50.0,
+            "avgDownOvershootPct": 300.0,
+            "upBreaches": 1,
+            "downBreaches": 1,
+            "tailBias": "DOWN"
+          },
+          "events": [
+            {
+              "signedMovePct": -8.0,
+              "moveDirection": "DOWN",
+              "upBreach": false,
+              "downBreach": true,
+              "breachSide": "DOWN",
+              "upOvershootPct": null,
+              "downOvershootPct": 300.0
+            }
+          ],
+          "quarters": {
+            "Q1": {
+              "quarterUpBreachRatePct": 33.33,
+              "quarterDownBreachRatePct": 0.0
+            }
+          },
+          "wingRecommendation": {
+            "tas": -0.8,
+            "structureMode": "AUTO_EQUAL_DELTA",
+            "baseWingMultiple": 1.50,
+            "putWingMultiple": 2.03,
+            "callWingMultiple": 0.98,
+            "recommendationLabel": "WIDEN_PUTS_TIGHTEN_CALLS",
+            "confidence": "LOW"
+          },
+          "skewOverlay": {
+            "current": {"skewQuality": "MISSING", "notes": "…"},
+            "atEvents": {"2025-03-01": {"skewQuality": "MISSING", "notes": "…"}}
+          }
+        }
+    """
     if not _is_valid_ticker(ticker):
         raise BreachInputError("Invalid ticker. Use A-Z/0-9 (optionally '.' or '-') and keep it short.")
     if n <= 0 or n > 50:
@@ -257,6 +352,7 @@ def compute_breach_stats(
     cutoff = dt.date.today() - dt.timedelta(days=365 * years)
     parsed = [(d, r) for (d, r) in parsed if d >= cutoff]
     parsed = parsed[:n]
+    current_quarter_key = _quarter_key(parsed[0][0]) if parsed else None
 
     # Step 2-5: per-event computations
     out_events: List[Dict[str, Any]] = []
@@ -268,6 +364,11 @@ def compute_breach_stats(
     above_breach_all: List[float] = []
     realized_if_breach: List[float] = []
     ratios_all: List[float] = []
+    # Phase 1 directional aggregates (baseline)
+    up_overshoot_all: List[float] = []
+    down_overshoot_all: List[float] = []
+    up_breaches_all: int = 0
+    down_breaches_all: int = 0
 
     quarter_acc: Dict[str, Dict[str, Any]] = {
         "Q1": {
@@ -279,6 +380,10 @@ def compute_breach_stats(
             "near_09": 0,
             "ratios": [],
             "above_breach": [],
+            "up_breaches": 0,
+            "down_breaches": 0,
+            "up_overshoot": [],
+            "down_overshoot": [],
             "realized": [],
             "implied": [],
             "max_ratio": None,
@@ -292,6 +397,10 @@ def compute_breach_stats(
             "near_09": 0,
             "ratios": [],
             "above_breach": [],
+            "up_breaches": 0,
+            "down_breaches": 0,
+            "up_overshoot": [],
+            "down_overshoot": [],
             "realized": [],
             "implied": [],
             "max_ratio": None,
@@ -305,6 +414,10 @@ def compute_breach_stats(
             "near_09": 0,
             "ratios": [],
             "above_breach": [],
+            "up_breaches": 0,
+            "down_breaches": 0,
+            "up_overshoot": [],
+            "down_overshoot": [],
             "realized": [],
             "implied": [],
             "max_ratio": None,
@@ -318,6 +431,10 @@ def compute_breach_stats(
             "near_09": 0,
             "ratios": [],
             "above_breach": [],
+            "up_breaches": 0,
+            "down_breaches": 0,
+            "up_overshoot": [],
+            "down_overshoot": [],
             "realized": [],
             "implied": [],
             "max_ratio": None,
@@ -341,9 +458,16 @@ def compute_breach_stats(
         close_px: Optional[float] = None
         open_px: Optional[float] = None
         realized_pct: Optional[float] = None
+        signed_move_pct: Optional[float] = None
+        move_direction: Optional[str] = None
 
         breach: Optional[bool] = None
         above_breach_pct: Optional[float] = None
+        up_breach: Optional[bool] = None
+        down_breach: Optional[bool] = None
+        breach_side: Optional[str] = None
+        up_overshoot_pct: Optional[float] = None
+        down_overshoot_pct: Optional[float] = None
 
         # Determine pricing date and realized window dates per spec
         prior_bar = get_prior_trading_day(client, t, earn_date)
@@ -429,13 +553,30 @@ def compute_breach_stats(
         # Step 4: realized move
         if close_px is not None and open_px is not None and close_px > 0:
             realized_pct = _pct_move(close_px, open_px)
+            signed_move_pct = ((float(open_px) - float(close_px)) / float(close_px)) * 100.0
+            move_direction = _move_direction(signed_move_pct)
 
         # Step 5: breach + above breach (only for valid events with implied+realized and known timing)
         valid_for_stats = timing in ("AMC", "BMO") and (implied_pct is not None) and (realized_pct is not None)
         if valid_for_stats:
-            breach = realized_pct > (implied_pct * float(k))
+            implied_k = float(implied_pct) * float(k)
+            breach = realized_pct > implied_k
             if breach and implied_pct and implied_pct > 0:
                 above_breach_pct = (realized_pct - implied_pct) / implied_pct * 100.0
+
+            # Directional breach / overshoot (Phase 1)
+            if signed_move_pct is not None and implied_k > 0:
+                up_breach = float(signed_move_pct) > implied_k
+                down_breach = float(signed_move_pct) < -implied_k
+                breach_side = "UP" if up_breach else "DOWN" if down_breach else None
+                if up_breach:
+                    up_overshoot_pct = ((float(signed_move_pct) - implied_k) / implied_k) * 100.0
+                if down_breach:
+                    down_overshoot_pct = ((abs(float(signed_move_pct)) - implied_k) / implied_k) * 100.0
+            else:
+                up_breach = False
+                down_breach = False
+                breach_side = None
 
             implied_all.append(implied_pct)
             realized_all.append(realized_pct)
@@ -472,6 +613,20 @@ def compute_breach_stats(
                 q["breaches"] += 1
                 if above_breach_pct is not None:
                     q["above_breach"].append(above_breach_pct)
+
+            # Directional accumulators (Phase 1)
+            if up_breach is True:
+                up_breaches_all += 1
+                q["up_breaches"] += 1
+                if up_overshoot_pct is not None:
+                    up_overshoot_all.append(float(up_overshoot_pct))
+                    q["up_overshoot"].append(float(up_overshoot_pct))
+            if down_breach is True:
+                down_breaches_all += 1
+                q["down_breaches"] += 1
+                if down_overshoot_pct is not None:
+                    down_overshoot_all.append(float(down_overshoot_pct))
+                    q["down_overshoot"].append(float(down_overshoot_pct))
         else:
             # record skip reason
             reason = "unknown timing" if timing == "UNK" else "missing implied/realized data"
@@ -490,6 +645,13 @@ def compute_breach_stats(
                 "openDateUsed": open_date_used,
                 "openPx": _round2(open_px),
                 "realizedMovePct": _round2(realized_pct),
+                "signedMovePct": _round2(signed_move_pct),
+                "moveDirection": move_direction,
+                "upBreach": up_breach,
+                "downBreach": down_breach,
+                "breachSide": breach_side,
+                "upOvershootPct": _round2(up_overshoot_pct),
+                "downOvershootPct": _round2(down_overshoot_pct),
                 "breach": breach,
                 "aboveBreachPct": _round2(above_breach_pct),
                 "notes": row_notes,
@@ -507,6 +669,17 @@ def compute_breach_stats(
     baseline_avg_ratio = _mean(ratios_all)
     baseline_avg_above_breach = _mean(above_breach_all)
 
+    up_breach_rate_pct = _rate_pct(up_breaches_all, events_used)
+    down_breach_rate_pct = _rate_pct(down_breaches_all, events_used)
+    avg_up_overshoot_pct = _mean(up_overshoot_all)
+    avg_down_overshoot_pct = _mean(down_overshoot_all)
+    tail_bias = _tail_bias(
+        up_breach_rate_pct=up_breach_rate_pct,
+        down_breach_rate_pct=down_breach_rate_pct,
+        avg_up_overshoot_pct=avg_up_overshoot_pct,
+        avg_down_overshoot_pct=avg_down_overshoot_pct,
+    )
+
     summary = {
         "events_found": events_found,
         "events_used": events_used,
@@ -516,6 +689,14 @@ def compute_breach_stats(
         "avg_realized_if_breach_pct": _round2(_mean(realized_if_breach)),
         "avg_realized_all_pct": _round2(_mean(realized_all)),
         "avg_implied_all_pct": _round2(_mean(implied_all)),
+        # Phase 1 directional aggregates (added keys only)
+        "upBreachRatePct": _round2(up_breach_rate_pct),
+        "downBreachRatePct": _round2(down_breach_rate_pct),
+        "avgUpOvershootPct": _round2(avg_up_overshoot_pct),
+        "avgDownOvershootPct": _round2(avg_down_overshoot_pct),
+        "upBreaches": int(up_breaches_all),
+        "downBreaches": int(down_breaches_all),
+        "tailBias": tail_bias,
     }
 
     baseline = {
@@ -557,6 +738,26 @@ def compute_breach_stats(
             # above breach values are already in percent units; delta is in percentage points
             overshoot_delta_pp = quarter_avg_above - baseline_avg_above_breach
 
+        # Phase 1 directional quarter metrics + deltas vs baseline (pp deltas where sample size allows)
+        q_up_rate = _rate_pct(int(acc["up_breaches"]), eu)
+        q_down_rate = _rate_pct(int(acc["down_breaches"]), eu)
+        q_avg_up_os = _mean(acc["up_overshoot"])
+        q_avg_down_os = _mean(acc["down_overshoot"])
+
+        q_up_delta_pp = None
+        q_down_delta_pp = None
+        q_up_os_delta_pp = None
+        q_down_os_delta_pp = None
+        if eu >= 3:
+            if q_up_rate is not None and up_breach_rate_pct is not None:
+                q_up_delta_pp = q_up_rate - up_breach_rate_pct
+            if q_down_rate is not None and down_breach_rate_pct is not None:
+                q_down_delta_pp = q_down_rate - down_breach_rate_pct
+            if q_avg_up_os is not None and avg_up_overshoot_pct is not None:
+                q_up_os_delta_pp = q_avg_up_os - avg_up_overshoot_pct
+            if q_avg_down_os is not None and avg_down_overshoot_pct is not None:
+                q_down_os_delta_pp = q_avg_down_os - avg_down_overshoot_pct
+
         z_breach = None
         if eu >= 1 and baseline_breach_rate_pct is not None and br_q is not None:
             p0 = baseline_breach_rate_pct / 100.0
@@ -587,6 +788,15 @@ def compute_breach_stats(
             "avg_realized_all_pct": _round2(_mean(acc["realized"])),
             "avg_implied_all_pct": _round2(_mean(acc["implied"])),
             "max_ratio_realized_to_implied": _round2(max_ratio),
+            # Phase 1 directional quarter fields (added keys only)
+            "quarterUpBreachRatePct": _round2(q_up_rate),
+            "quarterDownBreachRatePct": _round2(q_down_rate),
+            "quarterAvgUpOvershootPct": _round2(q_avg_up_os),
+            "quarterAvgDownOvershootPct": _round2(q_avg_down_os),
+            "quarterUpBreachDeltaPP": _round2(q_up_delta_pp),
+            "quarterDownBreachDeltaPP": _round2(q_down_delta_pp),
+            "quarterAvgUpOvershootDeltaPP": _round2(q_up_os_delta_pp),
+            "quarterAvgDownOvershootDeltaPP": _round2(q_down_os_delta_pp),
             "seasonality": seasonality_obj,
             "recommendation": _recommendation(
                 events_used=eu,
@@ -600,17 +810,34 @@ def compute_breach_stats(
 
     # V3/V3.1 overlays (do not affect core breach/seasonality calculations)
     _, regime_validation = compute_regime_backtest_view(client, t, events=out_events)
+    regime = compute_regime_overlay(client, t, quarters=quarters, n=n, years=years, k=float(k))
+    wing_rec = compute_wing_recommendation(
+        summary=summary,
+        quarters=quarters,
+        regime=regime,
+        current_quarter_key=current_quarter_key,
+        skew_component=None,
+    )
+    skew_overlay = compute_skew_overlay(
+        client,
+        ticker=t,
+        current_as_of_date=str(regime.get("asOfDate") or "")[:10],
+        events=out_events,
+        target_dte=2,
+    )
 
     return {
         "ticker": t,
         "params": {"n": n, "years": years, "k": float(k)},
         "summary": summary,
         "baseline": baseline,
-        "regime": compute_regime_overlay(client, t, quarters=quarters, n=n, years=years, k=float(k)),
+        "regime": regime,
         "regimeValidation": regime_validation,
         "quarters": quarters,
         "events": out_events,
         "skipped": skipped,
+        "wingRecommendation": wing_rec,
+        "skewOverlay": skew_overlay,
     }
 
 

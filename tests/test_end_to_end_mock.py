@@ -73,6 +73,16 @@ def test_compute_breach_stats_mocked():
     assert out["summary"]["breaches"] == 2
     assert out["summary"]["breach_rate_pct"] == 50.0
 
+    # Phase 1 directional summary aggregates
+    assert out["summary"]["upBreaches"] == 1
+    assert out["summary"]["downBreaches"] == 1
+    assert out["summary"]["upBreachRatePct"] == 25.0
+    assert out["summary"]["downBreachRatePct"] == 25.0
+    assert out["summary"]["avgUpOvershootPct"] == 50.0
+    assert out["summary"]["avgDownOvershootPct"] == 300.0
+    # Overshoot asymmetry is extreme here: bias should be DOWN
+    assert out["summary"]["tailBias"] == "DOWN"
+
     # Baseline (overall usable set)
     b = out["baseline"]
     assert b["events_used"] == 4
@@ -101,6 +111,17 @@ def test_compute_breach_stats_mocked():
     assert q["Q1"]["seasonality"]["ratio_delta"] == -0.75
     assert q["Q1"]["seasonality"]["overshoot_delta_pp"] == -125.0
 
+    # Phase 1 directional quarter metrics (Q1 has 1 UP breach, 0 DOWN breaches)
+    assert q["Q1"]["quarterUpBreachRatePct"] == 33.33
+    assert q["Q1"]["quarterDownBreachRatePct"] == 0.0
+    assert q["Q1"]["quarterAvgUpOvershootPct"] == 50.0
+    assert q["Q1"]["quarterAvgDownOvershootPct"] is None
+    # Deltas vs baseline (allowed because Q1 has 3 usable events)
+    assert q["Q1"]["quarterUpBreachDeltaPP"] == 8.33
+    assert q["Q1"]["quarterDownBreachDeltaPP"] == -25.0
+    assert q["Q1"]["quarterAvgUpOvershootDeltaPP"] == 0.0
+    assert q["Q1"]["quarterAvgDownOvershootDeltaPP"] is None
+
     assert q["Q4"]["events_total"] == 1
     assert q["Q4"]["events_used"] == 1
     assert q["Q4"]["recommendation"] == "Avoid (low sample)"
@@ -120,10 +141,70 @@ def test_compute_breach_stats_mocked():
         "openDateUsed",
         "openPx",
         "realizedMovePct",
+        "signedMovePct",
+        "moveDirection",
+        "upBreach",
+        "downBreach",
+        "breachSide",
+        "upOvershootPct",
+        "downOvershootPct",
         "breach",
         "aboveBreachPct",
         "notes",
     ):
         assert k in ev
+
+    # Phase 1 per-event directional correctness (AMC + BMO)
+    ev_by_date = {e["earnDate"]: e for e in out["events"]}
+    amc = ev_by_date["2025-03-01"]
+    assert amc["timing"] == "AMC"
+    assert amc["signedMovePct"] == 3.0
+    assert amc["moveDirection"] == "UP"
+    assert amc["upBreach"] is False
+    assert amc["downBreach"] is False
+    assert amc["breachSide"] is None
+
+    bmo = ev_by_date["2025-02-05"]
+    assert bmo["timing"] == "BMO"
+    assert bmo["signedMovePct"] == -3.6
+    assert bmo["moveDirection"] == "DOWN"
+    assert bmo["upBreach"] is False
+    assert bmo["downBreach"] is False
+    assert bmo["breachSide"] is None
+
+    up_breach = ev_by_date["2025-01-30"]
+    assert up_breach["upBreach"] is True
+    assert up_breach["downBreach"] is False
+    assert up_breach["breachSide"] == "UP"
+    assert up_breach["upOvershootPct"] == 50.0
+    assert up_breach["downOvershootPct"] is None
+
+    down_breach = ev_by_date["2024-10-31"]
+    assert down_breach["upBreach"] is False
+    assert down_breach["downBreach"] is True
+    assert down_breach["breachSide"] == "DOWN"
+    assert down_breach["upOvershootPct"] is None
+    assert down_breach["downOvershootPct"] == 300.0
+
+    # Phase 2 wingRecommendation (history + regime only; skew missing)
+    wr = out.get("wingRecommendation")
+    assert isinstance(wr, dict)
+    assert wr["quality"] == "MISSING"
+    assert wr["quarterKey"] == "Q1"
+    assert wr["quarterRecommendation"] == "Wide"
+    assert wr["structureMode"] == "AUTO_EQUAL_DELTA"
+    assert wr["recommendationLabel"] == "WIDEN_PUTS_TIGHTEN_CALLS"
+    assert wr["confidence"] == "LOW"
+    assert wr["baseWingMultiple"] == 1.5
+    assert wr["putWingMultiple"] == 2.03
+    assert wr["callWingMultiple"] == 0.98
+    # TAS should be negative for downside tail dominance
+    assert wr["tas"] < 0
+
+    # Phase 4 skew overlay scaffolding should degrade safely
+    so = out.get("skewOverlay")
+    assert isinstance(so, dict)
+    assert so["current"]["skewQuality"] == "MISSING"
+    assert "Skew unavailable" in (so["current"]["notes"] or "")
 
 

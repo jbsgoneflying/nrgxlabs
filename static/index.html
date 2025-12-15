@@ -117,7 +117,7 @@
                 Suggested Adjustment
                 <span class="info" title="Adjustment derived from quarter seasonality baseline and current regime inputs (SPY realized volatility percentile + single-name IV expansion + correlation proxy).">ⓘ</span>
               </div>
-              <div id="regimeMessage" class="metricValue">—</div>
+              <div id="regimeMessage" class="metricValue metricValue--message">—</div>
               <div class="metricCaption">Based on quarter + regime</div>
             </div>
             <div id="bufferTargetCard" class="metricCard">
@@ -129,8 +129,119 @@
                   >ⓘ</span
                 >
               </div>
-              <div id="bufferTarget" class="metricValue mono">—</div>
+              <div class="segmented" role="group" aria-label="Buffer mode">
+                <button id="bufferModeSymmetric" class="segButton" type="button">Symmetric</button>
+                <button id="bufferModeAsymmetric" class="segButton" type="button">Asymmetric (Auto)</button>
+              </div>
+              <div id="bufferTargetGrid" class="miniGrid"></div>
               <div id="bufferTargetSubtext" class="metricCaption muted">Execution buffer (UI only)</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="surface" id="skewWingsSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">Skew &amp; Wings</h2>
+            <div class="sectionMeta muted" id="skewWingsMeta">—</div>
+          </div>
+          <div class="metricGrid metricGrid--skewWingsTop">
+            <div class="metricCard" id="directionalTailCard">
+              <div class="metricLabel">Directional Tail Stats</div>
+              <div id="directionalTailGrid" class="miniGrid"></div>
+              <div id="directionalTailFootnote" class="metricCaption muted">—</div>
+            </div>
+            <div class="metricCard" id="skewSnapshotCard">
+              <div class="metricLabel">Skew Snapshot</div>
+              <div id="skewSnapshotGrid" class="miniGrid"></div>
+              <div id="skewSnapshotNotes" class="metricCaption muted">—</div>
+            </div>
+          </div>
+
+          <div class="metricGrid metricGrid--skewWingsBottom">
+            <div class="metricCard" id="wingBuilderCard">
+              <div class="metricLabel">
+                Wing Builder (Auto)
+                <button id="tradeBuilderToggle" class="linkButton" type="button">Show trade builder</button>
+              </div>
+              <div id="wingBuilderGrid" class="miniGrid"></div>
+              <div id="wingBuilderRationale" class="metricCaption muted">—</div>
+
+              <div id="tradeBuilderPanel" class="tradeBuilder hidden" aria-label="Trade Builder">
+                <div class="tradeBuilderControls">
+                  <div class="tbRow">
+                    <div class="tbLabel">Structure mode</div>
+                    <div class="segmented" role="group" aria-label="Structure mode">
+                      <button id="tbModeAuto" class="segButton" type="button">Auto</button>
+                      <button id="tbModeDelta" class="segButton" type="button">Equal Delta</button>
+                      <button id="tbModePremium" class="segButton" type="button">Equal Premium</button>
+                    </div>
+                  </div>
+
+                  <div class="tbRow">
+                    <div class="tbLabel">Wing symmetry</div>
+                    <div class="segmented" role="group" aria-label="Wing symmetry">
+                      <button id="tbSymAuto" class="segButton" type="button">Auto Asymmetric</button>
+                      <button id="tbSymSym" class="segButton" type="button">Symmetric</button>
+                      <button id="tbSymManual" class="segButton" type="button">Manual</button>
+                    </div>
+                  </div>
+
+                  <div class="tbRow hidden" id="tbDeltaRow">
+                    <div class="tbLabel">Target short delta</div>
+                    <div class="tbInputs">
+                      <select id="tbDeltaPreset" class="controlSelect">
+                        <option value="0.05">0.05</option>
+                        <option value="0.10" selected>0.10</option>
+                        <option value="0.15">0.15</option>
+                      </select>
+                      <input id="tbTargetDelta" class="controlInput" inputmode="decimal" placeholder="0.10" />
+                    </div>
+                  </div>
+
+                  <div class="tbRow hidden" id="tbPremiumRow">
+                    <div class="tbLabel">Target wing premium</div>
+                    <div class="tbInputs">
+                      <input id="tbTargetPremium" class="controlInput" inputmode="decimal" placeholder="0.50" />
+                    </div>
+                  </div>
+
+                  <div class="tbRow hidden" id="tbManualMultRow">
+                    <div class="tbLabel">Manual EM multiples</div>
+                    <div class="tbInputs">
+                      <input id="tbPutMult" class="controlInput" inputmode="decimal" placeholder="Put × EM" />
+                      <input id="tbCallMult" class="controlInput" inputmode="decimal" placeholder="Call × EM" />
+                    </div>
+                  </div>
+
+                  <div class="tbRow">
+                    <div class="tbLabel">Wing width ($)</div>
+                    <div class="tbInputs">
+                      <select id="tbWingWidth" class="controlSelect">
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="5" selected>5</option>
+                        <option value="10">10</option>
+                        <option value="20">20</option>
+                      </select>
+                      <button id="tradeBuilderRecalc" class="primaryButton" type="button">Recalculate</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="tradeBuilderOutputs">
+                  <div class="tbCol">
+                    <div class="tbColTitle">Put side</div>
+                    <div id="tbPutOut" class="miniGrid"></div>
+                  </div>
+                  <div class="tbCol">
+                    <div class="tbColTitle">Call side</div>
+                    <div id="tbCallOut" class="miniGrid"></div>
+                  </div>
+                </div>
+
+                <div id="tradeBuilderNotes" class="metricCaption muted">—</div>
+              </div>
             </div>
           </div>
         </section>
@@ -173,6 +284,8 @@
             <div class="sectionMeta muted">
               <button id="earningsToggle" class="linkButton" type="button">Show earnings history</button>
               <span class="spacerDot">·</span>
+              <button id="advancedColsToggle" class="linkButton" type="button">Show advanced columns</button>
+              <span class="spacerDot">·</span>
               <span id="skippedSummary"></span>
             </div>
           </div>
@@ -192,6 +305,9 @@
                   <th>openDate</th>
                   <th class="num">open</th>
                   <th class="num">realized</th>
+                  <th class="num advCol">signed</th>
+                  <th class="advCol">side</th>
+                  <th class="num advCol">dirOvershoot</th>
                   <th>breach</th>
                   <th>regime</th>
                   <th>gate</th>

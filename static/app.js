@@ -18,6 +18,14 @@ function fmtNum(v) {
   return Number.isFinite(n) ? n.toFixed(2) : "—";
 }
 
+function fmtSignedPct(v) {
+  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${n.toFixed(2)}%`;
+}
+
 function escapeHtml(s) {
   return String(s)
     .replaceAll("&", "&amp;")
@@ -35,6 +43,19 @@ function pill(text, kind) {
 let lastPayload = null;
 let isBusy = false;
 let earningsExpanded = false;
+let bufferModePref = null; // "symmetric" | "asymmetric" | null (auto)
+let showAdvancedCols = false;
+let tradeBuilderExpanded = false;
+
+const tradeBuilderState = {
+  mode: "auto", // auto | equal_delta | equal_premium
+  symmetry: "auto", // auto | symmetric | manual
+  target_delta: 0.10,
+  target_premium: 0.50,
+  wing_width: 5,
+  put_mult: null,
+  call_mult: null,
+};
 
 const NEAR_BREACH_THRESHOLD = 0.9;
 
@@ -156,18 +177,18 @@ function buildBufferTarget(payload) {
 
   // Muted / no-trade display rules (UI only).
   if (gate === "NO_TRADE" || isAvoid) {
-    return { text: "—", subtext: "No trade", muted: true };
+    return { primary: "—", secondary: null, subtext: "No trade", muted: true };
   }
 
   const base = _baseWingFactorFromRec(qRecRaw);
   const tm = (rg.tailMultiplier === null || rg.tailMultiplier === undefined) ? null : Number(rg.tailMultiplier);
   if (base === null || tm === null || Number.isNaN(tm)) {
-    return { text: "—", subtext: "Execution buffer (UI only)", muted: false };
+    return { primary: "—", secondary: null, subtext: "Execution buffer (UI only)", muted: false };
   }
 
   const finalWing = Number(base) * Number(tm); // UI-only: base wing factor × tail multiplier
   if (!Number.isFinite(finalWing)) {
-    return { text: "—", subtext: "Execution buffer (UI only)", muted: false };
+    return { primary: "—", secondary: null, subtext: "Execution buffer (UI only)", muted: false };
   }
 
   let bufferFactor = 1.10;
@@ -177,15 +198,265 @@ function buildBufferTarget(payload) {
 
   const bufferTarget = finalWing * bufferFactor;
   return {
-    text: `~${bufferTarget.toFixed(2)}× EM`,
+    primary: `~${bufferTarget.toFixed(2)}× EM`,
+    secondary: null,
     subtext: "Execution buffer (UI only)",
     muted: false,
   };
 }
 
+function _wingRecLabel(label) {
+  const l = String(label || "");
+  if (l === "WIDEN_PUTS_TIGHTEN_CALLS") return "Widen puts / tighten calls";
+  if (l === "WIDEN_CALLS_TIGHTEN_PUTS") return "Widen calls / tighten puts";
+  if (l === "SYMMETRIC") return "Symmetric";
+  if (l === "NO_TRADE") return "No trade (gate)";
+  return l || "—";
+}
+
+function renderBufferTarget(payload) {
+  const wing = payload?.wingRecommendation || null;
+  const hasAsymNumbers = wing && wing.putWingMultiple !== null && wing.putWingMultiple !== undefined
+    && wing.callWingMultiple !== null && wing.callWingMultiple !== undefined;
+  const canDefaultAsym = hasAsymNumbers && String(wing.confidence || "") !== "LOW";
+
+  const symBtn = $("bufferModeSymmetric");
+  const asymBtn = $("bufferModeAsymmetric");
+  if (asymBtn) asymBtn.disabled = !hasAsymNumbers;
+
+  let mode = bufferModePref;
+  if (!mode) mode = canDefaultAsym ? "asymmetric" : "symmetric";
+  if (mode === "asymmetric" && !hasAsymNumbers) mode = "symmetric";
+
+  if (symBtn) symBtn.classList.toggle("isActive", mode === "symmetric");
+  if (asymBtn) asymBtn.classList.toggle("isActive", mode === "asymmetric");
+
+  const bt = buildBufferTarget(payload);
+  const btGrid = $("bufferTargetGrid");
+  const btSub = $("bufferTargetSubtext");
+  const btCard = $("bufferTargetCard");
+
+  if (btGrid) {
+    if (bt.muted) {
+      btGrid.innerHTML = `<div class="k">Target</div><div class="v mono">—</div>`;
+    } else if (mode === "asymmetric" && hasAsymNumbers) {
+      btGrid.innerHTML = `
+        <div class="k">Put</div><div class="v mono">~${Number(wing.putWingMultiple).toFixed(2)}× EM</div>
+        <div class="k">Call</div><div class="v mono">~${Number(wing.callWingMultiple).toFixed(2)}× EM</div>
+      `;
+    } else {
+      btGrid.innerHTML = `<div class="k">Target</div><div class="v mono">${escapeHtml(bt.primary)}</div>`;
+    }
+  }
+
+  if (btSub) btSub.textContent = bt.subtext;
+  if (btCard) btCard.classList.toggle("isMuted", !!bt.muted);
+}
+
+function renderSkewWings(payload) {
+  const sec = $("skewWingsSection");
+  if (!sec) return;
+
+  const s = payload?.summary || {};
+  const wr = payload?.wingRecommendation || null;
+  const sk = payload?.skewOverlay?.current || null;
+
+  const hasDirectional =
+    s.upBreachRatePct !== undefined ||
+    s.downBreachRatePct !== undefined ||
+    s.avgUpOvershootPct !== undefined ||
+    s.avgDownOvershootPct !== undefined;
+
+  const dirCard = $("directionalTailCard");
+  const dirGrid = $("directionalTailGrid");
+  const dirFoot = $("directionalTailFootnote");
+
+  if (dirCard) dirCard.classList.toggle("hidden", !hasDirectional);
+  if (hasDirectional && dirGrid) {
+    const tailBias = s.tailBias || "—";
+    const biasBadge =
+      tailBias === "DOWN" ? pill("DOWN", "bad") : tailBias === "UP" ? pill("UP", "warn") : pill("NEUTRAL", "neutral");
+    dirGrid.innerHTML = `
+      <div class="k">Down breach rate</div><div class="v mono">${fmtPct(s.downBreachRatePct)}</div>
+      <div class="k">Up breach rate</div><div class="v mono">${fmtPct(s.upBreachRatePct)}</div>
+      <div class="k">Avg overshoot (Down)</div><div class="v mono">${fmtPct(s.avgDownOvershootPct)}</div>
+      <div class="k">Avg overshoot (Up)</div><div class="v mono">${fmtPct(s.avgUpOvershootPct)}</div>
+      <div class="k">Tail bias</div><div class="v">${biasBadge}</div>
+    `;
+  }
+  if (hasDirectional && dirFoot) {
+    dirFoot.textContent = `Based on usable events (n=${s.events_used ?? "—"}).`;
+  }
+
+  const skewCard = $("skewSnapshotCard");
+  const skewGrid = $("skewSnapshotGrid");
+  const skewNotes = $("skewSnapshotNotes");
+  const hasSkew = !!sk;
+  if (skewCard) skewCard.classList.toggle("hidden", !hasSkew);
+  if (hasSkew && skewGrid) {
+    const q = String(sk.skewQuality || "MISSING");
+    const qBadge =
+      q === "OK" ? pill("OK", "good") : q === "PARTIAL" ? pill("PARTIAL", "warn") : pill("MISSING", "neutral");
+    const rr25 = sk.rr25;
+    const rrLabel = rr25 === null || rr25 === undefined || Number.isNaN(rr25) ? "—" : `${Number(rr25).toFixed(4)}`;
+    const rrHint = rr25 < 0 ? "Put skew (downside priced)" : rr25 > 0 ? "Call skew (upside priced)" : "—";
+    skewGrid.innerHTML = `
+      <div class="k">RR25</div><div class="v mono">${escapeHtml(rrLabel)}</div>
+      <div class="k">As of</div><div class="v mono">${escapeHtml(sk.asOfDate || "—")}</div>
+      <div class="k">Quality</div><div class="v">${qBadge}</div>
+      <div class="k">Read</div><div class="v muted">${escapeHtml(rrHint)}</div>
+    `;
+  }
+  if (hasSkew && skewNotes) {
+    if (String(sk.skewQuality || "") === "MISSING") skewNotes.textContent = sk.notes || "Skew unavailable";
+    else skewNotes.textContent = sk.notes || "—";
+  }
+
+  const wingCard = $("wingBuilderCard");
+  const wingGrid = $("wingBuilderGrid");
+  const wingWhy = $("wingBuilderRationale");
+  const hasWing = !!wr;
+
+  if (wingCard) wingCard.classList.toggle("hidden", !hasWing);
+  if (hasWing && wingGrid) {
+    const conf = String(wr.confidence || "—");
+    const confBadge =
+      conf === "HIGH" ? pill("HIGH", "good") : conf === "MED" ? pill("MED", "warn") : pill("LOW", "neutral");
+    const mode = String(wr.structureMode || "");
+    const modeTxt =
+      mode === "AUTO_EQUAL_PREMIUM" ? "Auto: Equal Premium" : mode === "AUTO_EQUAL_DELTA" ? "Auto: Equal Delta" : (mode || "—");
+    wingGrid.innerHTML = `
+      <div class="k">Recommendation</div><div class="v">${escapeHtml(_wingRecLabel(wr.recommendationLabel))}</div>
+      <div class="k">Structure mode</div><div class="v">${escapeHtml(modeTxt)}</div>
+      <div class="k">Confidence</div><div class="v">${confBadge}</div>
+      <div class="k">TAS</div><div class="v mono">${wr.tas !== null && wr.tas !== undefined ? Number(wr.tas).toFixed(3) : "—"}</div>
+      <div class="k">Base wing</div><div class="v mono">${wr.baseWingMultiple !== null && wr.baseWingMultiple !== undefined ? `${Number(wr.baseWingMultiple).toFixed(2)}× EM` : "—"}</div>
+      <div class="k">Put wing</div><div class="v mono">${wr.putWingMultiple !== null && wr.putWingMultiple !== undefined ? `${Number(wr.putWingMultiple).toFixed(2)}× EM` : "—"}</div>
+      <div class="k">Call wing</div><div class="v mono">${wr.callWingMultiple !== null && wr.callWingMultiple !== undefined ? `${Number(wr.callWingMultiple).toFixed(2)}× EM` : "—"}</div>
+    `;
+  }
+
+  const gate = (payload?.regime?.guidance || {})?.tradeGate;
+  const isNoTrade = gate === "NO_TRADE";
+  if (wingCard) wingCard.classList.toggle("isMuted", isNoTrade);
+  if (hasWing && wingWhy) {
+    if (isNoTrade) wingWhy.textContent = "No Trade (Regime Gate).";
+    else wingWhy.textContent = (wr.structureRationale || wr.rationale || "—");
+  }
+
+  const meta = $("skewWingsMeta");
+  if (meta) meta.textContent = (hasDirectional || hasWing || hasSkew) ? "Directional tails + skew snapshot + wing multipliers" : "—";
+
+  // Hide entire section if nothing to show (graceful degradation).
+  const showSection = hasDirectional || hasWing || hasSkew;
+  sec.classList.toggle("hidden", !showSection);
+}
+
+function _bestUnderlyingPrice(payload) {
+  const tb = payload?.tradeBuilder;
+  if (tb && tb.underlyingPrice !== null && tb.underlyingPrice !== undefined) {
+    const p = Number(tb.underlyingPrice);
+    if (Number.isFinite(p) && p > 0) return p;
+  }
+  const events = Array.isArray(payload?.events) ? payload.events : [];
+  for (const e of events) {
+    const px = Number(e?.closePx);
+    if (Number.isFinite(px) && px > 0) return px;
+  }
+  return null;
+}
+
+function _bestImpliedMovePct(payload) {
+  const events = Array.isArray(payload?.events) ? payload.events : [];
+  for (const e of events) {
+    const imp = Number(e?.impliedMovePct);
+    if (Number.isFinite(imp) && imp > 0) return imp;
+  }
+  const s = payload?.summary || {};
+  const avg = Number(s.avg_implied_all_pct);
+  return Number.isFinite(avg) && avg > 0 ? avg : null;
+}
+
+function renderTradeBuilder(payload) {
+  const panel = $("tradeBuilderPanel");
+  if (!panel || panel.classList.contains("hidden")) return;
+
+  const putOut = $("tbPutOut");
+  const callOut = $("tbCallOut");
+  const notes = $("tradeBuilderNotes");
+
+  const price = _bestUnderlyingPrice(payload);
+  const impPct = _bestImpliedMovePct(payload);
+  const wr = payload?.wingRecommendation || null;
+  const gate = (payload?.regime?.guidance || {})?.tradeGate;
+
+  const baseMult = (wr && wr.baseWingMultiple !== null && wr.baseWingMultiple !== undefined) ? Number(wr.baseWingMultiple) : null;
+  const recPut = (wr && wr.putWingMultiple !== null && wr.putWingMultiple !== undefined) ? Number(wr.putWingMultiple) : null;
+  const recCall = (wr && wr.callWingMultiple !== null && wr.callWingMultiple !== undefined) ? Number(wr.callWingMultiple) : null;
+
+  let putMult = baseMult;
+  let callMult = baseMult;
+  if (tradeBuilderState.symmetry === "auto") {
+    if (recPut !== null && recCall !== null && String(wr?.confidence || "") !== "LOW") {
+      putMult = recPut;
+      callMult = recCall;
+    }
+  } else if (tradeBuilderState.symmetry === "symmetric") {
+    putMult = baseMult;
+    callMult = baseMult;
+  } else if (tradeBuilderState.symmetry === "manual") {
+    const pm = Number(tradeBuilderState.put_mult);
+    const cm = Number(tradeBuilderState.call_mult);
+    if (Number.isFinite(pm) && pm > 0) putMult = pm;
+    if (Number.isFinite(cm) && cm > 0) callMult = cm;
+  }
+
+  if (!price || !impPct || !putMult || !callMult) {
+    if (putOut) putOut.innerHTML = `<div class="k">Target</div><div class="v">—</div>`;
+    if (callOut) callOut.innerHTML = `<div class="k">Target</div><div class="v">—</div>`;
+    if (notes) notes.textContent = "Insufficient data to compute distance targets (need price + implied move + wing multipliers).";
+    return;
+  }
+
+  const em$ = price * (impPct / 100.0);
+  const putDist$ = em$ * putMult;
+  const callDist$ = em$ * callMult;
+  const width$ = Number(tradeBuilderState.wing_width) || 5;
+
+  const putShort = price - putDist$;
+  const putLong = putShort - width$;
+  const callShort = price + callDist$;
+  const callLong = callShort + width$;
+
+  const putDistPct = (putDist$ / price) * 100.0;
+  const callDistPct = (callDist$ / price) * 100.0;
+
+  if (putOut) {
+    putOut.innerHTML = `
+      <div class="k">Target distance</div><div class="v mono">$${putDist$.toFixed(2)} (${putDistPct.toFixed(2)}%)</div>
+      <div class="k">Short strike (est.)</div><div class="v mono">${putShort.toFixed(2)}</div>
+      <div class="k">Long strike (width)</div><div class="v mono">${putLong.toFixed(2)} (−$${width$.toFixed(0)})</div>
+      <div class="k">Wing multiple used</div><div class="v mono">${putMult.toFixed(2)}× EM</div>
+    `;
+  }
+  if (callOut) {
+    callOut.innerHTML = `
+      <div class="k">Target distance</div><div class="v mono">$${callDist$.toFixed(2)} (${callDistPct.toFixed(2)}%)</div>
+      <div class="k">Short strike (est.)</div><div class="v mono">${callShort.toFixed(2)}</div>
+      <div class="k">Long strike (width)</div><div class="v mono">${callLong.toFixed(2)} (+$${width$.toFixed(0)})</div>
+      <div class="k">Wing multiple used</div><div class="v mono">${callMult.toFixed(2)}× EM</div>
+    `;
+  }
+
+  const extra = gate === "NO_TRADE" ? "No Trade (Regime Gate)." : "Chain-based strike selection not enabled; showing distance targets only.";
+  if (notes) notes.textContent = `${extra} Assumed price $${price.toFixed(2)}; implied move ${impPct.toFixed(2)}%.`;
+}
+
 function renderEarningsTable(events) {
   const tbody = $("tbody");
   tbody.innerHTML = "";
+  const table = document.querySelector(".dataTable");
+  if (table) table.classList.toggle("showAdvanced", !!showAdvancedCols);
 
   const rows = Array.isArray(events) ? events : [];
   const shown = earningsExpanded ? rows : rows.slice(0, 3);
@@ -220,6 +491,9 @@ function renderEarningsTable(events) {
       <td>${escapeHtml(e.openDateUsed ?? "")}</td>
       <td class="num">${fmtNum(e.openPx)}</td>
       <td class="num">${fmtPct(e.realizedMovePct)}</td>
+      <td class="num advCol">${fmtSignedPct(e.signedMovePct)}</td>
+      <td class="advCol">${escapeHtml(e.breachSide ?? "—")}</td>
+      <td class="num advCol">${fmtPct(e.upOvershootPct ?? e.downOvershootPct)}</td>
       <td>${breachCell}</td>
       <td class="regimeCell">${regCell}</td>
       <td class="gateCell">${gateCell}</td>
@@ -335,13 +609,9 @@ function render(payload) {
   const a = $("actionSummary");
   if (a) a.textContent = buildActionSummary(payload.quarters);
 
-  const bt = buildBufferTarget(payload);
-  const btVal = $("bufferTarget");
-  const btSub = $("bufferTargetSubtext");
-  const btCard = $("bufferTargetCard");
-  if (btVal) btVal.textContent = bt.text;
-  if (btSub) btSub.textContent = bt.subtext;
-  if (btCard) btCard.classList.toggle("isMuted", !!bt.muted);
+  renderBufferTarget(payload);
+  renderSkewWings(payload);
+  renderTradeBuilder(payload);
 
   const skipped = payload.skipped || [];
   $("skippedSummary").textContent =
@@ -378,7 +648,7 @@ document.addEventListener("DOMContentLoaded", () => {
     ticker.value = ticker.value.toUpperCase();
   });
 
-  async function runCalculation() {
+  async function runCalculation(extraParams = null) {
     setStatus("");
     const t = (ticker.value || "").trim().toUpperCase();
     const k = (kSel?.value || "1.0");
@@ -390,7 +660,13 @@ document.addEventListener("DOMContentLoaded", () => {
     setBusy(true);
     setStatus(`Computing with k=${k}…`);
     try {
-      const url = `/api/breach?ticker=${encodeURIComponent(t)}&n=20&years=5&k=${encodeURIComponent(k)}`;
+      let url = `/api/breach?ticker=${encodeURIComponent(t)}&n=20&years=5&k=${encodeURIComponent(k)}`;
+      if (extraParams && typeof extraParams === "object") {
+        for (const [kk, vv] of Object.entries(extraParams)) {
+          if (vv === null || vv === undefined) continue;
+          url += `&${encodeURIComponent(kk)}=${encodeURIComponent(String(vv))}`;
+        }
+      }
       const payload = await fetchJson(url);
       render(payload);
       setStatus("");
@@ -424,6 +700,157 @@ document.addEventListener("DOMContentLoaded", () => {
       if (lastPayload) renderEarningsTable(lastPayload.events || []);
     });
   }
+
+  const adv = $("advancedColsToggle");
+  if (adv) {
+    adv.addEventListener("click", () => {
+      showAdvancedCols = !showAdvancedCols;
+      adv.textContent = showAdvancedCols ? "Hide advanced columns" : "Show advanced columns";
+      if (lastPayload) renderEarningsTable(lastPayload.events || []);
+    });
+  }
+
+  const symBtn = $("bufferModeSymmetric");
+  if (symBtn) {
+    symBtn.addEventListener("click", () => {
+      bufferModePref = "symmetric";
+      if (lastPayload) renderBufferTarget(lastPayload);
+    });
+  }
+  const asymBtn = $("bufferModeAsymmetric");
+  if (asymBtn) {
+    asymBtn.addEventListener("click", () => {
+      bufferModePref = "asymmetric";
+      if (lastPayload) renderBufferTarget(lastPayload);
+    });
+  }
+
+  const tbToggle = $("tradeBuilderToggle");
+  const tbPanel = $("tradeBuilderPanel");
+  if (tbToggle && tbPanel) {
+    tbToggle.addEventListener("click", () => {
+      tradeBuilderExpanded = !tradeBuilderExpanded;
+      tbPanel.classList.toggle("hidden", !tradeBuilderExpanded);
+      tbToggle.textContent = tradeBuilderExpanded ? "Hide trade builder" : "Show trade builder";
+      if (lastPayload) renderTradeBuilder(lastPayload);
+    });
+  }
+
+  function setSegActive(ids, activeId) {
+    for (const id of ids) {
+      const el = $(id);
+      if (el) el.classList.toggle("isActive", id === activeId);
+    }
+  }
+
+  const modeBtns = ["tbModeAuto", "tbModeDelta", "tbModePremium"];
+  const symBtns = ["tbSymAuto", "tbSymSym", "tbSymManual"];
+
+  function syncTradeBuilderControls() {
+    setSegActive(
+      modeBtns,
+      tradeBuilderState.mode === "auto" ? "tbModeAuto" : tradeBuilderState.mode === "equal_delta" ? "tbModeDelta" : "tbModePremium"
+    );
+    setSegActive(
+      symBtns,
+      tradeBuilderState.symmetry === "auto" ? "tbSymAuto" : tradeBuilderState.symmetry === "symmetric" ? "tbSymSym" : "tbSymManual"
+    );
+    const deltaRow = $("tbDeltaRow");
+    const premRow = $("tbPremiumRow");
+    const manualRow = $("tbManualMultRow");
+    if (deltaRow) deltaRow.classList.toggle("hidden", tradeBuilderState.mode !== "equal_delta");
+    if (premRow) premRow.classList.toggle("hidden", tradeBuilderState.mode !== "equal_premium");
+    if (manualRow) manualRow.classList.toggle("hidden", tradeBuilderState.symmetry !== "manual");
+  }
+
+  for (const id of modeBtns) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener("click", () => {
+      if (id === "tbModeAuto") tradeBuilderState.mode = "auto";
+      if (id === "tbModeDelta") tradeBuilderState.mode = "equal_delta";
+      if (id === "tbModePremium") tradeBuilderState.mode = "equal_premium";
+      syncTradeBuilderControls();
+      if (lastPayload) renderTradeBuilder(lastPayload);
+    });
+  }
+  for (const id of symBtns) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener("click", () => {
+      if (id === "tbSymAuto") tradeBuilderState.symmetry = "auto";
+      if (id === "tbSymSym") tradeBuilderState.symmetry = "symmetric";
+      if (id === "tbSymManual") tradeBuilderState.symmetry = "manual";
+      syncTradeBuilderControls();
+      if (lastPayload) renderTradeBuilder(lastPayload);
+    });
+  }
+
+  const deltaPreset = $("tbDeltaPreset");
+  if (deltaPreset) {
+    deltaPreset.addEventListener("change", () => {
+      const v = Number(deltaPreset.value);
+      if (Number.isFinite(v)) tradeBuilderState.target_delta = v;
+      const inp = $("tbTargetDelta");
+      if (inp) inp.value = String(v);
+    });
+  }
+  const deltaInp = $("tbTargetDelta");
+  if (deltaInp) {
+    deltaInp.addEventListener("input", () => {
+      const v = Number(deltaInp.value);
+      if (Number.isFinite(v)) tradeBuilderState.target_delta = v;
+    });
+  }
+  const premInp = $("tbTargetPremium");
+  if (premInp) {
+    premInp.addEventListener("input", () => {
+      const v = Number(premInp.value);
+      if (Number.isFinite(v)) tradeBuilderState.target_premium = v;
+    });
+  }
+  const putMultInp = $("tbPutMult");
+  if (putMultInp) {
+    putMultInp.addEventListener("input", () => {
+      tradeBuilderState.put_mult = putMultInp.value;
+      if (lastPayload) renderTradeBuilder(lastPayload);
+    });
+  }
+  const callMultInp = $("tbCallMult");
+  if (callMultInp) {
+    callMultInp.addEventListener("input", () => {
+      tradeBuilderState.call_mult = callMultInp.value;
+      if (lastPayload) renderTradeBuilder(lastPayload);
+    });
+  }
+  const widthSel = $("tbWingWidth");
+  if (widthSel) {
+    widthSel.addEventListener("change", () => {
+      const v = Number(widthSel.value);
+      if (Number.isFinite(v)) tradeBuilderState.wing_width = v;
+      if (lastPayload) renderTradeBuilder(lastPayload);
+    });
+  }
+
+  const tbRecalc = $("tradeBuilderRecalc");
+  if (tbRecalc) {
+    tbRecalc.addEventListener("click", async () => {
+      if (isBusy) return;
+      const gate = (lastPayload?.regime?.guidance || {})?.tradeGate;
+      if (gate === "NO_TRADE") return;
+      const extra = {
+        mode: tradeBuilderState.mode,
+        symmetry: tradeBuilderState.symmetry,
+        target_delta: tradeBuilderState.target_delta,
+        target_premium: tradeBuilderState.target_premium,
+        wing_width: tradeBuilderState.wing_width,
+        dte_target: 2,
+      };
+      await runCalculation(extra);
+    });
+  }
+
+  syncTradeBuilderControls();
 });
 
 

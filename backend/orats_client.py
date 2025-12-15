@@ -117,7 +117,7 @@ class OratsClient:
 
                 # For certain hist endpoints, ORATS returns 404 on dates with no data (weekends/holidays).
                 # We treat that as "empty result" so callers can probe for the nearest trading day.
-                if resp.status_code == 404 and path in ("/hist/dailies", "/hist/cores"):
+                if resp.status_code == 404 and path in ("/hist/dailies", "/hist/cores", "/hist/monies/implied"):
                     try:
                         data = resp.json()
                     except ValueError:
@@ -181,5 +181,115 @@ class OratsClient:
 
     def hist_dailies(self, ticker: str, trade_date: str, fields: str) -> OratsResponse:
         return self.get("/hist/dailies", {"ticker": ticker, "tradeDate": trade_date, "fields": fields})
+
+    def hist_monies_implied(
+        self,
+        *,
+        ticker: str,
+        trade_date: str,
+        fields: str,
+        dte: str | None = None,
+    ) -> OratsResponse:
+        params: Dict[str, Any] = {"ticker": ticker, "tradeDate": trade_date, "fields": fields}
+        if dte:
+            params["dte"] = dte  # format: "lo,hi"
+        return self.get("/hist/monies/implied", params)
+
+    # --- Skew scaffolding (Phase 4) ---
+    def get_skew_by_delta(
+        self,
+        *,
+        ticker: str,
+        trade_date: str,
+        dte_target: int,
+        deltas: list[int] | None = None,
+        rights: list[str] | None = None,
+    ) -> dict:
+        """
+        Placeholder for a volatility-surface / delta-slice skew fetch.
+
+        Expected (future) return shape:
+          {("C", 25): iv, ("P", 25): iv, ("C", 10): iv, ("P", 10): iv, "atm": iv}
+
+        This repo currently does not include ORATS endpoint knowledge for skew.
+        Callers must treat this as optional and degrade safely.
+        """
+        # Implementation using ORATS "monies implied" surface snapshot.
+        # ORATS provides seed vols keyed by CALL delta (vol10, vol25, vol50, vol75, vol90, ...).
+        # We map:
+        # - 25Δ put ≈ vol75 (75 call-delta)
+        # - 10Δ put ≈ vol90 (90 call-delta)
+        use_deltas = deltas or [10, 25]
+        use_rights = rights or ["C", "P"]
+
+        lo = max(1, int(dte_target) - 2)
+        hi = int(dte_target) + 7
+        fields = "ticker,tradeDate,expirDate,dte,stockPrice,vol10,vol25,vol50,vol75,vol90"
+        resp = self.hist_monies_implied(
+            ticker=ticker,
+            trade_date=str(trade_date)[:10],
+            fields=fields,
+            dte=f"{lo},{hi}",
+        )
+        rows = resp.rows or []
+        if not rows:
+            return {}
+
+        def _to_float(v: Any) -> Optional[float]:
+            try:
+                if v is None:
+                    return None
+                f = float(v)
+                if f != f:  # NaN
+                    return None
+                return f
+            except (TypeError, ValueError):
+                return None
+
+        best = None
+        best_dist = None
+        for r in rows:
+            dte_val = _to_float(r.get("dte"))
+            if dte_val is None:
+                continue
+            dist = abs(dte_val - float(dte_target))
+            if best is None or best_dist is None or dist < best_dist:
+                best = r
+                best_dist = dist
+        if best is None:
+            best = rows[0]
+
+        vol10 = _to_float(best.get("vol10"))
+        vol25 = _to_float(best.get("vol25"))
+        vol50 = _to_float(best.get("vol50") or best.get("atmiv"))
+        vol75 = _to_float(best.get("vol75"))
+        vol90 = _to_float(best.get("vol90"))
+
+        out: Dict[Any, Any] = {
+            "asOfDate": str(best.get("tradeDate") or str(trade_date)[:10])[:10],
+            "expirDate": str(best.get("expirDate") or "")[:10] if best.get("expirDate") else None,
+            "dte": _to_float(best.get("dte")),
+            "stockPrice": _to_float(best.get("stockPrice") or best.get("spotPrice")),
+            "atm": vol50,
+        }
+
+        def _set(right: str, delta: int, v: Optional[float]) -> None:
+            if v is None:
+                return
+            out[(right, int(delta))] = v
+
+        for d in use_deltas:
+            if int(d) == 25:
+                if "C" in use_rights:
+                    _set("C", 25, vol25)
+                if "P" in use_rights:
+                    _set("P", 25, vol75)
+            if int(d) == 10:
+                if "C" in use_rights:
+                    _set("C", 10, vol10)
+                if "P" in use_rights:
+                    _set("P", 10, vol90)
+
+        return out
 
 
