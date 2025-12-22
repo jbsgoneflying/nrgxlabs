@@ -336,6 +336,7 @@ def run_monte_carlo(
     wing_recommendation: Dict[str, Any],
     events: List[Dict[str, Any]],
     trade_builder: Optional[Dict[str, Any]],
+    event_risk: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Compute additive MC fields. Caller must ensure flags.ENABLE_MONTE_CARLO_EARNINGS is True.
@@ -386,6 +387,28 @@ def run_monte_carlo(
                 "pool": {"sizeUsed": len(used_pool), "excludedCounts": excluded},
                 "notes": ["MC unavailable: missing wing multipliers and no strike-based structure."],
             }
+        # Optional: event-risk widening (risk-only). Does not change ORATS EOD implied move anchoring.
+        bump_pct = 0.0
+        if bool(flags.BENZINGA_EVENT_RISK_AFFECTS_MC) and isinstance(event_risk, dict) and event_risk.get("enabled") is True:
+            try:
+                s = float(event_risk.get("score01"))
+                hi = float(flags.BENZINGA_EVENT_RISK_HIGH_THRESHOLD)
+                ca = float(flags.BENZINGA_EVENT_RISK_CAUTION_THRESHOLD)
+                max_bump = max(0.0, float(flags.BENZINGA_EVENT_RISK_MC_WING_BUMP_MAX_PCT))
+                if s > ca and ca < 1.0:
+                    bump_pct = ((s - ca) / (1.0 - ca)) * max_bump
+                    bump_pct = max(0.0, min(max_bump, bump_pct))
+                # Only apply when risk is meaningfully elevated
+                if s < hi:
+                    bump_pct = min(bump_pct, max_bump * 0.50)
+            except Exception:
+                bump_pct = 0.0
+
+        if bump_pct > 0:
+            notes.append(f"Event-risk widening applied: +{bump_pct:.1f}% to wing distances (risk-only).")
+            put_mult = float(put_mult) * (1.0 + bump_pct / 100.0)
+            call_mult = float(call_mult) * (1.0 + bump_pct / 100.0)
+
         structure = _structure_from_distances(
             spot=float(spot),
             implied_move_pct=float(imp_planned),
@@ -595,6 +618,7 @@ def optimize_wings_risk_only(
     wing_recommendation: Dict[str, Any],
     events: List[Dict[str, Any]],
     stability: Optional[Dict[str, Any]] = None,
+    event_risk: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Risk-only wing optimization around the heuristic EM-multiples.
@@ -621,6 +645,22 @@ def optimize_wings_risk_only(
     base_call = _to_float(wing_recommendation.get("callWingMultiple") or wing_recommendation.get("baseWingMultiple"))
     if base_put is None or base_call is None:
         return {"mode": "RISK_ONLY", "notes": ["Optimization unavailable: missing heuristic wing multiples."]}
+
+    # Optional: event-risk widening on the heuristic center (risk-only).
+    bump_pct = 0.0
+    if bool(flags.BENZINGA_EVENT_RISK_AFFECTS_MC) and isinstance(event_risk, dict) and event_risk.get("enabled") is True:
+        try:
+            s = float(event_risk.get("score01"))
+            ca = float(flags.BENZINGA_EVENT_RISK_CAUTION_THRESHOLD)
+            max_bump = max(0.0, float(flags.BENZINGA_EVENT_RISK_MC_WING_BUMP_MAX_PCT))
+            if s > ca and ca < 1.0:
+                bump_pct = ((s - ca) / (1.0 - ca)) * max_bump
+                bump_pct = max(0.0, min(max_bump, bump_pct))
+        except Exception:
+            bump_pct = 0.0
+    if bump_pct > 0:
+        base_put = float(base_put) * (1.0 + bump_pct / 100.0)
+        base_call = float(base_call) * (1.0 + bump_pct / 100.0)
 
     # Optional stability-based cap.
     cap_mode = None

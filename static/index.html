@@ -170,6 +170,37 @@
           </div>
         </section>
 
+        <section class="surface hidden" id="eventRiskSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Event Risk (Benzinga)
+              <span class="info" title="Additive context (does not change breach history). Uses Benzinga: Economic Calendar, News/WIIM, Ratings, and Options Activity.">ⓘ</span>
+            </h2>
+            <div class="sectionMeta muted" id="eventRiskMeta">—</div>
+          </div>
+          <div id="eventRiskExplain" class="finePrint muted">
+            Composite score (0–1) summarizing near-term event risk around the earnings window. Use it as a guardrail, not a signal.
+          </div>
+
+          <div class="metricGrid metricGrid--eventRisk">
+            <div class="metricCard">
+              <div class="metricLabel">Composite score</div>
+              <div id="eventRiskScore" class="metricValue mono">—</div>
+              <div id="eventRiskLabel" class="metricCaption muted">—</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Top Drivers</div>
+              <div id="eventRiskDrivers" class="eventRiskBody">—</div>
+              <div id="eventRiskNotes" class="metricCaption muted">—</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Impact this run</div>
+              <div id="eventRiskImpact" class="eventRiskBody">—</div>
+              <div id="eventRiskImpactNotes" class="metricCaption muted">—</div>
+            </div>
+          </div>
+        </section>
+
         <section class="surface" id="skewWingsSection">
           <div class="sectionHeader">
             <h2 class="sectionTitle">Skew &amp; Wings</h2>

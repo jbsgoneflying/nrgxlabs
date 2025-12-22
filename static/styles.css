@@ -255,6 +255,11 @@ body {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.metricGrid.metricGrid--eventRisk {
+  /* Give "Top Drivers" a wider lane so we don't truncate */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr);
+}
+
 @media (max-width: 1200px) {
   .metricGrid.metricGrid--regime {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -714,6 +719,57 @@ tr.row--near { background: rgba(255, 191, 0, 0.06); }
 .pill.bad { color: var(--red); border-color: rgba(255, 69, 58, 0.45); }
 .pill.warn { color: var(--amber); border-color: rgba(255, 191, 0, 0.35); }
 .pill.neutral { color: rgba(230,232,235,0.58); border-color: rgba(255,255,255,0.06); }
+
+.eventRiskList {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: rgba(230,232,235,0.72);
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.eventRiskBody {
+  margin-top: 8px;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0.08px;
+  line-height: 1.25;
+}
+
+.eventRiskBody .eventRiskList {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.28;
+}
+
+.eventRiskBody .eventRiskMuted {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.eventRiskList li {
+  margin: 6px 0;
+}
+
+.eventRiskMuted {
+  color: rgba(230,232,235,0.55);
+  font-weight: 500;
+}
+
+.eventRiskKicker {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.02);
+  font-size: 12px;
+  font-weight: 650;
+  color: rgba(230,232,235,0.72);
+}
 
 .delta {
   font-variant-numeric: tabular-nums;

@@ -5,9 +5,12 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from backend.benzinga_client import BenzingaClient
 from backend.config import get_flags
+from backend.earnings_calendar import benzinga_next_earnings
+from backend.event_risk_overlay import compute_event_risk_overlay_optional
 from backend.orats_client import OratsClient, OratsError
-from backend.regime_overlay import compute_regime_backtest_view, compute_regime_overlay
+from backend.regime_overlay import apply_event_risk_adjustment, compute_regime_backtest_view, compute_regime_overlay
 from backend.skew_overlay import compute_skew_overlay
 from backend.stats_utils import beta_posterior_from_counts
 from backend.trade_builder import compute_trade_builder
@@ -403,6 +406,7 @@ def compute_breach_stats(
     today: Optional[dt.date] = None,
     flags_override: Any = None,
     next_event_override: Optional[Dict[str, Any]] = None,
+    benzinga_client: BenzingaClient | None = None,
 ) -> Dict[str, Any]:
     """
     Compute ORATS earnings implied-move breach stats and overlays.
@@ -1046,6 +1050,60 @@ def compute_breach_stats(
     except Exception:
         current_quarter_key = _quarter_key(now)
 
+    # --- Benzinga event risk overlay (additive; default OFF) ---
+    event_risk: Optional[Dict[str, Any]] = None
+    bz_for_event_risk = benzinga_client if (bool(flags.ENABLE_BENZINGA) and bool(flags.BENZINGA_ENABLE_EVENT_RISK)) else None
+    if bz_for_event_risk is not None:
+        earn_date_next_for_risk: Optional[str] = _fmt_date(next_event_date) if next_event_date is not None else None
+        used_estimate_for_risk = False
+        if earn_date_next_for_risk is None:
+            try:
+                bz_ev = benzinga_next_earnings(bz_for_event_risk, ticker=t, now=now, lookahead_days=365)
+                if bz_ev is not None and bz_ev.earn_date:
+                    earn_date_next_for_risk = str(bz_ev.earn_date)[:10]
+            except Exception:
+                pass
+        if earn_date_next_for_risk is None:
+            # If both ORATS-forward and Benzinga calendar are missing, estimate from historical cadence (LOW confidence).
+            past = [(d, r) for (d, r) in parsed if d < now]
+            if past:
+                past.sort(key=lambda x: x[0], reverse=True)
+                recent_dates = [d for (d, _) in past[:6]]
+                gaps = []
+                for i in range(len(recent_dates) - 1):
+                    gaps.append((recent_dates[i] - recent_dates[i + 1]).days)
+                gaps_sorted = sorted([g for g in gaps if 1 <= g <= 300])
+                if gaps_sorted:
+                    mid = len(gaps_sorted) // 2
+                    cadence = gaps_sorted[mid] if (len(gaps_sorted) % 2 == 1) else int(round((gaps_sorted[mid - 1] + gaps_sorted[mid]) / 2.0))
+                else:
+                    cadence = 91
+                if cadence < 60 or cadence > 130:
+                    cadence = 91
+                last_earn = recent_dates[0]
+                est = last_earn + dt.timedelta(days=cadence)
+                while est <= now:
+                    est = est + dt.timedelta(days=cadence)
+                while est.weekday() >= 5:
+                    est = est + dt.timedelta(days=1)
+                earn_date_next_for_risk = _fmt_date(est)
+                used_estimate_for_risk = True
+        event_risk = compute_event_risk_overlay_optional(
+            bz_for_event_risk,
+            ticker=t,
+            as_of_date=str(current.get("asOfDate") or _fmt_date(now))[:10],
+            now=now,
+            earn_date_next=earn_date_next_for_risk,
+        )
+        if used_estimate_for_risk and isinstance(event_risk, dict):
+            notes = event_risk.get("notes")
+            if isinstance(notes, list):
+                notes.insert(0, "Earnings date estimated from history (LOW confidence).")
+
+    # Optional: let eventRisk tighten the regime overlay (bounded).
+    if bool(flags.BENZINGA_EVENT_RISK_AFFECTS_REGIME) and event_risk is not None:
+        regime = apply_event_risk_adjustment(regime=regime, event_risk=event_risk, flags=flags)
+
     wing_rec = compute_wing_recommendation(
         summary=summary,
         quarters=quarters,
@@ -1085,6 +1143,8 @@ def compute_breach_stats(
         "wingRecommendation": wing_rec,
         "skewOverlay": skew_overlay,
     }
+    if event_risk is not None:
+        out["eventRisk"] = event_risk
 
     # Progressive enhancement: chain-based strike builder
     if trade_builder_inputs is not None:
@@ -1120,6 +1180,11 @@ def compute_breach_stats(
             "pricingDateAsOf": None,
             "impliedMovePctPlanned": None,
             "impliedMoveSource": None,
+            # Additive provenance fields (for robustness + UI transparency)
+            "source": None,  # manual_override | orats_snapshot | benzinga | orats_hist | unknown
+            "confidence": None,  # HIGH|MED|LOW
+            "rawTime": None,  # Benzinga time string if available
+            "dateConfirmed": None,  # Benzinga date_confirmed flag if available
             "notes": [],
         }
         try:
@@ -1137,6 +1202,8 @@ def compute_breach_stats(
                 timing_override = str(next_event_override.get("timing") or "").strip().upper()
                 timing_planned = timing_override if timing_override in ("AMC", "BMO") else "UNK"
                 next_event["timingPlanned"] = timing_planned
+                next_event["source"] = "manual_override"
+                next_event["confidence"] = "HIGH" if timing_planned in ("AMC", "BMO") else "MED"
 
                 asof = str(current.get("asOfDate") or "")[:10] or None
                 next_event["pricingDateAsOf"] = asof
@@ -1215,6 +1282,8 @@ def compute_breach_stats(
                             next_event["earnDateNext"] = next_ern
                             timing_planned = classify_timing(snap_row.get("nextErnTod"))
                             next_event["timingPlanned"] = timing_planned
+                            next_event["source"] = "orats_snapshot"
+                            next_event["confidence"] = "HIGH" if timing_planned in ("AMC", "BMO") else "MED"
                             asof = str(snap_row.get("tradeDate") or current.get("asOfDate") or "")[:10] or None
                             next_event["pricingDateAsOf"] = asof
                             next_event["pricingDatePlanned"] = asof
@@ -1241,12 +1310,94 @@ def compute_breach_stats(
                     next_event["notes"].append("ORATS /cores snapshot nextErn unavailable (possibly subscription-gated); falling back.")
 
                 if not used_snapshot:
+                    # Benzinga fallback (calendar) for next earnings date/time.
+                    # This hardens MC/trade-builder against ORATS forward-field entitlement gaps.
+                    used_benzinga = False
+                    bz = benzinga_client if bool(flags.ENABLE_BENZINGA) else None
+                    if bz is not None:
+                        try:
+                            bz_ev = benzinga_next_earnings(bz, ticker=t, now=now, lookahead_days=365)
+                        except Exception as e:
+                            bz_ev = None
+                            next_event["notes"].append(f"Benzinga earnings calendar failed: {type(e).__name__}: {e}")
+                        if bz_ev is not None and bz_ev.earn_date:
+                            used_benzinga = True
+                            next_event["earnDateNext"] = str(bz_ev.earn_date)[:10]
+                            next_event["timingPlanned"] = str(bz_ev.timing or "UNK")
+                            next_event["source"] = "benzinga"
+                            next_event["confidence"] = str(bz_ev.confidence or "LOW")
+                            next_event["rawTime"] = bz_ev.raw_time
+                            next_event["dateConfirmed"] = bz_ev.date_confirmed
+                            next_event["notes"].append("Using Benzinga earnings calendar for next earnings date/time.")
+
+                            # Keep EOD anchoring: pricingDatePlanned stays at latest available ORATS EOD as-of date.
+                            asof = str(current.get("asOfDate") or "")[:10] or None
+                            next_event["pricingDateAsOf"] = asof
+                            next_event["pricingDatePlanned"] = asof
+
+                            # Compute theoretical target pricing date for transparency (may differ from as-of).
+                            pricing_target = None
+                            if next_event["timingPlanned"] == "AMC":
+                                pricing_target = next_event["earnDateNext"]
+                            elif next_event["timingPlanned"] == "BMO":
+                                try:
+                                    prior = get_prior_trading_day(client, t, _parse_date(next_event["earnDateNext"]))
+                                    pricing_target = str(prior.tradeDate)[:10] if prior and prior.tradeDate else None
+                                except Exception:
+                                    pricing_target = None
+                            next_event["pricingDateTarget"] = pricing_target
+                            if pricing_target and asof and pricing_target != asof:
+                                next_event["notes"].append(f"Target pricing date={pricing_target}; using latest available ORATS EOD asOf={asof}.")
+
+                            # Anchor implied move to the same ORATS EOD snapshot shown in the UI.
+                            implied = _to_float(current.get("impliedMovePct"))
+                            if implied is not None:
+                                next_event["impliedMovePctPlanned"] = _round2(float(implied))
+                                next_event["impliedMoveSource"] = "benzinga_event+current_snapshot"
+                            else:
+                                # Fallback: deterministic EOD anchoring via hist/cores on the latest as-of date.
+                                next_event["notes"].append("Benzinga event resolved, but current snapshot implied move missing; falling back to ORATS hist/cores as-of.")
+                                implied_pct_planned: Optional[float] = None
+                                used_date: Optional[str] = None
+                                if asof:
+                                    try:
+                                        cores_date = _parse_date(asof)
+                                    except Exception:
+                                        cores_date = None
+                                    if cores_date is not None:
+                                        for _ in range(0, 5):
+                                            try:
+                                                cores_resp = client.hist_cores(
+                                                    ticker=t,
+                                                    trade_date=_fmt_date(cores_date),
+                                                    fields="ticker,tradeDate,stockPrice,impErnMv",
+                                                )
+                                                row = _first_row(cores_resp.rows)
+                                            except Exception:
+                                                row = None
+                                            if row and row.get("impErnMv") is not None:
+                                                used_date = str(row.get("tradeDate") or _fmt_date(cores_date))[:10]
+                                                implied_pct_planned = _imp_to_pct(row.get("impErnMv"))
+                                                break
+                                            cores_date = cores_date - dt.timedelta(days=1)
+
+                                if implied_pct_planned is not None:
+                                    next_event["impliedMovePctPlanned"] = _round2(implied_pct_planned)
+                                    next_event["impliedMoveSource"] = "benzinga_event+hist_cores_asof"
+                                    if used_date and asof and used_date != asof:
+                                        next_event["notes"].append(f"Implied move used fallback cores date {used_date} (asOf {asof}).")
+                                else:
+                                    next_event["impliedMoveSource"] = "benzinga_event_missing_implied"
+                                    next_event["notes"].append("Benzinga event resolved, but implied move unavailable from ORATS current snapshot and hist/cores.")
+
                     # Fallback path: infer upcoming event from /hist/earnings (may be historical-only on delayed plans).
-                    if next_event_date is not None and next_event_raw is not None:
+                    if (not used_benzinga) and next_event_date is not None and next_event_raw is not None:
                         annc_tod = next_event_raw.get("anncTod") or next_event_raw.get("annc_tod") or next_event_raw.get("anncTOD")
                         timing_planned = classify_timing(annc_tod)
                         next_event["earnDateNext"] = _fmt_date(next_event_date)
                         next_event["timingPlanned"] = timing_planned
+                        next_event["source"] = next_event.get("source") or "orats_hist"
+                        next_event["confidence"] = next_event.get("confidence") or ("MED" if timing_planned in ("AMC", "BMO") else "LOW")
 
                         pricing_planned: Optional[str] = None
                         if timing_planned == "AMC":
@@ -1295,19 +1446,124 @@ def compute_breach_stats(
                         else:
                             implied_source = "missing"
 
-                    if implied_pct_planned is None:
-                        fallback_imp = _to_float(current.get("impliedMovePct"))
-                        if fallback_imp is not None:
-                            implied_pct_planned = float(fallback_imp)
-                            implied_source = "current_snapshot_fallback"
-                            next_event["notes"].append("Using current snapshot implied move as fallback (pricing-date cores unavailable).")
-                        next_event["impliedMovePctPlanned"] = _round2(implied_pct_planned)
-                        next_event["impliedMoveSource"] = implied_source
+                        if implied_pct_planned is None:
+                            fallback_imp = _to_float(current.get("impliedMovePct"))
+                            if fallback_imp is not None:
+                                implied_pct_planned = float(fallback_imp)
+                                implied_source = "current_snapshot_fallback"
+                                next_event["notes"].append("Using current snapshot implied move as fallback (pricing-date cores unavailable).")
+                            next_event["impliedMovePctPlanned"] = _round2(implied_pct_planned)
+                            next_event["impliedMoveSource"] = implied_source
                     else:
-                        next_event["notes"].append("No upcoming earnings event found in hist/earnings.")
-            out["nextEvent"] = next_event
+                        # No ORATS-forward event available (delayed plans often behave this way).
+                        next_event["notes"].append("No upcoming earnings event found in ORATS hist/earnings.")
+
+                # --- Last-resort fallbacks (to avoid "no anchor" for tickers with missing forward calendars) ---
+                # 1) If we still don't have an upcoming earnings date, estimate it from historical cadence.
+                if not next_event.get("earnDateNext"):
+                    # Use the most recent past earnings and a robust median cadence.
+                    past = [(d, r) for (d, r) in parsed if d < now]
+                    if past:
+                        past.sort(key=lambda x: x[0], reverse=True)
+                        recent_dates = [d for (d, _) in past[:6]]
+                        gaps = []
+                        for i in range(len(recent_dates) - 1):
+                            gaps.append((recent_dates[i] - recent_dates[i + 1]).days)
+                        gaps_sorted = sorted([g for g in gaps if 1 <= g <= 300])
+                        if gaps_sorted:
+                            mid = len(gaps_sorted) // 2
+                            cadence = gaps_sorted[mid] if (len(gaps_sorted) % 2 == 1) else int(round((gaps_sorted[mid - 1] + gaps_sorted[mid]) / 2.0))
+                        else:
+                            cadence = 91
+                        # Clamp to plausible quarterly cadence.
+                        if cadence < 60 or cadence > 130:
+                            cadence = 91
+
+                        last_earn = recent_dates[0]
+                        est = last_earn + dt.timedelta(days=cadence)
+                        while est <= now:
+                            est = est + dt.timedelta(days=cadence)
+
+                        # Best-effort: keep it on a weekday (earnings rarely scheduled on weekends).
+                        while est.weekday() >= 5:
+                            est = est + dt.timedelta(days=1)
+
+                        # Guess timing from recent events (mode of last 4 known timings).
+                        timings = []
+                        for (d, r) in past[:4]:
+                            annc = (r or {}).get("anncTod") or (r or {}).get("annc_tod") or (r or {}).get("anncTOD")
+                            tp = classify_timing(annc)
+                            if tp in ("AMC", "BMO"):
+                                timings.append(tp)
+                        timing_guess = timings[0] if timings and timings.count(timings[0]) >= timings.count(timings[-1]) else (timings[-1] if timings else "UNK")
+
+                        next_event["earnDateNext"] = _fmt_date(est)
+                        next_event["timingPlanned"] = next_event.get("timingPlanned") or timing_guess
+                        next_event["source"] = next_event.get("source") or "estimate"
+                        next_event["confidence"] = next_event.get("confidence") or "LOW"
+                        next_event["notes"].append(
+                            f"No forward earnings calendar available; estimated next earnings date from historical cadence (~{cadence}d). LOW confidence — use override to confirm."
+                        )
+
+                # 2) Ensure we always have an EOD anchor date for MC (pricingDatePlanned).
+                asof_cur = str(current.get("asOfDate") or "")[:10] or None
+                if next_event.get("pricingDateAsOf") is None:
+                    next_event["pricingDateAsOf"] = asof_cur
+                if next_event.get("pricingDatePlanned") is None:
+                    next_event["pricingDatePlanned"] = asof_cur
+
+                # If we have a (real or estimated) earnings date + timing, compute a pricing-date target for transparency.
+                if next_event.get("pricingDateTarget") is None and next_event.get("earnDateNext") and next_event.get("timingPlanned") in ("AMC", "BMO"):
+                    try:
+                        ed = _parse_date(str(next_event.get("earnDateNext")))
+                    except Exception:
+                        ed = None
+                    if ed is not None:
+                        if next_event.get("timingPlanned") == "AMC":
+                            next_event["pricingDateTarget"] = _fmt_date(ed)
+                        else:  # BMO
+                            prior = get_prior_trading_day(client, t, ed)
+                            next_event["pricingDateTarget"] = str(prior.tradeDate)[:10] if prior and prior.tradeDate else None
+
+                # 3) If implied move is still missing, anchor from ORATS hist/cores as-of (deterministic EOD).
+                if next_event.get("impliedMovePctPlanned") is None and asof_cur:
+                    implied_pct_planned: Optional[float] = None
+                    used_date: Optional[str] = None
+                    try:
+                        cores_date = _parse_date(asof_cur)
+                    except Exception:
+                        cores_date = None
+                    if cores_date is not None:
+                        for _ in range(0, 5):
+                            try:
+                                cores_resp = client.hist_cores(
+                                    ticker=t,
+                                    trade_date=_fmt_date(cores_date),
+                                    fields="ticker,tradeDate,stockPrice,impErnMv",
+                                )
+                                row = _first_row(cores_resp.rows)
+                            except Exception:
+                                row = None
+                            if row and row.get("impErnMv") is not None:
+                                used_date = str(row.get("tradeDate") or _fmt_date(cores_date))[:10]
+                                implied_pct_planned = _imp_to_pct(row.get("impErnMv"))
+                                break
+                            cores_date = cores_date - dt.timedelta(days=1)
+
+                    if implied_pct_planned is not None:
+                        next_event["impliedMovePctPlanned"] = _round2(implied_pct_planned)
+                        next_event["impliedMoveSource"] = next_event.get("impliedMoveSource") or "hist_cores_asof_only"
+                        if used_date and asof_cur and used_date != asof_cur:
+                            next_event["notes"].append(f"Implied move anchored from ORATS hist/cores fallback date {used_date} (asOf {asof_cur}).")
+                        else:
+                            next_event["notes"].append("Implied move anchored from ORATS hist/cores on as-of date.")
+                    else:
+                        next_event["impliedMoveSource"] = next_event.get("impliedMoveSource") or "missing"
         except Exception as e:
             next_event["notes"].append(f"nextEvent calculation failed: {type(e).__name__}: {e}")
+        finally:
+            # Always return nextEvent (even if partially populated) so UI/MC can explain failures.
+            out["nextEvent"] = next_event
 
         try:
             out["monteCarlo"] = run_monte_carlo(
@@ -1320,6 +1576,7 @@ def compute_breach_stats(
                 wing_recommendation=wing_rec,
                 events=out_events,
                 trade_builder=(out.get("tradeBuilder") if isinstance(out.get("tradeBuilder"), dict) else None),
+                event_risk=event_risk,
             )
         except Exception as e:
             out["monteCarlo"] = {"nSims": 0, "notes": [f"MC failed: {type(e).__name__}: {e}"]}
@@ -1342,6 +1599,7 @@ def compute_breach_stats(
                     wing_recommendation=wing_rec,
                     events=out_events,
                     stability=(out.get("stability") if isinstance(out.get("stability"), dict) else None),
+                    event_risk=event_risk,
                 )
             except Exception as e:
                 out["monteCarloOptimization"] = {"mode": "RISK_ONLY", "notes": [f"Optimization failed: {type(e).__name__}: {e}"]}

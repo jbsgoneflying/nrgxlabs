@@ -14,6 +14,7 @@ from cachetools import TTLCache
 
 from backend.earnings_logic import BreachInputError, compute_breach_stats, compute_current_snapshot
 from backend.config import get_flags
+from backend.benzinga_client import BenzingaClient
 from backend.orats_client import OratsClient, OratsError
 
 
@@ -37,6 +38,9 @@ app = FastAPI(title="ORATS Earnings Implied Move Breach", version="1.0.0")
 _client_lock = threading.Lock()
 _client: OratsClient | None = None
 
+_bz_client_lock = threading.Lock()
+_bz_client: BenzingaClient | None = None
+
 _breach_cache = TTLCache(maxsize=512, ttl=6 * 60 * 60)  # 6 hours
 _breach_cache_lock = threading.Lock()
 
@@ -49,6 +53,23 @@ def _get_client() -> OratsClient:
         if _client is None:
             _client = OratsClient.from_env()
     return _client
+
+
+def _get_benzinga_client_optional() -> BenzingaClient | None:
+    """
+    Optional Benzinga client (only constructed if BENZINGA_API_KEY is set).
+    Kept as a singleton so per-process caching is effective.
+    """
+    # Feature-flag gate (env-driven)
+    if not get_flags().ENABLE_BENZINGA:
+        return None
+    global _bz_client
+    if _bz_client is not None:
+        return _bz_client
+    with _bz_client_lock:
+        if _bz_client is None:
+            _bz_client = BenzingaClient.from_env_optional()
+    return _bz_client
 
 
 def _breach_cache_key(ticker: str, n: int, years: int, k: float, flags_fp: tuple | None = None) -> tuple:
@@ -154,6 +175,7 @@ def breach(
             trade_builder_inputs=(trade_builder_inputs if has_trade_builder else None),
             flags_override=effective_flags,
             next_event_override={"date": mc_event_date, "timing": mc_event_timing},
+            benzinga_client=_get_benzinga_client_optional(),
         )
         if not has_trade_builder:
             with _breach_cache_lock:

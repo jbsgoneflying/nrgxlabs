@@ -13,8 +13,8 @@ FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "golden"
 
 # Fill these after first run (see assertion message if missing).
 EXPECTED = {
-    "MU": {"seed": 245931981883769468, "breachProbEither": 0.000000, "cvar95Total": 0.0},
-    "NKE": {"seed": 10077185795213068593, "breachProbEither": 0.393000, "cvar95Total": 5.0},
+    "MU": {"seed": 6154368175708811480, "breachProbEither": 0.000000, "cvar95Total": 0.0},
+    "NKE": {"seed": 15873674609952260458, "breachProbEither": 0.418500, "cvar95Total": 5.0},
 }
 
 

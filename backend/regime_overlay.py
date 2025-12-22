@@ -690,3 +690,75 @@ def compute_regime_backtest_view(
     return per_date, _build_regime_validation(events)
 
 
+def apply_event_risk_adjustment(
+    *,
+    regime: Dict[str, Any],
+    event_risk: Dict[str, Any] | None,
+    flags: Any,
+) -> Dict[str, Any]:
+    """
+    Apply an additive Benzinga event-risk adjustment to a regime overlay.
+
+    IMPORTANT: This returns a NEW dict and does not mutate the cached `regime` input,
+    because `compute_regime_overlay` caches and reuses regime dict objects.
+    """
+    try:
+        enabled = bool(getattr(flags, "BENZINGA_EVENT_RISK_AFFECTS_REGIME", False))
+    except Exception:
+        enabled = False
+    if not enabled:
+        return dict(regime)
+
+    if not isinstance(event_risk, dict) or event_risk.get("enabled") is not True:
+        return dict(regime)
+
+    score = event_risk.get("score01")
+    try:
+        s = float(score)
+    except Exception:
+        return dict(regime)
+    if not (0.0 <= s <= 1.0):
+        return dict(regime)
+
+    hi = float(getattr(flags, "BENZINGA_EVENT_RISK_HIGH_THRESHOLD", 0.66))
+    ca = float(getattr(flags, "BENZINGA_EVENT_RISK_CAUTION_THRESHOLD", 0.50))
+    max_bump_pct = float(getattr(flags, "BENZINGA_EVENT_RISK_REGIME_TAIL_BUMP_MAX_PCT", 20.0))
+    max_bump_pct = max(0.0, min(100.0, max_bump_pct))
+
+    # Map score above CAUTION threshold into [0..max_bump_pct].
+    bump_pct = 0.0
+    if s > ca and ca < 1.0:
+        bump_pct = ((s - ca) / (1.0 - ca)) * max_bump_pct
+        bump_pct = max(0.0, min(max_bump_pct, bump_pct))
+
+    out = dict(regime)
+    out["eventRiskAdjustment"] = {
+        "enabled": True,
+        "score01": round(s, 3),
+        "tailMultiplierBumpPct": round(bump_pct, 2),
+        "thresholds": {"caution": ca, "high": hi},
+    }
+
+    # Tail multiplier bump (bounded).
+    tm = out.get("tailMultiplier")
+    try:
+        tm_f = float(tm)
+    except Exception:
+        tm_f = None
+    if tm_f is not None and tm_f > 0 and bump_pct > 0:
+        out["tailMultiplier"] = round(tm_f * (1.0 + bump_pct / 100.0), 2)
+
+    # Trade gate softening: promote OK -> CAUTION when risk is HIGH.
+    guidance = out.get("guidance") if isinstance(out.get("guidance"), dict) else {}
+    gate = str(guidance.get("tradeGate") or out.get("tradeGate") or "OK")
+    msg = str(guidance.get("message") or "")
+    if s >= hi and gate == "OK":
+        gate = "CAUTION"
+        msg = (msg + " " if msg else "") + "Caution (event-risk elevated)."
+
+    # Write back guidance without mutating nested dict
+    out["guidance"] = {"tradeGate": gate, "message": msg or guidance.get("message") or "Standard"}
+    out["tradeGate"] = gate
+    return out
+
+

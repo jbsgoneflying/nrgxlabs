@@ -403,11 +403,20 @@ function renderMonteCarlo(payload) {
   const anchorImp = ne?.impliedMovePctPlanned;
   const anchorTxt = (anchorImp !== null && anchorImp !== undefined) ? `${Number(anchorImp).toFixed(2)}%` : "—";
 
-  if (meta) meta.textContent = hasAnyMc ? `n=${nSims} · conditioning=${cond} · pool=${poolN} · anchor=${anchorDate} (${anchorTxt})` : "MC requested (waiting for data)…";
+  const src = ne?.source ? String(ne.source) : null;
+  const conf = ne?.confidence ? String(ne.confidence) : null;
+  const prov = src ? ` · src=${src}${conf ? `/${conf}` : ""}` : "";
+  if (meta) meta.textContent = hasAnyMc ? `n=${nSims} · conditioning=${cond} · pool=${poolN} · anchor=${anchorDate} (${anchorTxt})${prov}` : "MC requested (waiting for data)…";
 
   const notes = [];
   if (hasAnyMc && Array.isArray(mc.notes)) notes.push(...mc.notes);
   if (ne && Array.isArray(ne.notes) && ne.notes.length) notes.push(...ne.notes.map(s => `Next event: ${s}`));
+  if (ne && (ne.rawTime || ne.dateConfirmed !== null && ne.dateConfirmed !== undefined)) {
+    const rt = ne.rawTime ? `time=${ne.rawTime}` : null;
+    const dc = (ne.dateConfirmed === true) ? "date_confirmed=1" : (ne.dateConfirmed === false) ? "date_confirmed=0" : null;
+    const bits = [rt, dc].filter(Boolean).join(", ");
+    if (bits) notes.push(`Next event meta: ${bits}.`);
+  }
   if (!hasAnyMc) notes.push("MC unavailable: server did not return monteCarlo output. Ensure MC toggle is on and backend supports mc=1.");
   if (note) note.textContent = notes.length ? notes.join(" ") : "Simulates close→open earnings gap only (no intraday path).";
 
@@ -462,6 +471,97 @@ function renderMonteCarlo(payload) {
   }
   const optNotes = Array.isArray(opt.notes) ? opt.notes.join(" ") : "";
   if (wingOptNote) wingOptNote.textContent = mode ? `${mode}. ${optNotes}` : (optNotes || "—");
+}
+
+function _eventRiskBadge(label) {
+  const l = String(label || "");
+  if (l === "HIGH") return pill("HIGH", "bad");
+  if (l === "MED") return pill("MED", "warn");
+  if (l === "LOW") return pill("LOW", "neutral");
+  return escapeHtml(l || "—");
+}
+
+function renderEventRisk(payload) {
+  const sec = $("eventRiskSection");
+  if (!sec) return;
+  const er = payload?.eventRisk || null;
+  const show = !!(er && (er.enabled || er.score01 !== null && er.score01 !== undefined));
+  sec.classList.toggle("hidden", !show);
+  if (!show) return;
+
+  const meta = $("eventRiskMeta");
+  const scoreEl = $("eventRiskScore");
+  const labelEl = $("eventRiskLabel");
+  const driversEl = $("eventRiskDrivers");
+  const notesEl = $("eventRiskNotes");
+  const impactEl = $("eventRiskImpact");
+  const impactNotesEl = $("eventRiskImpactNotes");
+  const explainEl = $("eventRiskExplain");
+
+  const asOf = er?.asOfDate || "—";
+  const anchor = er?.earnDateNext || "—";
+  const w = er?.window || null;
+  const wTxt = w ? `${w.start || "—"}→${w.end || "—"}` : "—";
+  if (meta) meta.textContent = `asOf=${asOf} · anchor=${anchor} · window=${wTxt}`;
+
+  const s = (er?.score01 === null || er?.score01 === undefined) ? null : Number(er.score01);
+  if (scoreEl) scoreEl.textContent = (s !== null && Number.isFinite(s)) ? `${s.toFixed(3)}` : "—";
+  if (labelEl) {
+    const badge = _eventRiskBadge(er?.label);
+    labelEl.innerHTML = `${badge} <span class="eventRiskMuted">Low &lt;0.33 · Med &lt;0.66 · High ≥0.66</span>`;
+  }
+  if (explainEl) {
+    explainEl.textContent = "Composite score (0–1) summarizing near-term event risk around the earnings window. Use it as a guardrail, not a signal.";
+  }
+
+  const c = er?.components || {};
+  const macro = c?.macroProximity || {};
+  const head = c?.headlineShock || {};
+  const rat = c?.analystCluster || {};
+  const opt = c?.optionsActivity || {};
+
+  const macroN = macro.countHighImpactUS ?? "—";
+  const macroTop = Array.isArray(macro.top) ? macro.top : [];
+
+  const newsN = head.newsCount3d ?? "—";
+  const wiimN = head.wiimCount3d ?? "—";
+  const ratN = rat.ratingsCount7d ?? "—";
+  const ratActions = Array.isArray(rat.actions) ? rat.actions.filter(Boolean) : [];
+  const optN = opt.signalsCount3d ?? "—";
+
+  const driverItems = [];
+  driverItems.push(`<li><strong>Macro</strong>: ${escapeHtml(String(macroN))} high-impact US events (importance ≥3) in window${macroTop.length ? `.<br/><span class="eventRiskMuted">${escapeHtml(macroTop.join(" · "))}</span>` : ""}</li>`);
+  driverItems.push(`<li><strong>News</strong>: ${escapeHtml(String(newsN))} headlines (3d) · <strong>WIIM</strong>: ${escapeHtml(String(wiimN))} (3d)</li>`);
+  driverItems.push(`<li><strong>Analyst ratings</strong>: ${escapeHtml(String(ratN))} (7d)${ratActions.length ? `.<br/><span class="eventRiskMuted">${escapeHtml(ratActions.join(" · "))}</span>` : ""}</li>`);
+  driverItems.push(`<li><strong>Unusual options</strong>: ${escapeHtml(String(optN))} signals (3d)</li>`);
+  if (driversEl) driversEl.innerHTML = `<ul class="eventRiskList">${driverItems.join("")}</ul>`;
+
+  const notes = [];
+  if (Array.isArray(er?.notes) && er.notes.length) notes.push(...er.notes);
+  if (Array.isArray(er?.sources) && er.sources.length) notes.push(`Sources: ${er.sources.join(", ")}`);
+  if (notesEl) notesEl.textContent = notes.length ? notes.join(" ") : "—";
+
+  // Impact this run: show whether it actually adjusted regime/MC.
+  const impacts = [];
+  const rgAdj = payload?.regime?.eventRiskAdjustment || null;
+  if (rgAdj && rgAdj.enabled) {
+    const bump = rgAdj.tailMultiplierBumpPct;
+    const gate = payload?.regime?.guidance?.tradeGate || payload?.regime?.tradeGate || "—";
+    impacts.push(`Regime: +${Number(bump || 0).toFixed(1)}% tail · gate=${gate}`);
+  } else {
+    impacts.push("Regime: no adjustment");
+  }
+  const mc = payload?.monteCarlo || null;
+  const mcNotes = Array.isArray(mc?.notes) ? mc.notes.join(" ") : "";
+  if (mcNotes.includes("Event-risk widening applied")) impacts.push("MC: wing widening applied");
+  else impacts.push("MC: no widening");
+  if (impactEl) impactEl.innerHTML = `<div class="eventRiskKicker">${escapeHtml(impacts.join(" · "))}</div>`;
+
+  const impactNotes = [];
+  if (rgAdj && rgAdj.enabled && rgAdj.thresholds) {
+    impactNotes.push(`Thresholds: caution≥${rgAdj.thresholds.caution} · high≥${rgAdj.thresholds.high}.`);
+  }
+  if (impactNotesEl) impactNotesEl.textContent = impactNotes.length ? impactNotes.join(" ") : "—";
 }
 
 function _bestUnderlyingPrice(payload) {
@@ -769,6 +869,7 @@ function render(payload) {
   if (a) a.textContent = buildActionSummary(payload.quarters);
 
   renderBufferTarget(payload);
+  renderEventRisk(payload);
   renderSkewWings(payload);
   renderMonteCarlo(payload);
   renderTradeBuilder(payload);
