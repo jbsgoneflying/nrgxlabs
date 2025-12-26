@@ -5,12 +5,15 @@ import os
 import math
 import time
 import datetime as dt
+import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Callable, Iterable
 
 from backend.technicals import encode_image_to_data_url
 from backend.orats_client import OratsClient
 from backend.benzinga_client import BenzingaClient, BenzingaResponse
+
+LOG = logging.getLogger(__name__)
 
 
 def _pick(d: dict, keys: List[str]) -> dict:
@@ -635,7 +638,7 @@ def askraven_agent_chat(
         tools.append(_tool_schema_benzinga_get_news())
     tools.append(_tool_schema_web_fetch())
     if enable_web:
-        # built-in tool (executed by OpenAI)
+        # built-in tool (executed by OpenAI). Some SDKs use web_search_preview.
         tools.append({"type": "web_search"})
 
     sys_txt = ASKRAVEN_SYSTEM_PROMPT + "\n\nIMPORTANT: You may use tools if needed. When citing web/news, include URLs. Return a non-empty plain-text answer."
@@ -689,12 +692,11 @@ def askraven_agent_chat(
         if budget_exhausted():
             return "AskRaven budget exhausted (time/tool limit). Try a narrower question or increase ASK_RAVEN_BUDGET."
 
-        try:
-            kwargs: Dict[str, Any] = {"model": model, "max_output_tokens": max_out, "tools": tools}
-            try:
-                kwargs["reasoning"] = {"effort": effort}
-            except Exception:
-                pass
+        def _responses_create_with_tools(use_tools: List[dict]) -> Any:
+            kwargs: Dict[str, Any] = {"model": model, "max_output_tokens": max_out, "tools": use_tools}
+            # Only set reasoning effort if it looks valid; otherwise omit.
+            if str(effort).lower() in ("auto", "low", "medium", "high"):
+                kwargs["reasoning"] = {"effort": str(effort).lower()}
 
             if prev_id is None:
                 kwargs["input"] = [
@@ -705,8 +707,21 @@ def askraven_agent_chat(
                 kwargs["previous_response_id"] = prev_id
                 kwargs["input"] = pending_tool_results
 
-            resp = client.responses.create(**kwargs)
+            return client.responses.create(**kwargs)
+
+        try:
+            resp = _responses_create_with_tools(tools)
         except Exception as e:
+            # Common failure mode: wrong built-in web tool name. Retry once with preview.
+            if enable_web:
+                try:
+                    tools2 = [t for t in tools if not (isinstance(t, dict) and t.get("type") == "web_search")]
+                    tools2.append({"type": "web_search_preview"})
+                    resp = _responses_create_with_tools(tools2)
+                except Exception as e2:
+                    LOG.warning("AskRaven agent: responses.create failed (tools): %s", e2)
+                    return call_openai(question=question, context_pack=ctx, images=images)
+            LOG.warning("AskRaven agent: responses.create failed: %s", e)
             # If Responses API is unavailable, fall back to the existing single-shot call.
             return call_openai(question=question, context_pack=ctx, images=images)
 
@@ -1007,6 +1022,23 @@ def fallback_briefing(*, question: str, context_pack: Dict[str, Any]) -> str:
                     bit += f" · {when}"
                 lines.append(f"- {bit}")
             lines.append("")
+
+    # --- ORATS chain prefetch (if present) ---
+    chain_pf = context_pack.get("oratsChainPrefetch") if isinstance(context_pack.get("oratsChainPrefetch"), dict) else None
+    if chain_pf and chain_pf.get("ok") and isinstance(chain_pf.get("top"), dict):
+        top = chain_pf.get("top") or {}
+        lines.append("## ORATS chain slice (prefetch)")
+        lines.append(f"- Expiry: {chain_pf.get('expiry') or '—'} · rowsUsed={chain_pf.get('rowsUsed')}")
+        if isinstance(top.get("putOI"), list) and top.get("putOI"):
+            p0 = top.get("putOI")[0]
+            lines.append(f"- Put OI wall (top): strike={p0.get('strike')} · putOpenInterest={_fmt_num(p0.get('putOpenInterest'), 0)}")
+        if isinstance(top.get("callOI"), list) and top.get("callOI"):
+            c0 = top.get("callOI")[0]
+            lines.append(f"- Call OI wall (top): strike={c0.get('strike')} · callOpenInterest={_fmt_num(c0.get('callOpenInterest'), 0)}")
+        if isinstance(top.get("gamma"), list) and top.get("gamma"):
+            g0 = top.get("gamma")[0]
+            lines.append(f"- Gamma peak (top): strike={g0.get('strike')} · gamma={_fmt_num(g0.get('gamma'), 6)}")
+        lines.append("")
 
     lines.append("## What can gap the open (framework)")
     lines.append("- Macro prints (CPI/FOMC/NFP minutes/claims, etc.), surprise policy headlines, geopolitical shocks, and big single-name earnings warnings are the classic gap drivers.")
