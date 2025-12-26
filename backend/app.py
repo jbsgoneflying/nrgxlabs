@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import time
+import datetime as dt
 from pathlib import Path
 import threading
 from dataclasses import replace
@@ -290,6 +291,90 @@ class ChatMessageRequest(BaseModel):
     message: str = Field(..., description="User question")
     image_ids: list[str] = Field(default_factory=list)
 
+def _truncate(s: str, n: int) -> str:
+    t = str(s or "").replace("\n", " ").strip()
+    return (t[:n] + "…") if len(t) > n else t
+
+
+def _benzinga_news_context(*, engine: str, report: dict, question: str) -> dict | None:
+    """
+    Best-effort, recent Benzinga news snapshot for AskRaven.
+    Uses BenzingaClient's internal cache, and we also keep our own tiny TTL in Redis if available.
+    """
+    bz = _get_benzinga_client_optional()
+    if bz is None:
+        return None
+
+    eng = str(engine or "").strip().lower()
+    q = str(question or "").lower()
+    wants_news = any(k in q for k in ("news", "headline", "headlines", "pre-market", "premarket", "gap", "catalyst", "catalysts"))
+    # Always attach for Engine 2 (market context), or when explicitly requested.
+    if not (wants_news or eng == "engine2"):
+        return None
+
+    tickers = None
+    if eng == "engine1":
+        t = str((report or {}).get("ticker") or "").strip().upper()
+        tickers = t if t else None
+    else:
+        # SPX often isn't a standard equity ticker in news feeds; SPY reliably is.
+        tickers = "SPY,SPX"
+
+    now = dt.datetime.utcnow().date()
+    date_to = now.isoformat()
+    date_from = (now - dt.timedelta(days=2)).isoformat()
+    cache_key = f"benzinga_news:{tickers}:{date_from}:{date_to}"
+
+    if _store is not None:
+        cached = _store.get_json(cache_key)
+        if isinstance(cached, dict) and cached.get("items"):
+            return cached
+
+    try:
+        resp = bz.news(
+            tickers=tickers,
+            date_from=date_from,
+            date_to=date_to,
+            page=0,
+            page_size=50,
+            sort="updated",
+        )
+        rows = resp.rows or []
+    except Exception:
+        rows = []
+
+    items = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        title = _truncate(str(r.get("title") or r.get("headline") or ""), 220)
+        if not title:
+            continue
+        items.append(
+            {
+                "title": title,
+                "created": _truncate(str(r.get("created") or r.get("created_at") or r.get("published") or ""), 40),
+                "updated": _truncate(str(r.get("updated") or r.get("updated_at") or ""), 40),
+                "url": _truncate(str(r.get("url") or ""), 260),
+                "source": _truncate(str(r.get("source") or ""), 40),
+                "summary": _truncate(str(r.get("summary") or r.get("teaser") or ""), 280),
+            }
+        )
+        if len(items) >= 12:
+            break
+
+    out = {
+        "enabled": True,
+        "provider": "benzinga",
+        "tickers": tickers,
+        "window": {"from": date_from, "to": date_to},
+        "items": items,
+        "notes": ["Recent Benzinga headlines snapshot (best-effort)."],
+    }
+    if _store is not None:
+        _store.set_json(cache_key, out, ttl_s=15 * 60)  # 15 min
+    return out
+
 
 @app.post("/api/chat/upload")
 async def chat_upload(files: list[UploadFile] = File(...)):
@@ -363,6 +448,10 @@ async def chat_message(req: ChatMessageRequest):
         images.append(UploadedImage(content=b, content_type=str(ct), image_id=str(image_id)))
 
     ctx = build_context_pack(engine=engine, report=report)
+    # Add Benzinga News snapshot (market/ticker) for “news of the day” style questions.
+    news_ctx = _benzinga_news_context(engine=engine, report=report, question=msg)
+    if news_ctx is not None:
+        ctx["news"] = news_ctx
     try:
         reply = call_openai(question=msg, context_pack=ctx, images=images)
     except RuntimeError as e:
