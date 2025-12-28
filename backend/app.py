@@ -623,7 +623,16 @@ def calendar_debug_earnings(
         max_pages = 50
         rows_all: list[dict] = []
         for page in range(max_pages):
-            resp = bz.calendar_earnings(date_from=d0, date_to=d1, pagesize=pagesize, page=page)
+            # IMPORTANT: use Benzinga server-side ticker filtering when provided.
+            # Some feeds/plans can return sparse results for broad date-range queries
+            # but return full coverage for per-ticker queries.
+            resp = bz.calendar_earnings(
+                tickers=(t if t else None),
+                date_from=d0,
+                date_to=d1,
+                pagesize=pagesize,
+                page=page,
+            )
             batch = resp.rows or []
             rows_all.extend([r for r in batch if isinstance(r, dict)])
             if len(batch) < pagesize:
@@ -633,6 +642,7 @@ def calendar_debug_earnings(
         out_rows: list[dict] = []
         for r in rows_all:
             sym = str(r.get("ticker") or r.get("symbol") or "").strip().upper()
+            # If server-side tickers was used, sym should already match; keep this as a safety net.
             if t and sym != t:
                 continue
             out_rows.append(
