@@ -284,6 +284,14 @@ def build_calendar_payload(
         debug_counts["snapshotAvailable"] = True
         debug_counts["snapshotEtDate"] = str(meta.get("etDate") or "")[:10] if meta else None
         debug_counts["snapshotUniverseSize"] = meta.get("universeSize") if meta else None
+        try:
+            est_n = int(meta.get("estimatedDatesUsed") or 0)
+        except Exception:
+            est_n = 0
+        if est_n > 0:
+            notes.append(
+                f"Earnings dates are estimated for {est_n} tickers (ORATS returned no exact nextErn date; using weeks/days-to-earnings). Treat as approximate."
+            )
         tickers_in_range = 0
         for d0 in day_keys:
             obj = by_date.get(d0) if isinstance(by_date, dict) else None

@@ -76,21 +76,56 @@ class RefreshResult:
     notes: List[str]
 
 
-def _fetch_next_earnings_from_orats(client: OratsClient, *, ticker: str) -> Tuple[Optional[str], str]:
+def _is_placeholder_date(s: str) -> bool:
+    d = str(s or "").strip()
+    return d in ("", "0", "0000-00-00", "0000-00-00T00:00:00", "0000-00-00 00:00:00")
+
+
+def _to_int(v: Any) -> Optional[int]:
+    try:
+        if v is None:
+            return None
+        x = int(float(v))
+        return x
+    except Exception:
+        return None
+
+
+def _fetch_next_earnings_from_orats(
+    client: OratsClient,
+    *,
+    ticker: str,
+    today: dt.date,
+) -> Tuple[Optional[dt.date], str, bool]:
     """
-    Return (nextErnDate, timing) from ORATS /cores.
+    Return (nextErnDate, timing, estimated) from ORATS /cores.
     timing in AMC|BMO|UNK
     """
     fields = "ticker,nextErn,nextErnTod,daysToNextErn,wksNextErn"
     rows = client.cores(ticker=str(ticker).upper(), fields=fields).rows or []
     row = rows[0] if rows else {}
     if not isinstance(row, dict):
-        return None, "UNK"
+        return None, "UNK", False
     d0 = str(row.get("nextErn") or "")[:10]
     timing = classify_timing(row.get("nextErnTod"))
     if timing not in ("AMC", "BMO"):
         timing = "UNK"
-    return (d0 if d0 else None), timing
+
+    # Primary: exact date
+    if not _is_placeholder_date(d0):
+        d = _parse_date(d0)
+        if d is not None:
+            return d, timing, False
+
+    # Fallback: approximate from days/weeks-to-earnings if date is missing on this ORATS plan.
+    days = _to_int(row.get("daysToNextErn"))
+    wks = _to_int(row.get("wksNextErn"))
+    if (days is None or days <= 0) and (wks is not None and wks > 0):
+        days = int(wks) * 7
+    if days is not None and days > 0:
+        return today + dt.timedelta(days=int(days)), timing, True
+
+    return None, timing, False
 
 
 def build_earnings_snapshot(
@@ -110,6 +145,7 @@ def build_earnings_snapshot(
     by_date: Dict[str, Dict[str, List[str]]] = {}
     calls = 0
     used = 0
+    est_used = 0
     errors = 0
     notes: List[str] = []
 
@@ -118,12 +154,9 @@ def build_earnings_snapshot(
         if not sym:
             continue
         try:
-            d0, timing = _fetch_next_earnings_from_orats(client, ticker=sym)
+            d, timing, est = _fetch_next_earnings_from_orats(client, ticker=sym, today=today)
             calls += 1
-            if not d0:
-                continue
-            d = _parse_date(d0)
-            if d is None:
+            if not d:
                 continue
             if d < today or d > end:
                 continue
@@ -132,6 +165,8 @@ def build_earnings_snapshot(
                 by_date[k] = {"BMO": [], "AMC": [], "UNK": []}
             by_date[k][timing].append(sym)
             used += 1
+            if est:
+                est_used += 1
         except Exception:
             errors += 1
             continue
@@ -148,6 +183,7 @@ def build_earnings_snapshot(
         "universeSize": int(len(universe)),
         "oratsCalls": int(calls),
         "rowsUsed": int(used),
+        "estimatedDatesUsed": int(est_used),
         "errors": int(errors),
         "horizonDays": int(horizon_days),
         "notes": notes,
