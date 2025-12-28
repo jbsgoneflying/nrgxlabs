@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import sys
 import sys
 
 try:
@@ -11,6 +13,13 @@ try:
     load_dotenv()
 except Exception:
     pass
+
+# Ensure repo root is on sys.path when running as a script (cron-friendly).
+# When executed as `python3 scripts/refresh_calendar_snapshot.py`, Python adds the
+# script directory (`.../scripts`) to sys.path, not the repo root.
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 from backend.orats_client import OratsClient
 from backend.redis_store import get_store_optional
