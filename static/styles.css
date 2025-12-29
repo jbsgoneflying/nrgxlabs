@@ -1260,9 +1260,12 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   height: 44px;
   object-fit: contain;
   border-radius: 12px;
-  background: rgba(255,255,255,0.92);
+  /* Slightly darker than the card so white/transparent logos (e.g. BA, NKE) remain visible. */
+  background: rgba(245,245,247,0.98);
   border: 1px solid rgba(15, 23, 42, 0.10);
   box-shadow: 0 10px 26px rgba(15, 20, 30, 0.08);
+  /* Adds contrast for light/white marks on transparent PNGs. */
+  filter: drop-shadow(0 1px 2px rgba(15, 20, 30, 0.22));
 }
 
 .calTile--noLogo .calTileLogo { display: none; }
@@ -1284,9 +1287,10 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   height: 30px;
   object-fit: contain;
   border-radius: 10px;
-  background: rgba(255,255,255,0.92);
+  background: rgba(245,245,247,0.98);
   border: 1px solid rgba(15, 23, 42, 0.10);
   box-shadow: 0 10px 18px rgba(15, 20, 30, 0.06);
+  filter: drop-shadow(0 1px 2px rgba(15, 20, 30, 0.22));
 }
 
 .popoverTitleRow {
@@ -1301,8 +1305,9 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   height: 34px;
   object-fit: contain;
   border-radius: 12px;
-  background: rgba(255,255,255,0.92);
+  background: rgba(245,245,247,0.98);
   border: 1px solid rgba(15, 23, 42, 0.10);
+  filter: drop-shadow(0 1px 2px rgba(15, 20, 30, 0.22));
 }
 
 .calEventPill {
