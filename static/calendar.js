@@ -659,8 +659,16 @@ async function refresh() {
 function shiftAnchor(dir) {
   const a = parseIsoDate(state.anchor) || new Date();
   if (state.view === "month") {
+    // Month shifting: clamp the day-of-month to avoid JS Date rollover
+    // (e.g. Jan 31 + 1 month => Mar 3 because Feb doesn't have 31).
     const dt = new Date(a);
+    const origDay = dt.getDate();
+    dt.setDate(1); // safe pivot day
     dt.setMonth(dt.getMonth() + dir);
+    const y = dt.getFullYear();
+    const m = dt.getMonth(); // 0-based
+    const lastDay = new Date(y, m + 1, 0).getDate();
+    dt.setDate(Math.min(origDay, lastDay));
     state.anchor = isoDate(dt);
   } else if (state.view === "week") {
     state.anchor = isoDate(addDays(a, 7 * dir));

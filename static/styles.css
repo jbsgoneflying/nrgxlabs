@@ -1242,6 +1242,24 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   font-size: 10px;
 }
 
+.calGrid--week .calTile,
+.calGrid--day .calTile {
+  /* Match month view density for visual consistency across views. */
+  padding: 6px 8px;
+  gap: 4px;
+}
+
+.calGrid--week .calTileLogo,
+.calGrid--day .calTileLogo {
+  width: 58px;
+  height: 58px;
+}
+
+.calGrid--week .calTileTicker,
+.calGrid--day .calTileTicker {
+  font-size: 10px;
+}
+
 .calTile {
   appearance: none;
   border: 1px solid var(--border);
