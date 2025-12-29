@@ -90,7 +90,40 @@ const state = {
   engine1Only: false,
   layers: { holiday: true, earlyClose: true, fed: true, econ: true, treasury: true, opex: true },
   lastPayload: null,
+  rankCache: {},
 };
+
+function _allocMonthCaps({ bmoN, amcN, unkN }, totalCap = 8) {
+  // Month view goal: keep each day to ~4 rows max.
+  // With a 2-column tile grid, that means totalCap=8 tiles across all timing groups.
+  const cap = Math.max(0, Number(totalCap) || 0);
+  const groups = [
+    { k: "BMO", n: Math.max(0, Number(bmoN) || 0) },
+    { k: "AMC", n: Math.max(0, Number(amcN) || 0) },
+    { k: "UNK", n: Math.max(0, Number(unkN) || 0) },
+  ].filter(g => g.n > 0);
+
+  const out = { BMO: 0, AMC: 0, UNK: 0 };
+  if (!cap || groups.length === 0) return out;
+  if (groups.length === 1) {
+    out[groups[0].k] = cap;
+    return out;
+  }
+
+  // Even split, then allocate leftovers in priority order: BMO -> AMC -> UNK.
+  const base = Math.floor(cap / groups.length);
+  let left = cap - base * groups.length;
+  const order = ["BMO", "AMC", "UNK"];
+  for (const g of groups) out[g.k] = base;
+  for (const k of order) {
+    if (left <= 0) break;
+    if (out[k] > 0 || groups.some(g => g.k === k)) {
+      out[k] += 1;
+      left -= 1;
+    }
+  }
+  return out;
+}
 
 function setStatus(msg, isError = false) {
   const el = $("status");
@@ -215,6 +248,10 @@ function render(payload) {
     const amc = Array.isArray(earnings?.AMC) ? earnings.AMC : [];
     const unk = Array.isArray(earnings?.UNK) ? earnings.UNK : [];
 
+    const caps = (view === "month")
+      ? _allocMonthCaps({ bmoN: bmo.length, amcN: amc.length, unkN: unk.length }, 8)
+      : { BMO: 14, AMC: 14, UNK: 14 };
+
     const evShown = (view === "month" && evs.length > 2) ? evs.slice(0, 2) : evs;
     const evMore = (view === "month" && evs.length > 2) ? (evs.length - 2) : 0;
     const evHtml = evs.length
@@ -224,9 +261,9 @@ function render(payload) {
         </div>`
       : "";
 
-    const grp = (label, rows, cls) => {
+    const grp = (label, rows, cls, cap0) => {
       if (!rows.length) return "";
-      const max = view === "month" ? 8 : 14;
+      const max = Math.max(0, Number(cap0) || 0);
       const shown = rows.slice(0, max);
       const rest = rows.length - shown.length;
       return `
@@ -259,9 +296,9 @@ function render(payload) {
         </div>
         ${evHtml}
         <div class="calEarnings">
-          ${grp("Before Open", bmo, "bmo")}
-          ${grp("After Close", amc, "amc")}
-          ${grp("Other", unk, "unk")}
+          ${grp("Before Open", bmo, "bmo", caps.BMO)}
+          ${grp("After Close", amc, "amc", caps.AMC)}
+          ${grp("Other", unk, "unk", caps.UNK)}
         </div>
       </div>
     `);
@@ -282,13 +319,14 @@ function render(payload) {
   grid.querySelectorAll(".calTile").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const ticker = String(btn.getAttribute("data-ticker") || "").toUpperCase();
+      const date = String(btn.getAttribute("data-date") || "");
       if (!ticker) return;
-      await openTickerPopover(ticker);
+      await openTickerPopover(ticker, date);
     });
   });
 }
 
-async function openTickerPopover(ticker) {
+async function openTickerPopover(ticker, date = "") {
   const popTitle = $("popTitle");
   const popBody = $("popBody");
   const popLink = $("popBreachLink");
@@ -305,8 +343,96 @@ async function openTickerPopover(ticker) {
       popLogo.classList.add("hidden");
     }
   }
-  if (popBody) popBody.innerHTML = `<div class="muted">Rank disabled for now. Open Engine 1 for full details.</div>`;
-  if (popLink) popLink.href = `/breach?ticker=${encodeURIComponent(ticker)}`;
+  if (popBody) {
+    const src = state?.lastPayload?.meta?.counts?.snapshotSource || "—";
+    const et = state?.lastPayload?.meta?.counts?.snapshotEtDate || "—";
+    popBody.innerHTML = `
+      <div class="muted" style="margin-bottom:10px;">
+        Earnings date: <span class="mono">${escapeHtml(String(date || "—").slice(0, 10))}</span>
+      </div>
+      <div class="muted" style="margin-bottom:10px;">
+        Source: <span class="mono">${escapeHtml(String(src || "—"))}</span> · snapshotET: <span class="mono">${escapeHtml(String(et || "—"))}</span>
+      </div>
+      <div class="muted" style="margin-bottom:10px;">
+        Optional: compute a lightweight “earnings IC rank” for this ticker (on-demand; cached).
+      </div>
+      <div id="popRankBox" class="miniGrid"></div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+        <button id="popRankBtn" class="primaryButton" type="button">Compute quick score</button>
+        <button id="popRankClear" class="linkButton" type="button">Clear</button>
+      </div>
+      <div class="finePrint muted" style="margin-top:8px;">
+        This is a pre-screen only. Use Engine 1 for the full report (MC + trade builder).
+      </div>
+    `;
+  }
+
+  // Deep link: open Engine 1 with MC enabled + autorun the report.
+  if (popLink) {
+    const qs = new URLSearchParams({
+      ticker: String(ticker || "").toUpperCase(),
+      mc: "1",
+      mc_cond_regime: "1",
+      mc_cond_quarter: "1",
+      autorun: "1",
+    });
+    popLink.href = `/breach?${qs.toString()}`;
+  }
+
+  // Wire rank button (on-demand per ticker)
+  const box = $("popRankBox");
+  const btn = $("popRankBtn");
+  const clear = $("popRankClear");
+  const renderRank = (r) => {
+    if (!box) return;
+    if (!r || typeof r !== "object") {
+      box.innerHTML = `<div class="muted">—</div>`;
+      return;
+    }
+    const grade = r.grade || "—";
+    const score = (r.score100 !== null && r.score100 !== undefined) ? Number(r.score100).toFixed(1) : "—";
+    const em = (r.frontWeekEmPct !== null && r.frontWeekEmPct !== undefined) ? `${Number(r.frontWeekEmPct).toFixed(2)}%` : "—";
+    const br15 = r?.breachRatePct?.k1_5;
+    const br20 = r?.breachRatePct?.k2_0;
+    const br15Txt = (br15 !== null && br15 !== undefined) ? `${Number(br15).toFixed(1)}%` : "—";
+    const br20Txt = (br20 !== null && br20 !== undefined) ? `${Number(br20).toFixed(1)}%` : "—";
+    box.innerHTML = `
+      <div class="k">Condor rank</div><div class="v"><span class="pill pill--mini neutral">${escapeHtml(String(grade))}</span> <span class="mono">${escapeHtml(String(score))}</span></div>
+      <div class="k">Front-week EM</div><div class="v mono">${escapeHtml(em)}</div>
+      <div class="k">Breach rate</div><div class="v mono">k=1.5 ${escapeHtml(br15Txt)} · k=2.0 ${escapeHtml(br20Txt)}</div>
+      <div class="k">As-of</div><div class="v mono">${escapeHtml(String(r.asOfDate || "—"))}</div>
+    `;
+  };
+
+  if (box) renderRank(state.rankCache[String(ticker || "").toUpperCase()] || null);
+
+  if (btn) {
+    btn.onclick = async () => {
+      const t = String(ticker || "").toUpperCase();
+      if (!t) return;
+      if (state.rankCache[t]) {
+        renderRank(state.rankCache[t]);
+        return;
+      }
+      if (box) box.innerHTML = `<div class="muted">Loading…</div>`;
+      try {
+        // Keep it lightweight: smaller lookback + fewer events than full Engine 1 default.
+        const r = await fetchJson(`/api/condor-rank?ticker=${encodeURIComponent(t)}&n=12&years=5`, { timeoutMs: 45000 });
+        state.rankCache[t] = r;
+        renderRank(r);
+      } catch (e) {
+        if (box) box.innerHTML = `<div class="muted">Error: ${escapeHtml(String(e?.message || e))}</div>`;
+      }
+    };
+  }
+  if (clear) {
+    clear.onclick = () => {
+      const t = String(ticker || "").toUpperCase();
+      if (t) delete state.rankCache[t];
+      renderRank(null);
+    };
+  }
+
   openPopover(true);
 }
 

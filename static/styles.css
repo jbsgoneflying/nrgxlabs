@@ -1219,6 +1219,13 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   gap: 8px;
 }
 
+.calGrid--month .calTiles {
+  /* Month grid cells are narrow; use a consistent 2-column tile layout (≈4 rows max when capped). */
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .calTile {
   appearance: none;
   border: 1px solid var(--border);
@@ -1238,6 +1245,7 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   justify-content: center;
   gap: 6px;
   min-width: 66px;
+  width: 100%;
 }
 
 .calTile:hover {

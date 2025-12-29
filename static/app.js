@@ -1110,10 +1110,16 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   })();
 
+  // Query params (calendar deep-links)
+  const qs = new URLSearchParams(window.location.search || "");
+  const qsTicker = (qs.get("ticker") || "").trim().toUpperCase();
+  const qsMc = String(qs.get("mc") || "").trim().toLowerCase();
+  const qsAutorun = String(qs.get("autorun") || "").trim().toLowerCase();
+
   const form = $("form");
   const ticker = $("ticker");
   const kSel = $("k");
-  ticker.value = (ticker.value || "AAPL").toUpperCase();
+  ticker.value = (qsTicker || ticker.value || "AAPL").toUpperCase();
   setTickerLogo(ticker.value);
 
   ticker.addEventListener("input", () => {
@@ -1347,6 +1353,13 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // Apply mc=1 from querystring without triggering a compute until we decide to autorun.
+  if (mcToggle && (qsMc === "1" || qsMc === "true" || qsMc === "yes" || qsMc === "on")) {
+    mcEnabledPref = true;
+    mcToggle.checked = true;
+    if (mcGroup) mcGroup.classList.toggle("hidden", false);
+  }
+
   if (mcDate) {
     mcDate.addEventListener("change", async () => {
       mcEventOverride.date = mcDate.value || null;
@@ -1366,6 +1379,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // AskRaven removed
   initTooltips();
+
+  // Optional auto-run for calendar deep-links: /breach?ticker=...&mc=1&autorun=1
+  if (qsAutorun === "1" || qsAutorun === "true" || qsAutorun === "yes" || qsAutorun === "on") {
+    // Kick once on page load. Respect "busy" guardrails.
+    if (!isBusy) runCalculation();
+  }
 });
 
 
