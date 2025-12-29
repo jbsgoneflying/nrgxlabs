@@ -130,6 +130,11 @@ body {
   padding: 2px 0;
 }
 
+/* Engine 2: underlying badge row */
+.controlBarForm.controlBarForm--engine2 .tickerInputRow {
+  gap: 10px;
+}
+
 .controlBarForm.controlBarForm--engine2 .controlGroup {
   min-width: 0; /* override base min-width to prevent overflow */
 }
