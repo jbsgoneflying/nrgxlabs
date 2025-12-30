@@ -401,8 +401,29 @@
               </span>
             </h2>
             <div class="sectionMeta muted" id="gexMeta">—</div>
+            <div class="tbInputs" style="justify-content:flex-end; gap:8px;">
+              <button id="gexViewComposite" class="chipToggle isOn" type="button" aria-pressed="true">Composite</button>
+              <button id="gexViewRaw" class="chipToggle" type="button" aria-pressed="false">Raw grid</button>
+              <span class="spacerDot">·</span>
+              <button id="gexModeNet" class="chipToggle isOn" type="button" aria-pressed="true">Net</button>
+              <button id="gexModeSlope" class="chipToggle" type="button" aria-pressed="false">Slope</button>
+            </div>
           </div>
           <div class="chartCard">
+            <div class="gexMetrics" aria-label="Distance-to-failure and stability metrics">
+              <div class="gexMetric">
+                <div class="gexMetricK">Downside gamma-flip</div>
+                <div class="gexMetricV mono"><span id="gexDownPts">—</span> pts <span class="muted">(<span id="gexDownEm">—</span>× EM)</span></div>
+              </div>
+              <div class="gexMetric">
+                <div class="gexMetricK">Upside gamma-flip</div>
+                <div class="gexMetricV mono"><span id="gexUpPts">—</span> pts <span class="muted">(<span id="gexUpEm">—</span>× EM)</span></div>
+              </div>
+              <div class="gexMetric">
+                <div class="gexMetricK">Weekly stability</div>
+                <div class="gexMetricV"><span id="gexStability" class="gexStabilityChip">—</span></div>
+              </div>
+            </div>
             <div id="gexHeatmap" class="gexHeatmap" aria-label="SPX net $GEX heat map"></div>
             <div id="gexHeatTip" class="chartTip hidden" role="tooltip"></div>
             <div id="gexNote" class="metricCaption muted">—</div>

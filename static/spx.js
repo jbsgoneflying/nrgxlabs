@@ -79,6 +79,11 @@ const gammaState = {
   layers: { putWall: true, callWall: true, clusters: true, gammaPeaks: true, gammaFlip: true },
 };
 
+const gexState = {
+  view: "composite", // composite|raw
+  mode: "net", // net|slope
+};
+
 function setLoading(isLoading) {
   const btn = $("runBtn");
   if (!btn) return;
@@ -213,6 +218,49 @@ function initGammaMapUI() {
   });
 }
 
+function initGexHeatmapUI() {
+  const btnComp = $("gexViewComposite");
+  const btnRaw = $("gexViewRaw");
+  const btnNet = $("gexModeNet");
+  const btnSlope = $("gexModeSlope");
+
+  const setView = (v) => {
+    gexState.view = (v === "raw") ? "raw" : "composite";
+    if (btnComp) {
+      const on = gexState.view === "composite";
+      btnComp.classList.toggle("isOn", on);
+      btnComp.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    if (btnRaw) {
+      const on = gexState.view === "raw";
+      btnRaw.classList.toggle("isOn", on);
+      btnRaw.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    // Re-fetch so backend display hints + cache key align (cheap; cached).
+    loadGammaMap();
+  };
+
+  const setMode = (m) => {
+    gexState.mode = (m === "slope") ? "slope" : "net";
+    if (btnNet) {
+      const on = gexState.mode === "net";
+      btnNet.classList.toggle("isOn", on);
+      btnNet.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    if (btnSlope) {
+      const on = gexState.mode === "slope";
+      btnSlope.classList.toggle("isOn", on);
+      btnSlope.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    loadGammaMap();
+  };
+
+  if (btnComp) btnComp.addEventListener("click", () => setView("composite"));
+  if (btnRaw) btnRaw.addEventListener("click", () => setView("raw"));
+  if (btnNet) btnNet.addEventListener("click", () => setMode("net"));
+  if (btnSlope) btnSlope.addEventListener("click", () => setMode("slope"));
+}
+
 async function loadGammaMap() {
   const meta = $("gammaMeta");
   const note = $("gammaNote");
@@ -223,7 +271,13 @@ async function loadGammaMap() {
     if (meta) meta.textContent = "Loading…";
     if (note) note.textContent = "—";
     const v = gammaState.view;
-    const payload = await fetchJson(`/api/spx-levels?view=${encodeURIComponent(v)}&points=90&window_days=180`, { timeoutMs: 45000 });
+    const payload = await fetchJson(
+      `/api/spx-levels?view=${encodeURIComponent(v)}&points=90&window_days=180&include_heatmap=1`
+      + `&heatmap_view=${encodeURIComponent(gexState.view)}`
+      + `&heatmap_mode=${encodeURIComponent(gexState.mode)}`
+      + `&slope_window=5&flip_adjacent_n=5`,
+      { timeoutMs: 45000 }
+    );
     lastGammaPayload = payload;
     renderGammaMap(payload);
     renderGexHeatmap(payload);
@@ -241,16 +295,37 @@ function renderGexHeatmap(payload) {
   const meta = $("gexMeta");
   const note = $("gexNote");
   const tip = $("gexHeatTip");
+  const downPtsEl = $("gexDownPts");
+  const downEmEl = $("gexDownEm");
+  const upPtsEl = $("gexUpPts");
+  const upEmEl = $("gexUpEm");
+  const stabEl = $("gexStability");
   if (!wrap) return;
 
   const heat = payload?.levels?.gexHeatmap || null;
   const enabled = !!heat?.enabled;
-  const expiries = Array.isArray(heat?.expiries) ? heat.expiries : [];
-  const strikes = Array.isArray(heat?.strikes) ? heat.strikes : [];
-  const mat = Array.isArray(heat?.netDollarGex) ? heat.netDollarGex : [];
   const spot = Number(heat?.spot);
   const band = Number(heat?.bandPct);
   const wmode = String(heat?.weightingMode || "");
+  const denom = Number(heat?.scaleDenom);
+  const ivUsed = Number(heat?.atmIvUsedPct);
+
+  // Metrics strip
+  const m = heat?.metrics || {};
+  if (downPtsEl) downPtsEl.textContent = Number.isFinite(Number(m?.downsideDistancePts)) ? fmt2(m.downsideDistancePts) : "—";
+  if (upPtsEl) upPtsEl.textContent = Number.isFinite(Number(m?.upsideDistancePts)) ? fmt2(m.upsideDistancePts) : "—";
+  if (downEmEl) downEmEl.textContent = Number.isFinite(Number(m?.downsideDistanceEm)) ? fmt2(m.downsideDistanceEm) : "—";
+  if (upEmEl) upEmEl.textContent = Number.isFinite(Number(m?.upsideDistanceEm)) ? fmt2(m.upsideDistanceEm) : "—";
+  const st = heat?.stability || {};
+  if (stabEl) {
+    const lab = String(st?.label || "—");
+    stabEl.textContent = lab;
+    stabEl.classList.toggle("isStable", lab === "Stable");
+    stabEl.classList.toggle("isAsym", lab === "Asymmetric");
+    stabEl.classList.toggle("isFragile", lab === "Fragile");
+    const rs = Array.isArray(st?.reasons) ? st.reasons.filter(Boolean) : [];
+    stabEl.title = rs.join("\n");
+  }
 
   const hideTip = () => { if (tip) tip.classList.add("hidden"); };
   const showTip = (html, x, y) => {
@@ -264,7 +339,31 @@ function renderGexHeatmap(payload) {
     tip.style.top = `${top}px`;
   };
 
-  if (!payload || !enabled || !expiries.length || !strikes.length || !mat.length) {
+  // Determine which dataset to render
+  let yLabels = [];
+  let strikes = [];
+  let mat = [];
+  let rowMeta = []; // optional per-row meta for tooltip (e.g. effectiveDte / EM)
+
+  const raw = heat?.raw || {};
+  const comp = heat?.composite || {};
+  if (gexState.view === "raw") {
+    const expiries = Array.isArray(raw?.expiries) ? raw.expiries : [];
+    strikes = Array.isArray(raw?.strikes) ? raw.strikes : [];
+    const net = Array.isArray(raw?.netDollarGex) ? raw.netDollarGex : [];
+    const slope = Array.isArray(raw?.slopeNetDollarGex) ? raw.slopeNetDollarGex : [];
+    mat = (gexState.mode === "slope") ? slope : net;
+    yLabels = expiries.map((e) => String(e).slice(5)); // MM-DD
+    rowMeta = expiries.map((e) => ({ expiry: String(e) }));
+  } else {
+    const buckets = Array.isArray(comp?.buckets) ? comp.buckets : [];
+    strikes = Array.isArray(comp?.strikes) ? comp.strikes : [];
+    yLabels = buckets.map((b) => String(b?.label || b?.key || "—"));
+    rowMeta = buckets.map((b) => ({ key: b?.key, effectiveDte: b?.effectiveDte, expectedMovePts: b?.expectedMovePts }));
+    mat = buckets.map((b) => (gexState.mode === "slope") ? (b?.slopeNetDollarGex || []) : (b?.netDollarGex || []));
+  }
+
+  if (!payload || !enabled || !yLabels.length || !strikes.length || !mat.length) {
     wrap.innerHTML = `<div class="muted" style="padding:14px;">Run Engine 2 to load the heat map.</div>`;
     if (meta) meta.textContent = "—";
     if (note) {
@@ -280,8 +379,9 @@ function renderGexHeatmap(payload) {
   for (let i = 0; i < mat.length; i++) {
     const row = Array.isArray(mat[i]) ? mat[i] : [];
     for (let j = 0; j < row.length; j++) {
-      const v = Number(row[j]);
-      if (!Number.isFinite(v)) continue;
+      const v0 = Number(row[j]);
+      if (!Number.isFinite(v0)) continue;
+      const v = (Number.isFinite(denom) && denom > 0) ? (v0 / denom) : v0; // normalization is render-only
       maxAbs = Math.max(maxAbs, Math.abs(v));
     }
   }
@@ -289,7 +389,7 @@ function renderGexHeatmap(payload) {
 
   const w = Math.max(320, wrap.clientWidth || 640);
   const pad = { l: 74, r: 10, t: 10, b: 26 };
-  const rows = expiries.length;
+  const rows = yLabels.length;
   const cols = strikes.length;
   const cellH = 16;
   const cellW = Math.max(6, Math.floor((w - pad.l - pad.r) / Math.max(1, cols)));
@@ -301,12 +401,13 @@ function renderGexHeatmap(payload) {
   const scale = (v) => {
     const n = Number(v);
     if (!Number.isFinite(n)) return 0;
-    const a = Math.abs(n);
+    const nn = (Number.isFinite(denom) && denom > 0) ? (n / denom) : n; // normalization is render-only
+    const a = Math.abs(nn);
     // compress large dynamic range
     const t = Math.log10(1 + a / 1e6);
     const tMax = Math.log10(1 + maxAbs / 1e6);
     const u = tMax > 0 ? (t / tMax) : 0;
-    return (n < 0 ? -u : u);
+    return (nn < 0 ? -u : u);
   };
 
   const colorFor = (v) => {
@@ -325,7 +426,8 @@ function renderGexHeatmap(payload) {
 
   if (meta) {
     const b = Number.isFinite(band) ? `${Math.round(band * 100)}%` : "—";
-    meta.textContent = `spot=${Number.isFinite(spot) ? _fmtNum(spot, 2) : "—"} · band=±${b} · mode=${wmode || "—"} · rows=${rows} · cols=${cols}`;
+    const ivTxt = Number.isFinite(ivUsed) ? `${ivUsed.toFixed(2)}%` : "—";
+    meta.textContent = `spot=${Number.isFinite(spot) ? _fmtNum(spot, 2) : "—"} · band=±${b} · iv=${ivTxt} · mode=${wmode || "—"} · rows=${rows} · cols=${cols}`;
   }
   if (note) {
     const warns = Array.isArray(heat?.warnings) ? heat.warnings.filter(Boolean) : [];
@@ -333,15 +435,40 @@ function renderGexHeatmap(payload) {
     note.textContent = warns[0] || notes[0] || "Live, informational only.";
   }
 
-  const yLabels = expiries.map((e) => String(e).slice(5)); // MM-DD
   const tickEvery = Math.max(1, Math.round(cols / 6));
   const xTicks = strikes.map((s, i) => ({ s: Number(s), i })).filter(t => (t.i % tickEvery) === 0);
+
+  const bnds = heat?.boundaries || {};
+  const downB = Number(bnds?.downsideAccelerationBoundaryStrike);
+  const upB = Number(bnds?.upsideAccelerationBoundaryStrike);
+  const xForStrike = (k) => {
+    const kk = Number(k);
+    if (!Number.isFinite(kk)) return null;
+    let best = null;
+    let bestD = null;
+    for (let i = 0; i < strikes.length; i++) {
+      const s = Number(strikes[i]);
+      if (!Number.isFinite(s)) continue;
+      const d = Math.abs(s - kk);
+      if (best === null || bestD === null || d < bestD) {
+        best = i;
+        bestD = d;
+      }
+    }
+    return best === null ? null : (xForCol(best) + (cellW / 2));
+  };
+  const xDown = xForStrike(downB);
+  const xUp = xForStrike(upB);
 
   wrap.innerHTML = `
     <svg class="gexSvg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="SPX net $GEX heat map">
       <rect x="0" y="0" width="${w}" height="${h}" class="gexBg"></rect>
       ${yLabels.map((lab, r) => `<text x="${pad.l - 8}" y="${yForRow(r) + 12}" class="gexAxis gexAxis--y" text-anchor="end">${escapeHtml(lab)}</text>`).join("")}
       ${xTicks.map(t => `<text x="${xForCol(t.i) + 2}" y="${h - 10}" class="gexAxis gexAxis--x">${escapeHtml(fmt0(t.s))}</text>`).join("")}
+      ${xDown === null ? "" : `<line x1="${xDown}" x2="${xDown}" y1="${pad.t}" y2="${pad.t + rows * cellH}" class="gexBoundary gexBoundary--down"></line>
+        <text x="${xDown + 6}" y="${pad.t + 10}" class="gexBoundaryLabel">Downside acceleration boundary</text>`}
+      ${xUp === null ? "" : `<line x1="${xUp}" x2="${xUp}" y1="${pad.t}" y2="${pad.t + rows * cellH}" class="gexBoundary gexBoundary--up"></line>
+        <text x="${xUp + 6}" y="${pad.t + 22}" class="gexBoundaryLabel">Upside acceleration boundary</text>`}
       ${mat.map((row, r) => {
         const rr = Array.isArray(row) ? row : [];
         return rr.map((v, c) => {
@@ -368,17 +495,23 @@ function renderGexHeatmap(payload) {
       hideTip();
       return;
     }
-    const exp = expiries[row];
+    const rowInfo = rowMeta[row] || {};
+    const rowLabel = yLabels[row];
     const strike = strikes[col];
     const v = (Array.isArray(mat[row]) ? mat[row][col] : null);
     const vNum = Number(v);
-    const valTxt = Number.isFinite(vNum) ? fmtMoneyShort(vNum) : "—";
+    const isMoney = (gexState.mode === "net");
+    const valTxt = Number.isFinite(vNum) ? (isMoney ? fmtMoneyShort(vNum) : fmtMoneyShort(vNum)) : "—";
+    const eff = rowInfo?.effectiveDte;
+    const emPts = rowInfo?.expectedMovePts;
+    const extra = (eff !== undefined && eff !== null) ? `effectiveDTE=${escapeHtml(String(eff))} · EM=${escapeHtml(String(emPts ?? "—"))} pts` : "";
     const html = `
-      <div class="chartTipTitle">Net $GEX</div>
-      <div class="chartTipBody mono">${escapeHtml(String(exp))} · strike ${escapeHtml(fmt0(strike))}</div>
+      <div class="chartTipTitle">${escapeHtml(gexState.mode === "slope" ? "GEX slope (Δ per strike)" : "Net $GEX")}</div>
+      <div class="chartTipBody mono">${escapeHtml(String(rowLabel))} · strike ${escapeHtml(fmt0(strike))}</div>
       <div class="chartTipDivider"></div>
       <div class="chartTipBody mono">${escapeHtml(valTxt)}</div>
-      <div class="chartTipBody muted">spot=${escapeHtml(Number.isFinite(spot) ? _fmtNum(spot, 2) : "—")} · band=±${escapeHtml(Number.isFinite(band) ? String(Math.round(band * 100)) : "—")}%</div>
+      ${extra ? `<div class="chartTipBody muted">${extra}</div>` : ""}
+      <div class="chartTipBody muted">spot=${escapeHtml(Number.isFinite(spot) ? _fmtNum(spot, 2) : "—")} · band=±${escapeHtml(Number.isFinite(band) ? String(Math.round(band * 100)) : "—")}% · normalization=${Number.isFinite(denom) && denom > 0 ? "on (render-only)" : "off"}</div>
     `;
     showTip(html, ev.clientX, ev.clientY);
   });
@@ -1005,6 +1138,7 @@ async function main() {
 
   initTooltips();
   initGammaMapUI();
+  initGexHeatmapUI();
   // AskRaven removed
 
   // Do NOT auto-run: user must review selections and click Run.

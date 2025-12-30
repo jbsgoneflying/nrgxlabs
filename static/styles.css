@@ -1636,6 +1636,50 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   overflow: hidden;
 }
 
+.gexMetrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.gexMetric {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255,255,255,0.62);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.gexMetricK {
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.1px;
+  color: rgba(11,11,15,0.70);
+}
+
+.gexMetricV {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 850;
+  color: rgba(11,11,15,0.92);
+}
+
+.gexStabilityChip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255,255,255,0.72);
+  font-weight: 900;
+  letter-spacing: 0.1px;
+}
+.gexStabilityChip.isStable { background: rgba(22, 163, 74, 0.10); border-color: rgba(22, 163, 74, 0.18); }
+.gexStabilityChip.isAsym { background: rgba(234, 179, 8, 0.12); border-color: rgba(234, 179, 8, 0.20); }
+.gexStabilityChip.isFragile { background: rgba(220, 38, 38, 0.10); border-color: rgba(220, 38, 38, 0.18); }
+
 .gexSvg {
   display: block;
   width: 100%;
@@ -1658,6 +1702,23 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   shape-rendering: geometricPrecision;
   stroke: rgba(15, 23, 42, 0.06);
   stroke-width: 0.7;
+}
+
+.gexBoundary {
+  stroke: rgba(15, 23, 42, 0.45);
+  stroke-width: 1.4;
+  stroke-dasharray: 6 6;
+}
+.gexBoundary--down { stroke: rgba(220, 38, 38, 0.55); }
+.gexBoundary--up { stroke: rgba(22, 163, 74, 0.55); }
+
+.gexBoundaryLabel {
+  font-size: 11px;
+  font-weight: 850;
+  fill: rgba(11, 11, 15, 0.58);
+  letter-spacing: -0.1px;
+  user-select: none;
+  pointer-events: none;
 }
 
 .gammaChart {

@@ -354,6 +354,288 @@ def compute_spx_net_gex_heatmap(
     }
 
 
+def _finite(v: Any) -> Optional[float]:
+    x = _to_float(v)
+    return None if x is None else float(x)
+
+
+def _row_slope_first_diff(vals: List[Optional[float]]) -> List[Optional[float]]:
+    """
+    First difference across strikes: slope[i] = vals[i] - vals[i-1].
+    Keeps the same length; slope[0] = None.
+
+    IMPORTANT: this is computed on RAW Net $GEX (not normalized).
+    """
+    out: List[Optional[float]] = [None] * len(vals)
+    if not vals:
+        return out
+    prev = vals[0]
+    for i in range(1, len(vals)):
+        cur = vals[i]
+        if cur is None or prev is None:
+            out[i] = None
+        else:
+            out[i] = float(cur) - float(prev)
+        prev = cur
+    return out
+
+
+def _rolling_mean(vals: List[Optional[float]], *, window: int) -> List[Optional[float]]:
+    """
+    Centered rolling mean ignoring None; returns None where insufficient data.
+    """
+    w = int(window)
+    if w <= 1:
+        return list(vals)
+    n = len(vals)
+    out: List[Optional[float]] = [None] * n
+    half = w // 2
+    for i in range(n):
+        lo = max(0, i - half)
+        hi = min(n, i + half + 1)
+        xs = [float(x) for x in vals[lo:hi] if x is not None and math.isfinite(float(x))]
+        if len(xs) >= max(2, min(w, hi - lo) // 2):
+            out[i] = float(sum(xs) / float(len(xs)))
+        else:
+            out[i] = None
+    return out
+
+
+def _apply_slope(vals: List[Optional[float]], *, window: int) -> List[Optional[float]]:
+    """
+    Slope = first difference across strikes, then rolling-mean smoothing.
+    Computed on RAW Net $GEX; normalization is applied only at render time.
+    """
+    return _rolling_mean(_row_slope_first_diff(vals), window=int(window))
+
+
+def _parse_expiry_safe(s: str) -> Optional[dt.date]:
+    try:
+        return _parse_date(str(s)[:10])
+    except Exception:
+        return None
+
+
+def _select_expiries_by_dte(
+    exp_dates: List[str],
+    *,
+    today: dt.date,
+    dte_max: int,
+    cap: int,
+) -> List[Tuple[str, int]]:
+    """
+    Return (expiry_iso, dte_days) sorted by expiry date, filtered to 0..dte_max.
+    """
+    out: List[Tuple[str, int]] = []
+    for e in _normalize_expiry_dates(exp_dates):
+        ed = _parse_expiry_safe(e)
+        if ed is None:
+            continue
+        dte = int((ed - today).days)
+        if dte < 0 or dte > int(dte_max):
+            continue
+        out.append((str(e)[:10], dte))
+    out.sort(key=lambda x: x[0])
+    if cap and len(out) > int(cap):
+        out = out[: int(cap)]
+    return out
+
+
+def _bucket_for_dte(dte: int) -> Optional[str]:
+    dd = int(dte)
+    if 0 <= dd <= 5:
+        return "0_5"
+    if 6 <= dd <= 10:
+        return "6_10"
+    if 20 <= dd <= 40:
+        return "20_40"
+    return None
+
+
+def _bucket_label(k: str) -> str:
+    return {"0_5": "0–5 DTE", "6_10": "6–10 DTE", "20_40": "20–40 DTE"}.get(k, k)
+
+
+def _exp_decay_weight(*, dte: int, half_life_dte: float) -> float:
+    hl = float(half_life_dte)
+    if hl <= 1e-9:
+        return 1.0
+    lam = math.log(2.0) / hl
+    return math.exp(-lam * float(max(0, int(dte))))
+
+
+def _weighted_sum_rows(
+    *,
+    rows: List[List[Optional[float]]],
+    weights: List[float],
+) -> List[Optional[float]]:
+    """
+    Weighted sum across expiry rows, skipping None cells.
+    """
+    if not rows:
+        return []
+    m = len(rows[0])
+    out: List[Optional[float]] = [None] * m
+    for j in range(m):
+        num = 0.0
+        den = 0.0
+        for i in range(len(rows)):
+            w = float(weights[i])
+            if w <= 0:
+                continue
+            v = rows[i][j] if j < len(rows[i]) else None
+            if v is None:
+                continue
+            fv = float(v)
+            if not math.isfinite(fv):
+                continue
+            num += w * fv
+            den += w
+        out[j] = (num / den) if den > 1e-12 else None
+    return out
+
+
+def _find_accel_boundary_from_spot(
+    *,
+    strikes: List[float],
+    vals: List[Optional[float]],
+    spot: float,
+    side: str,
+    adjacent_n: int,
+) -> Optional[float]:
+    """
+    Find the first boundary from spot outward where sign flips from positive->negative
+    and remains negative for >= adjacent_n strikes beyond the boundary.
+
+    side: "down" (scan decreasing strikes) or "up" (scan increasing strikes)
+    Returns an approximate boundary strike (midpoint between the two strikes around the flip).
+    """
+    if not strikes or not vals or len(strikes) != len(vals):
+        return None
+    s0 = float(spot)
+    n = max(1, int(adjacent_n))
+
+    # Find nearest strike index to spot with a finite value
+    best_i = None
+    best_d = None
+    for i, k in enumerate(strikes):
+        v = vals[i]
+        if v is None:
+            continue
+        if not math.isfinite(float(v)):
+            continue
+        d = abs(float(k) - s0)
+        if best_i is None or best_d is None or d < best_d:
+            best_i = i
+            best_d = d
+    if best_i is None:
+        return None
+
+    def _sign(v: float) -> int:
+        return 1 if v >= 0 else -1
+
+    v0 = vals[best_i]
+    if v0 is None:
+        return None
+    base_sign = _sign(float(v0))
+
+    if side == "down":
+        # boundary below spot: looking for + to - as we move down
+        for i in range(best_i - 1, -1, -1):
+            vi = vals[i]
+            vup = vals[i + 1]
+            if vi is None or vup is None:
+                continue
+            if not (math.isfinite(float(vi)) and math.isfinite(float(vup))):
+                continue
+            if _sign(float(vup)) == 1 and _sign(float(vi)) == -1:
+                # persistence: i down to i-(n-1) are negative
+                ok = True
+                for j in range(i, max(-1, i - n), -1):
+                    vj = vals[j]
+                    if vj is None or (not math.isfinite(float(vj))) or _sign(float(vj)) != -1:
+                        ok = False
+                        break
+                if ok:
+                    return 0.5 * (float(strikes[i]) + float(strikes[i + 1]))
+        return None
+
+    if side == "up":
+        # boundary above spot: looking for + to - as we move up
+        for i in range(best_i, len(strikes) - 1):
+            vi = vals[i]
+            vdn = vals[i + 1]
+            if vi is None or vdn is None:
+                continue
+            if not (math.isfinite(float(vi)) and math.isfinite(float(vdn))):
+                continue
+            if _sign(float(vi)) == 1 and _sign(float(vdn)) == -1:
+                # persistence: i+1 up to i+n are negative
+                ok = True
+                for j in range(i + 1, min(len(strikes), i + 1 + n)):
+                    vj = vals[j]
+                    if vj is None or (not math.isfinite(float(vj))) or _sign(float(vj)) != -1:
+                        ok = False
+                        break
+                if ok:
+                    return 0.5 * (float(strikes[i]) + float(strikes[i + 1]))
+        return None
+
+    return None
+
+
+def _classify_stability(
+    *,
+    strikes: List[float],
+    vals0_5: List[Optional[float]],
+    spot: float,
+    em_pts: Optional[float],
+    downside_em: Optional[float],
+    upside_em: Optional[float],
+    fragile_band_em: float = 0.75,
+    asym_diff_em: float = 0.5,
+) -> Dict[str, Any]:
+    """
+    Stability label priority (explicit):
+    1) Fragile if negative gamma exists within ±0.75 EM of spot
+    2) Asymmetric if |distance_up_EM - distance_down_EM| > 0.5 EM
+    3) Stable otherwise
+    """
+    reasons: List[str] = []
+    s0 = float(spot)
+
+    # 1) Fragile
+    if em_pts is not None and float(em_pts) > 1e-9:
+        band = float(fragile_band_em) * float(em_pts)
+        lo = s0 - band
+        hi = s0 + band
+        neg_found = False
+        for k, v in zip(strikes, vals0_5):
+            if v is None:
+                continue
+            if float(k) < lo or float(k) > hi:
+                continue
+            if float(v) < 0:
+                neg_found = True
+                break
+        if neg_found:
+            reasons.append(f"Fragile: negative gamma detected within ±{fragile_band_em:.2f} EM of spot")
+            return {"label": "Fragile", "reasons": reasons}
+
+    # 2) Asymmetric
+    if downside_em is None or upside_em is None:
+        reasons.append("Asymmetric: one-sided boundary missing (insufficient data for both sides)")
+        return {"label": "Asymmetric", "reasons": reasons}
+    if abs(float(upside_em) - float(downside_em)) > float(asym_diff_em):
+        reasons.append(f"Asymmetric: upside vs downside boundary distance differs by > {asym_diff_em:.2f} EM")
+        return {"label": "Asymmetric", "reasons": reasons}
+
+    # 3) Stable
+    reasons.append("Stable: no negative gamma near spot and boundaries are balanced")
+    return {"label": "Stable", "reasons": reasons}
+
+
+
 def _pick_live_expiry(expirations_rows: List[dict], *, today: dt.date) -> Optional[str]:
     # Backwards-compatible wrapper: preserve old semantics (nearest / 0DTE).
     exp_dates: List[str] = []
@@ -515,8 +797,12 @@ def compute_spx_live_levels(
     top_n: int = 5,
     cluster_steps: int = 2,
     include_heatmap: bool = True,
-    heatmap_expiries: int = 12,
+    heatmap_expiries: int = 30,
     heatmap_band_pct: Optional[float] = None,
+    heatmap_mode: str = "net",  # net|slope (display hint; payload contains both)
+    heatmap_view: str = "composite",  # composite|raw (display hint; payload contains both)
+    slope_window: int = 5,
+    flip_adjacent_n: int = 5,
 ) -> Dict[str, Any]:
     """
     Compute SPX live dealer-gamma and OI wall/cluster levels (informational).
@@ -620,10 +906,7 @@ def compute_spx_live_levels(
     gex_heatmap = None
     if bool(include_heatmap) and used_symbol:
         try:
-            # Compute heatmap across multiple expiries using ONE full live strikes pull for the chosen symbol.
-            # (The /api/spx-levels endpoint caches this payload, so this stays interactive.)
             band_h = float(heatmap_band_pct) if (heatmap_band_pct is not None) else float(band_pct)
-            exp_window = _pick_expiry_window(used_exp_dates, view=view, today=today, now_dt=now_dt, limit=int(heatmap_expiries))
 
             # Prefer a full strikes cache if we already have it.
             all_rows = strikes_cache_by_symbol.get(used_symbol)
@@ -632,8 +915,13 @@ def compute_spx_live_levels(
 
             # Prefer spot from the full rows in case the selected-expiry rows were sparse.
             s0 = _pick_spot_from_live_rows(all_rows) or (float(spot) if spot is not None else None)
-            if s0 is not None and exp_window:
-                gex_heatmap = compute_spx_net_gex_heatmap(
+            if s0 is not None:
+                # --- Pick expiries for RAW grid (need to cover out to 40 DTE for composite buckets) ---
+                exp_dtes = _select_expiries_by_dte(used_exp_dates, today=today, dte_max=45, cap=int(heatmap_expiries))
+                exp_window = [e for (e, _) in exp_dtes]
+                dte_by_exp = {e: int(dte) for (e, dte) in exp_dtes}
+
+                raw = compute_spx_net_gex_heatmap(
                     all_rows,
                     expiries=exp_window,
                     spot=float(s0),
@@ -641,6 +929,167 @@ def compute_spx_live_levels(
                     contract_multiplier=100,
                     strike_cap=180,
                 )
+
+                strikes = [float(x) for x in (raw.get("strikes") or [])]
+                raw_rows = raw.get("netDollarGex") if isinstance(raw.get("netDollarGex"), list) else []
+                raw_rows = [r if isinstance(r, list) else [] for r in raw_rows]
+
+                # --- Slope mode (computed on RAW Net $GEX; normalization applies only at render time) ---
+                slope_rows = [_apply_slope([_finite(x) for x in row], window=int(slope_window)) for row in raw_rows]
+
+                # --- Daily IV proxy for normalization + EM (prefer ORATS cores iv30) ---
+                iv_notes: List[str] = []
+                iv_used_pct = None
+                iv_trade = prior_trading_day(client, ticker="SPX", date=today) or today
+                try:
+                    fields_iv = "ticker,tradeDate,iv30,iv30d,iv30Day,iv"
+                    core_rows = fetch_hist_cores_range(client, ticker="SPX", start=iv_trade - dt.timedelta(days=30), end=iv_trade, fields=fields_iv)
+                    core_rows = [r for r in core_rows if isinstance(r, dict)]
+                    core_rows.sort(key=lambda r: str(r.get("tradeDate") or "")[:10])
+                    best_iv = None
+                    for r in reversed(core_rows):
+                        for k in ("iv30", "iv30d", "iv30Day", "iv"):
+                            best_iv = _iv_to_pct(r.get(k))
+                            if best_iv is not None:
+                                break
+                        if best_iv is not None:
+                            break
+                    iv_used_pct = best_iv
+                except Exception:
+                    iv_used_pct = None
+
+                if iv_used_pct is None:
+                    # Fallback: monies implied vol50 around ~30DTE (still daily, but slower / entitlement-dependent)
+                    try:
+                        iv_used_pct = fetch_atm_iv_pct(client, ticker="SPX", trade_date=iv_trade, dte_target=30)
+                        if iv_used_pct is not None:
+                            iv_notes.append("ATM IV proxy fell back to monies-implied vol50 (30DTE).")
+                    except Exception:
+                        iv_used_pct = None
+
+                iv_dec = (float(iv_used_pct) / 100.0) if (iv_used_pct is not None and float(iv_used_pct) > 0) else None
+                scale_denom = (float(s0) * float(iv_dec)) if (iv_dec is not None) else None
+                if scale_denom is None:
+                    iv_notes.append("ATM IV proxy unavailable; normalization disabled (raw color scaling).")
+
+                # --- Composite rows (expiry buckets weighted by exponential DTE decay) ---
+                base_weights = {"0_5": 1.0, "6_10": 0.6, "20_40": 0.25}
+                half_life = 2.0
+                expiries_used: List[dict] = []
+                for e in exp_window:
+                    dte = dte_by_exp.get(e)
+                    b = _bucket_for_dte(int(dte)) if dte is not None else None
+                    if b is None:
+                        continue
+                    w = float(base_weights.get(b, 0.0)) * _exp_decay_weight(dte=int(dte), half_life_dte=float(half_life))
+                    expiries_used.append({"expiry": e, "dte": int(dte), "bucket": b, "weight": round(float(w), 8)})
+
+                buckets_out: List[dict] = []
+                bucket_keys = ["0_5", "6_10", "20_40"]
+                for b in bucket_keys:
+                    idxs: List[int] = []
+                    ws: List[float] = []
+                    dtes_for_bucket: List[int] = []
+                    for i, e in enumerate(exp_window):
+                        dte = dte_by_exp.get(e)
+                        if dte is None:
+                            continue
+                        if _bucket_for_dte(int(dte)) != b:
+                            continue
+                        w = float(base_weights.get(b, 0.0)) * _exp_decay_weight(dte=int(dte), half_life_dte=float(half_life))
+                        if w <= 0:
+                            continue
+                        idxs.append(i)
+                        ws.append(float(w))
+                        dtes_for_bucket.append(int(dte))
+
+                    rows_sel = [raw_rows[i] for i in idxs]
+                    net_row = _weighted_sum_rows(rows=rows_sel, weights=ws) if rows_sel else [None] * len(strikes)
+                    slope_row = _apply_slope([_finite(x) for x in net_row], window=int(slope_window)) if net_row else [None] * len(strikes)
+
+                    # effectiveDTE = Σ(w*dte)/Σ(w)
+                    den = sum(ws) if ws else 0.0
+                    eff_dte = (sum(float(w) * float(d) for (w, d) in zip(ws, dtes_for_bucket)) / den) if den > 1e-12 else None
+                    em_pts = None
+                    if iv_dec is not None and eff_dte is not None and float(eff_dte) > 0:
+                        em_pts = float(s0) * float(iv_dec) * math.sqrt(float(eff_dte) / 252.0)
+
+                    buckets_out.append(
+                        {
+                            "key": b,
+                            "label": _bucket_label(b),
+                            "effectiveDte": None if eff_dte is None else round(float(eff_dte), 4),
+                            "expectedMovePts": None if em_pts is None else round(float(em_pts), 4),
+                            "rowsUsed": len(rows_sel),
+                            "netDollarGex": [None if x is None else round(float(x), 6) for x in net_row],
+                            "slopeNetDollarGex": [None if x is None else round(float(x), 6) for x in slope_row],
+                        }
+                    )
+
+                # --- Boundaries computed ONLY from 0–5 composite row ---
+                b0 = next((x for x in buckets_out if x.get("key") == "0_5"), None) or {}
+                vals0 = [(_finite(x) if x is not None else None) for x in (b0.get("netDollarGex") or [])]
+                em0 = _finite(b0.get("expectedMovePts"))
+                down_strike = _find_accel_boundary_from_spot(strikes=strikes, vals=vals0, spot=float(s0), side="down", adjacent_n=int(flip_adjacent_n))
+                up_strike = _find_accel_boundary_from_spot(strikes=strikes, vals=vals0, spot=float(s0), side="up", adjacent_n=int(flip_adjacent_n))
+
+                down_pts = (float(s0) - float(down_strike)) if (down_strike is not None) else None
+                up_pts = (float(up_strike) - float(s0)) if (up_strike is not None) else None
+                down_em = (float(down_pts) / float(em0)) if (down_pts is not None and em0 is not None and em0 > 1e-9) else None
+                up_em = (float(up_pts) / float(em0)) if (up_pts is not None and em0 is not None and em0 > 1e-9) else None
+
+                stability = _classify_stability(
+                    strikes=strikes,
+                    vals0_5=vals0,
+                    spot=float(s0),
+                    em_pts=em0,
+                    downside_em=down_em,
+                    upside_em=up_em,
+                    fragile_band_em=0.75,
+                    asym_diff_em=0.5,
+                )
+
+                gex_heatmap = {
+                    "enabled": True,
+                    "display": {"view": str(heatmap_view or "composite"), "mode": str(heatmap_mode or "net")},
+                    "spot": round(float(s0), 6),
+                    "bandPct": float(band_h),
+                    "weightingMode": raw.get("weightingMode"),
+                    "contractMultiplier": int(raw.get("contractMultiplier") or 100),
+                    "atmIvUsedPct": None if iv_used_pct is None else round(float(iv_used_pct), 4),
+                    "scaleDenom": None if scale_denom is None else round(float(scale_denom), 8),
+                    "raw": {
+                        "expiries": raw.get("expiries") or [],
+                        "dteByExpiry": dte_by_exp,
+                        "strikes": raw.get("strikes") or [],
+                        "netDollarGex": raw.get("netDollarGex") or [],
+                        "slopeNetDollarGex": [[None if x is None else round(float(x), 6) for x in row] for row in slope_rows],
+                    },
+                    "composite": {
+                        "halfLifeDte": float(half_life),
+                        "baseWeights": base_weights,
+                        "expiriesUsed": expiries_used,
+                        "strikes": raw.get("strikes") or [],
+                        "buckets": buckets_out,
+                    },
+                    "boundaries": {
+                        "flipAdjacentN": int(flip_adjacent_n),
+                        "downsideAccelerationBoundaryStrike": None if down_strike is None else round(float(down_strike), 2),
+                        "upsideAccelerationBoundaryStrike": None if up_strike is None else round(float(up_strike), 2),
+                    },
+                    "metrics": {
+                        "downsideDistancePts": None if down_pts is None else round(float(down_pts), 2),
+                        "upsideDistancePts": None if up_pts is None else round(float(up_pts), 2),
+                        "downsideDistanceEm": None if down_em is None else round(float(down_em), 4),
+                        "upsideDistanceEm": None if up_em is None else round(float(up_em), 4),
+                    },
+                    "stability": stability,
+                    "warnings": [*list(raw.get("warnings") or []), *iv_notes],
+                    "notes": [
+                        "Slope is computed on raw Net $GEX; normalization applies only at render time.",
+                        *list(raw.get("notes") or []),
+                    ],
+                }
         except Exception as e:
             # Keep endpoint resilient: heatmap is additive UI. Don't fail the entire levels payload.
             LOG.exception("Failed to compute SPX net $GEX heatmap")

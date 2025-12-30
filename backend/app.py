@@ -459,8 +459,12 @@ def spx_levels(
     window_days: int = Query(180, ge=30, le=800, description="Calendar days to scan back for SPX EOD closes (chart window)"),
     points: int = Query(90, ge=30, le=260, description="Max trading-day points to return for charting"),
     include_heatmap: int = Query(1, ge=0, le=1, description="Include net $GEX heatmap matrix (0|1)"),
-    heatmap_expiries: int = Query(12, ge=3, le=30, description="How many expiries to include in the heatmap"),
+    heatmap_expiries: int = Query(30, ge=6, le=60, description="How many expiries to include in the raw heatmap grid"),
     heatmap_band_pct: float = Query(0.05, ge=0.01, le=0.20, description="Spot band for heatmap strikes (e.g. 0.05 = ±5%)"),
+    heatmap_mode: str = Query("net", description="Heatmap mode: net|slope"),
+    heatmap_view: str = Query("composite", description="Heatmap view: composite|raw"),
+    slope_window: int = Query(5, ge=1, le=25, description="Slope smoothing window (strikes)"),
+    flip_adjacent_n: int = Query(5, ge=2, le=20, description="Persistence requirement for acceleration boundary detection"),
 ):
     """
     Lightweight chart payload for Engine 2's dealer-gamma / OI wall visualization.
@@ -483,6 +487,10 @@ def spx_levels(
             "include_heatmap": int(include_heatmap),
             "heatmap_expiries": int(heatmap_expiries),
             "heatmap_band_pct": float(heatmap_band_pct),
+            "heatmap_mode": str(heatmap_mode or "net"),
+            "heatmap_view": str(heatmap_view or "composite"),
+            "slope_window": int(slope_window),
+            "flip_adjacent_n": int(flip_adjacent_n),
         }
         key = _spx_levels_cache_key(params, f.cache_key_engine2())
         with _spx_levels_cache_lock:
@@ -510,10 +518,14 @@ def spx_levels(
             include_heatmap=bool(int(include_heatmap)),
             heatmap_expiries=int(heatmap_expiries),
             heatmap_band_pct=float(heatmap_band_pct),
+            heatmap_mode=str(heatmap_mode or "net"),
+            heatmap_view=str(heatmap_view or "composite"),
+            slope_window=int(slope_window),
+            flip_adjacent_n=int(flip_adjacent_n),
         )
 
         payload = {
-            "schemaVersion": 2,
+            "schemaVersion": 3,
             "priceSeries": closes,
             "levels": levels,
         }
