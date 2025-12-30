@@ -1626,6 +1626,40 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   overflow: hidden;
 }
 
+/* --- Engine 2: Net $GEX Heat Map --- */
+.gexHeatmap {
+  width: 100%;
+  min-height: 240px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255,255,255,0.55);
+  overflow: hidden;
+}
+
+.gexSvg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.gexBg { fill: rgba(255,255,255,0.55); }
+
+.gexAxis {
+  font-size: 11px;
+  font-weight: 750;
+  fill: rgba(11, 11, 15, 0.52);
+  user-select: none;
+  pointer-events: none;
+}
+.gexAxis--x { letter-spacing: -0.2px; }
+.gexAxis--y { letter-spacing: 0.0px; }
+
+.gexCell {
+  shape-rendering: geometricPrecision;
+  stroke: rgba(15, 23, 42, 0.06);
+  stroke-width: 0.7;
+}
+
 .gammaChart {
   width: 100%;
   height: 260px;

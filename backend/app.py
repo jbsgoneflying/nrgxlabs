@@ -458,6 +458,9 @@ def spx_levels(
     view: str = Query("weekly", description="weekly|nearest"),
     window_days: int = Query(180, ge=30, le=800, description="Calendar days to scan back for SPX EOD closes (chart window)"),
     points: int = Query(90, ge=30, le=260, description="Max trading-day points to return for charting"),
+    include_heatmap: int = Query(1, ge=0, le=1, description="Include net $GEX heatmap matrix (0|1)"),
+    heatmap_expiries: int = Query(12, ge=3, le=30, description="How many expiries to include in the heatmap"),
+    heatmap_band_pct: float = Query(0.05, ge=0.01, le=0.20, description="Spot band for heatmap strikes (e.g. 0.05 = ±5%)"),
 ):
     """
     Lightweight chart payload for Engine 2's dealer-gamma / OI wall visualization.
@@ -473,7 +476,14 @@ def spx_levels(
         raise HTTPException(status_code=400, detail="view must be weekly|nearest")
 
     try:
-        params = {"view": v, "window_days": int(window_days), "points": int(points)}
+        params = {
+            "view": v,
+            "window_days": int(window_days),
+            "points": int(points),
+            "include_heatmap": int(include_heatmap),
+            "heatmap_expiries": int(heatmap_expiries),
+            "heatmap_band_pct": float(heatmap_band_pct),
+        }
         key = _spx_levels_cache_key(params, f.cache_key_engine2())
         with _spx_levels_cache_lock:
             cached = _spx_levels_cache.get(key)
@@ -491,10 +501,19 @@ def spx_levels(
             closes = closes[-int(points) :]
 
         # --- Live levels ---
-        levels = compute_spx_live_levels(client, view=v, band_pct=0.05, top_n=5, cluster_steps=2)
+        levels = compute_spx_live_levels(
+            client,
+            view=v,
+            band_pct=0.05,
+            top_n=5,
+            cluster_steps=2,
+            include_heatmap=bool(int(include_heatmap)),
+            heatmap_expiries=int(heatmap_expiries),
+            heatmap_band_pct=float(heatmap_band_pct),
+        )
 
         payload = {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "priceSeries": closes,
             "levels": levels,
         }

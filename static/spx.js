@@ -28,6 +28,18 @@ function fmt2(x) {
   return Number.isFinite(n) ? n.toFixed(2) : "—";
 }
 
+function fmtMoneyShort(x) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return "—";
+  const s = n < 0 ? "-" : "+";
+  const a = Math.abs(n);
+  if (a >= 1e12) return `${s}$${(a / 1e12).toFixed(2)}T`;
+  if (a >= 1e9) return `${s}$${(a / 1e9).toFixed(2)}B`;
+  if (a >= 1e6) return `${s}$${(a / 1e6).toFixed(2)}M`;
+  if (a >= 1e3) return `${s}$${(a / 1e3).toFixed(2)}K`;
+  return `${s}$${a.toFixed(0)}`;
+}
+
 function _pickMeaningfulClusters(sideClusters, spot, strikeStep) {
   const xs = Array.isArray(sideClusters) ? sideClusters : [];
   if (!xs.length) return [];
@@ -214,12 +226,162 @@ async function loadGammaMap() {
     const payload = await fetchJson(`/api/spx-levels?view=${encodeURIComponent(v)}&points=90&window_days=180`, { timeoutMs: 45000 });
     lastGammaPayload = payload;
     renderGammaMap(payload);
+    renderGexHeatmap(payload);
   } catch (e) {
     lastGammaPayload = null;
     if (meta) meta.textContent = "Dealer Gamma Map unavailable";
     if (note) note.textContent = String(e?.message || e || "Error");
     chart.innerHTML = `<div class="muted" style="padding:14px;">${escapeHtml(String(e?.message || e || "Failed to load."))}</div>`;
+    renderGexHeatmap(null);
   }
+}
+
+function renderGexHeatmap(payload) {
+  const wrap = $("gexHeatmap");
+  const meta = $("gexMeta");
+  const note = $("gexNote");
+  const tip = $("gexHeatTip");
+  if (!wrap) return;
+
+  const heat = payload?.levels?.gexHeatmap || null;
+  const enabled = !!heat?.enabled;
+  const expiries = Array.isArray(heat?.expiries) ? heat.expiries : [];
+  const strikes = Array.isArray(heat?.strikes) ? heat.strikes : [];
+  const mat = Array.isArray(heat?.netDollarGex) ? heat.netDollarGex : [];
+  const spot = Number(heat?.spot);
+  const band = Number(heat?.bandPct);
+  const wmode = String(heat?.weightingMode || "");
+
+  const hideTip = () => { if (tip) tip.classList.add("hidden"); };
+  const showTip = (html, x, y) => {
+    if (!tip) return;
+    tip.innerHTML = html;
+    tip.classList.remove("hidden");
+    const box = wrap.getBoundingClientRect();
+    const left = clamp(x - box.left + 12, 8, box.width - 260);
+    const top = clamp(y - box.top + 12, 8, box.height - 140);
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+  };
+
+  if (!payload || !enabled || !expiries.length || !strikes.length || !mat.length) {
+    wrap.innerHTML = `<div class="muted" style="padding:14px;">Run Engine 2 to load the heat map.</div>`;
+    if (meta) meta.textContent = "—";
+    if (note) {
+      const err = heat?.error ? `Heatmap unavailable (${String(heat.error)}).` : "—";
+      note.textContent = payload && !enabled ? err : "—";
+    }
+    hideTip();
+    return;
+  }
+
+  // Compute max abs for scaling (ignore nulls)
+  let maxAbs = 0;
+  for (let i = 0; i < mat.length; i++) {
+    const row = Array.isArray(mat[i]) ? mat[i] : [];
+    for (let j = 0; j < row.length; j++) {
+      const v = Number(row[j]);
+      if (!Number.isFinite(v)) continue;
+      maxAbs = Math.max(maxAbs, Math.abs(v));
+    }
+  }
+  if (!Number.isFinite(maxAbs) || maxAbs <= 0) maxAbs = 1;
+
+  const w = Math.max(320, wrap.clientWidth || 640);
+  const pad = { l: 74, r: 10, t: 10, b: 26 };
+  const rows = expiries.length;
+  const cols = strikes.length;
+  const cellH = 16;
+  const cellW = Math.max(6, Math.floor((w - pad.l - pad.r) / Math.max(1, cols)));
+  const h = pad.t + pad.b + rows * cellH;
+
+  const xForCol = (c) => pad.l + c * cellW;
+  const yForRow = (r) => pad.t + r * cellH;
+
+  const scale = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return 0;
+    const a = Math.abs(n);
+    // compress large dynamic range
+    const t = Math.log10(1 + a / 1e6);
+    const tMax = Math.log10(1 + maxAbs / 1e6);
+    const u = tMax > 0 ? (t / tMax) : 0;
+    return (n < 0 ? -u : u);
+  };
+
+  const colorFor = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "rgba(120,120,130,0.10)"; // missing
+    const t = scale(n); // -1..1
+    const a = Math.min(1, Math.abs(t));
+    // Diverging: blue (neg) to orange (pos)
+    const hue = (t < 0) ? 210 : 20;
+    const sat = 72;
+    // darker = stronger
+    const light = 82 - (a * 34);
+    const alpha = 0.95;
+    return `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
+  };
+
+  if (meta) {
+    const b = Number.isFinite(band) ? `${Math.round(band * 100)}%` : "—";
+    meta.textContent = `spot=${Number.isFinite(spot) ? _fmtNum(spot, 2) : "—"} · band=±${b} · mode=${wmode || "—"} · rows=${rows} · cols=${cols}`;
+  }
+  if (note) {
+    const warns = Array.isArray(heat?.warnings) ? heat.warnings.filter(Boolean) : [];
+    const notes = Array.isArray(heat?.notes) ? heat.notes.filter(Boolean) : [];
+    note.textContent = warns[0] || notes[0] || "Live, informational only.";
+  }
+
+  const yLabels = expiries.map((e) => String(e).slice(5)); // MM-DD
+  const tickEvery = Math.max(1, Math.round(cols / 6));
+  const xTicks = strikes.map((s, i) => ({ s: Number(s), i })).filter(t => (t.i % tickEvery) === 0);
+
+  wrap.innerHTML = `
+    <svg class="gexSvg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="SPX net $GEX heat map">
+      <rect x="0" y="0" width="${w}" height="${h}" class="gexBg"></rect>
+      ${yLabels.map((lab, r) => `<text x="${pad.l - 8}" y="${yForRow(r) + 12}" class="gexAxis gexAxis--y" text-anchor="end">${escapeHtml(lab)}</text>`).join("")}
+      ${xTicks.map(t => `<text x="${xForCol(t.i) + 2}" y="${h - 10}" class="gexAxis gexAxis--x">${escapeHtml(fmt0(t.s))}</text>`).join("")}
+      ${mat.map((row, r) => {
+        const rr = Array.isArray(row) ? row : [];
+        return rr.map((v, c) => {
+          const x = xForCol(c);
+          const y = yForRow(r);
+          const fill = colorFor(v);
+          return `<rect class="gexCell" data-r="${r}" data-c="${c}" x="${x}" y="${y}" width="${cellW}" height="${cellH - 1}" rx="2" ry="2" fill="${fill}"></rect>`;
+        }).join("");
+      }).join("")}
+    </svg>
+  `;
+
+  const svg = wrap.querySelector("svg");
+  if (!svg) return;
+
+  svg.addEventListener("mouseleave", () => hideTip());
+  svg.addEventListener("mousemove", (ev) => {
+    const box = svg.getBoundingClientRect();
+    const mx = ev.clientX - box.left;
+    const my = ev.clientY - box.top;
+    const col = Math.floor((mx - pad.l) / cellW);
+    const row = Math.floor((my - pad.t) / cellH);
+    if (row < 0 || row >= rows || col < 0 || col >= cols) {
+      hideTip();
+      return;
+    }
+    const exp = expiries[row];
+    const strike = strikes[col];
+    const v = (Array.isArray(mat[row]) ? mat[row][col] : null);
+    const vNum = Number(v);
+    const valTxt = Number.isFinite(vNum) ? fmtMoneyShort(vNum) : "—";
+    const html = `
+      <div class="chartTipTitle">Net $GEX</div>
+      <div class="chartTipBody mono">${escapeHtml(String(exp))} · strike ${escapeHtml(fmt0(strike))}</div>
+      <div class="chartTipDivider"></div>
+      <div class="chartTipBody mono">${escapeHtml(valTxt)}</div>
+      <div class="chartTipBody muted">spot=${escapeHtml(Number.isFinite(spot) ? _fmtNum(spot, 2) : "—")} · band=±${escapeHtml(Number.isFinite(band) ? String(Math.round(band * 100)) : "—")}%</div>
+    `;
+    showTip(html, ev.clientX, ev.clientY);
+  });
 }
 
 function renderGammaMap(payload) {

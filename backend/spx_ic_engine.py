@@ -160,6 +160,200 @@ def _pick_weekly_close_expiry_date(
     return ds[-1]
 
 
+def _pick_expiry_window(
+    exp_dates: List[str],
+    *,
+    view: str,
+    today: dt.date,
+    now_dt: Optional[dt.datetime] = None,
+    limit: int = 12,
+) -> List[str]:
+    """
+    Pick a small forward window of expiries for visualization (heatmap).
+
+    - view="weekly": prefer Friday expiries (then Thursday holiday fallbacks), starting from
+      today (or tomorrow if after cash close).
+    - view="nearest": prefer nearest expiries (including 0DTE if present).
+
+    Returns a sorted, unique list of ISO dates (YYYY-MM-DD).
+    """
+    ds = _normalize_expiry_dates(exp_dates)
+    if not ds:
+        return []
+    lim = max(1, int(limit))
+
+    v = str(view or "weekly").strip().lower()
+    now_et = _now_et(now_dt)
+    after_close = _after_cash_close_et(now_et)
+    start = today + dt.timedelta(days=1) if after_close else today
+
+    # Partition into (>=start) and all
+    future: List[Tuple[str, dt.date]] = []
+    for d0 in ds:
+        try:
+            dd = _parse_date(d0)
+        except Exception:
+            continue
+        if dd >= start:
+            future.append((d0, dd))
+    future.sort(key=lambda x: x[1])
+
+    # If nothing upcoming, return last known few.
+    if not future:
+        return ds[-lim:]
+
+    if v.startswith("week"):
+        fr = [d0 for (d0, dd) in future if dd.weekday() == 4]
+        th = [d0 for (d0, dd) in future if dd.weekday() == 3]
+        other = [d0 for (d0, dd) in future if dd.weekday() not in (3, 4)]
+        out = fr + th + other
+        return out[:lim]
+
+    # nearest/0DTE style: just take upcoming in order
+    return [d0 for (d0, _) in future[:lim]]
+
+
+def _pick_spot_from_live_rows(rows: List[dict]) -> Optional[float]:
+    # Prefer spotPrice if present, else stockPrice
+    for key in ("spotPrice", "spot_price", "spot"):
+        for r in rows or []:
+            if not isinstance(r, dict):
+                continue
+            v = _to_float(r.get(key))
+            if v and v > 0:
+                return float(v)
+    for key in ("stockPrice", "stock_price", "underlyingPrice"):
+        for r in rows or []:
+            if not isinstance(r, dict):
+                continue
+            v = _to_float(r.get(key))
+            if v and v > 0:
+                return float(v)
+    return None
+
+
+def compute_spx_net_gex_heatmap(
+    strikes_rows: List[dict],
+    *,
+    expiries: List[str],
+    spot: float,
+    band_pct: float = 0.05,
+    contract_multiplier: int = 100,
+    strike_cap: int = 180,
+) -> Dict[str, Any]:
+    """
+    Build an expiry × strike matrix of net dollar gamma exposure (best-effort proxy).
+
+      net$GEX(strike,exp) ≈ gamma * (callOI - putOI) * spot^2 * contract_multiplier
+
+    Notes:
+    - Uses ORATS live strikes payload for gamma + OI.
+    - If OI is missing, falls back to volume (noisy); otherwise gamma-only (very noisy).
+    - Filters to strikes within ±band_pct of spot to keep the matrix compact.
+    """
+    rows = [r for r in (strikes_rows or []) if isinstance(r, dict)]
+    out_exp = [str(e)[:10] for e in (expiries or []) if e]
+
+    s0 = float(spot)
+    lo = s0 * (1.0 - float(band_pct))
+    hi = s0 * (1.0 + float(band_pct))
+
+    has_call_oi = any(_to_float(r.get("callOpenInterest")) is not None for r in rows)
+    has_put_oi = any(_to_float(r.get("putOpenInterest")) is not None for r in rows)
+    has_call_vol = any(_to_float(r.get("callVolume")) is not None for r in rows)
+    has_put_vol = any(_to_float(r.get("putVolume")) is not None for r in rows)
+
+    warnings: List[str] = []
+    if has_call_oi or has_put_oi:
+        weighting_mode = "oi"
+        if not (has_call_oi and has_put_oi):
+            warnings.append("Open interest missing on one side; using 0 for missing side.")
+    elif has_call_vol or has_put_vol:
+        weighting_mode = "volume"
+        warnings.append("Open interest unavailable; using volume-weighted net $GEX proxy (noisy).")
+    else:
+        weighting_mode = "gamma_only"
+        warnings.append("Open interest and volume unavailable; using gamma-only net $GEX proxy (very noisy).")
+
+    # Group by expiry (only for requested expiries)
+    rows_by_exp: Dict[str, List[dict]] = {e: [] for e in out_exp}
+    for r in rows:
+        ex = str(r.get("expirDate") or r.get("expiry") or r.get("expDate") or r.get("exp_date") or "")[:10]
+        if ex in rows_by_exp:
+            rows_by_exp[ex].append(r)
+
+    # Collect strikes (union across expiries) inside the band
+    strike_set = set()
+    for ex in out_exp:
+        for r in rows_by_exp.get(ex) or []:
+            k = _to_float(r.get("strike"))
+            if k is None:
+                continue
+            kk = float(k)
+            if lo <= kk <= hi:
+                strike_set.add(kk)
+    strikes = sorted(strike_set)
+
+    # Cap strikes (keep stable sampling across the band)
+    cap = max(40, int(strike_cap))
+    if len(strikes) > cap:
+        stride = int(math.ceil(len(strikes) / float(cap)))
+        strikes = strikes[:: max(1, stride)]
+
+    # Build expiry×strike matrix (null for missing)
+    mat: List[List[Optional[float]]] = []
+    for ex in out_exp:
+        by_strike: Dict[float, float] = {}
+        for r in rows_by_exp.get(ex) or []:
+            k = _to_float(r.get("strike"))
+            gamma = _to_float(r.get("gamma"))
+            if k is None or gamma is None:
+                continue
+            kk = float(k)
+            if kk not in strike_set:
+                # Outside band or filtered out; skip
+                continue
+
+            if weighting_mode == "oi":
+                c = _to_float(r.get("callOpenInterest")) or 0.0
+                p = _to_float(r.get("putOpenInterest")) or 0.0
+            elif weighting_mode == "volume":
+                c = _to_float(r.get("callVolume")) or 0.0
+                p = _to_float(r.get("putVolume")) or 0.0
+            else:
+                c = 1.0
+                p = 1.0
+            c = max(0.0, float(c))
+            p = max(0.0, float(p))
+
+            # Dollar-gamma-ish scaling (street-style proxy)
+            val = float(gamma) * (c - p) * (s0**2) * float(contract_multiplier)
+            if math.isfinite(val):
+                by_strike[kk] = by_strike.get(kk, 0.0) + float(val)
+
+        row_vals: List[Optional[float]] = []
+        for kk in strikes:
+            v = by_strike.get(float(kk))
+            row_vals.append(None if v is None else round(float(v), 6))
+        mat.append(row_vals)
+
+    return {
+        "enabled": True,
+        "spot": round(float(s0), 6),
+        "bandPct": float(band_pct),
+        "weightingMode": weighting_mode,
+        "contractMultiplier": int(contract_multiplier),
+        "expiries": out_exp,
+        "strikes": [round(float(k), 6) for k in strikes],
+        "netDollarGex": mat,
+        "warnings": warnings,
+        "notes": [
+            "Net $GEX is a best-effort proxy computed from ORATS strike gamma and OI; not a full dealer positioning model.",
+            "Missing strikes are returned as null (not zero).",
+        ],
+    }
+
+
 def _pick_live_expiry(expirations_rows: List[dict], *, today: dt.date) -> Optional[str]:
     # Backwards-compatible wrapper: preserve old semantics (nearest / 0DTE).
     exp_dates: List[str] = []
@@ -320,6 +514,9 @@ def compute_spx_live_levels(
     band_pct: float = 0.05,
     top_n: int = 5,
     cluster_steps: int = 2,
+    include_heatmap: bool = True,
+    heatmap_expiries: int = 12,
+    heatmap_band_pct: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Compute SPX live dealer-gamma and OI wall/cluster levels (informational).
@@ -375,6 +572,7 @@ def compute_spx_live_levels(
 
     used_symbol = None
     used_expiry = None
+    used_exp_dates: List[str] = []
     chain_rows: List[dict] = []
     chain_warn: List[str] = []
 
@@ -390,6 +588,7 @@ def compute_spx_live_levels(
         if rows:
             used_symbol = used_chain_sym or sym
             used_expiry = ex
+            used_exp_dates = exp_dates_by_symbol.get(sym) or []
             chain_rows = rows
             chain_warn = warn
             break
@@ -418,6 +617,39 @@ def compute_spx_live_levels(
     if spot is not None:
         flip = _compute_gamma_flip_strike(chain_rows, spot=float(spot), band_pct=float(band_pct), weighting_mode=wmode, contract_multiplier=100)
 
+    gex_heatmap = None
+    if bool(include_heatmap) and used_symbol:
+        try:
+            # Compute heatmap across multiple expiries using ONE full live strikes pull for the chosen symbol.
+            # (The /api/spx-levels endpoint caches this payload, so this stays interactive.)
+            band_h = float(heatmap_band_pct) if (heatmap_band_pct is not None) else float(band_pct)
+            exp_window = _pick_expiry_window(used_exp_dates, view=view, today=today, now_dt=now_dt, limit=int(heatmap_expiries))
+
+            # Prefer a full strikes cache if we already have it.
+            all_rows = strikes_cache_by_symbol.get(used_symbol)
+            if all_rows is None:
+                all_rows = [r for r in (client.live_strikes(ticker=used_symbol, fields=fields0).rows or []) if isinstance(r, dict)]
+
+            # Prefer spot from the full rows in case the selected-expiry rows were sparse.
+            s0 = _pick_spot_from_live_rows(all_rows) or (float(spot) if spot is not None else None)
+            if s0 is not None and exp_window:
+                gex_heatmap = compute_spx_net_gex_heatmap(
+                    all_rows,
+                    expiries=exp_window,
+                    spot=float(s0),
+                    band_pct=float(band_h),
+                    contract_multiplier=100,
+                    strike_cap=180,
+                )
+        except Exception as e:
+            # Keep endpoint resilient: heatmap is additive UI. Don't fail the entire levels payload.
+            LOG.exception("Failed to compute SPX net $GEX heatmap")
+            gex_heatmap = {
+                "enabled": False,
+                "error": f"{type(e).__name__}",
+                "notes": ["Heatmap unavailable (best-effort)."],
+            }
+
     return {
         "enabled": True,
         "view": "weekly" if str(view).lower().startswith("week") else "nearest",
@@ -429,6 +661,7 @@ def compute_spx_live_levels(
         "gammaFlipStrike": None if flip is None else round(float(flip), 2),
         "dealerGamma": dg,
         "oiClusters": oi,
+        "gexHeatmap": gex_heatmap,
         "warnings": [*exp_warn, *list(chain_warn or []), *list(dg.get("warnings") or []), *list(oi.get("warnings") or [])],
         "notes": [
             "Live, informational only. Does not change backtest/odds.",

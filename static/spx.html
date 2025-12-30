@@ -380,6 +380,35 @@
           </div>
         </section>
 
+        <section class="surface" id="gexHeatMap">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Net $GEX Heat Map
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Net $GEX Heat Map help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Net $GEX Heat Map (expiry × strike)</div>
+                  <div class="tipBody">
+                    <p>A live, best-effort view of <b>net dollar gamma proxy</b> by strike across upcoming expiries.</p>
+                    <ul>
+                      <li><b>Color</b>: warm = positive net $GEX, cool = negative net $GEX.</li>
+                      <li><b>Hover</b> a cell to see the exact expiry/strike value.</li>
+                      <li><b>Desk view</b>: use pools as context for potential “pinning” vs “acceleration” zones.</li>
+                    </ul>
+                    <p><b>Important</b>: derived from ORATS live strike gamma + OI; informational only.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="gexMeta">—</div>
+          </div>
+          <div class="chartCard">
+            <div id="gexHeatmap" class="gexHeatmap" aria-label="SPX net $GEX heat map"></div>
+            <div id="gexHeatTip" class="chartTip hidden" role="tooltip"></div>
+            <div id="gexNote" class="metricCaption muted">—</div>
+          </div>
+        </section>
+
         <!-- AskRaven removed -->
 
         <section class="surface">
