@@ -865,10 +865,7 @@ body {
   color: var(--ta-muted);
 }
 
-/* Calendar: +N expand panel (keeps month cells uniform) */
-.calGrid--month .calCell {
-  height: 240px;
-}
+/* Calendar: +N expand panel (month cells use dynamic height) */
 
 .calExpandPanel {
   position: absolute;
