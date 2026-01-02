@@ -382,47 +382,7 @@
           </div>
         </section>
 
-        <section class="surface hidden" id="technicalsSection">
-          <div class="sectionHeader">
-            <h2 class="sectionTitle">
-              Technicals (Daily)
-              <span class="tipWrap">
-                <button class="tipBtn" type="button" aria-label="Technicals help" aria-expanded="false">i</button>
-                <div class="tipPanel" role="tooltip">
-                  <div class="tipTitle">Technicals (daily, swing-focused)</div>
-                  <div class="tipBody">
-                    <p>This panel summarizes classic technical indicators using <b>daily/EOD</b> bars only (not intraday). It is designed for <b>swing trading</b> context.</p>
-                    <ul>
-                      <li><b>What it is</b>: deterministic signals + a rule-based narrative (no LLM required).</li>
-                      <li><b>How to use</b>: pair with macro/dealer context; focus on key levels and invalidation.</li>
-                      <li><b>Compliance note</b>: informational only; not investment advice.</li>
-                    </ul>
-                  </div>
-                </div>
-              </span>
-            </h2>
-            <div class="sectionMeta muted" id="technicalsMeta">—</div>
-          </div>
-
-          <div class="metricGrid">
-            <div class="metricCard" style="grid-column: 1 / -1;">
-              <div class="metricLabel">Narrative</div>
-              <div id="technicalsSummary" class="metricValue metricValue--message">—</div>
-            </div>
-            <div class="metricCard" style="grid-column: 1 / -1;">
-              <div class="metricLabel">Key points</div>
-              <div id="technicalsBullets" class="metricCaption muted">—</div>
-            </div>
-            <div class="metricCard" style="grid-column: 1 / -1;">
-              <div class="metricLabel">Invalidation / what would change the view</div>
-              <div id="technicalsInvalidation" class="metricCaption muted">—</div>
-            </div>
-            <div class="metricCard" style="grid-column: 1 / -1;">
-              <div class="metricLabel">Data quality notes</div>
-              <div id="technicalsNotes" class="metricCaption muted">—</div>
-            </div>
-          </div>
-        </section>
+        <section class="surface hidden" id="technicalsSection"></section>
 
         <section class="surface hidden" id="eventRiskSection">
           <div class="sectionHeader">
@@ -729,6 +689,7 @@
       </section>
     </main>
 
+    <script src="/static/ta_panel.js"></script>
     <script src="/static/app.js"></script>
   </body>
 </html>

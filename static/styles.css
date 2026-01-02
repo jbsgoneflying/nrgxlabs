@@ -441,6 +441,382 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* ============================================================
+   Technicals (Daily) Panel — desk scan UI (glass tokens)
+   ============================================================ */
+:root {
+  --ta-radius-lg: 16px;
+  --ta-radius-md: 12px;
+  --ta-blur: 20px;
+  --ta-glass-bg: rgba(255, 255, 255, 0.55);
+  --ta-glass-border: rgba(255, 255, 255, 0.16);
+  --ta-shadow: 0 18px 40px rgba(0, 0, 0, 0.10);
+  --ta-text: rgba(11, 11, 15, 0.92);
+  --ta-muted: rgba(11, 11, 15, 0.55);
+  --ta-divider: rgba(11, 11, 15, 0.10);
+  --ta-pos: rgba(46, 204, 113, 0.14);
+  --ta-neu: rgba(120, 120, 140, 0.14);
+  --ta-neg: rgba(255, 77, 77, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ta-glass-bg: rgba(255, 255, 255, 0.06);
+    --ta-glass-border: rgba(255, 255, 255, 0.14);
+    --ta-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+    --ta-text: rgba(245, 245, 247, 0.92);
+    --ta-muted: rgba(245, 245, 247, 0.62);
+    --ta-divider: rgba(255, 255, 255, 0.10);
+    --ta-pos: rgba(46, 204, 113, 0.14);
+    --ta-neu: rgba(120, 140, 255, 0.12);
+    --ta-neg: rgba(255, 77, 77, 0.12);
+  }
+}
+
+.taPanel {
+  display: grid;
+  gap: 12px;
+  color: var(--ta-text);
+}
+
+.taGlass {
+  background: var(--ta-glass-bg);
+  border: 1px solid var(--ta-glass-border);
+  border-radius: var(--ta-radius-lg);
+  box-shadow: var(--ta-shadow);
+  backdrop-filter: blur(var(--ta-blur));
+}
+
+.taHeader {
+  padding: 14px 14px 10px;
+  border-radius: var(--ta-radius-lg);
+  background: var(--ta-glass-bg);
+  border: 1px solid var(--ta-glass-border);
+  box-shadow: var(--ta-shadow);
+  backdrop-filter: blur(var(--ta-blur));
+}
+
+.taHeaderRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.taHeaderRow--sub {
+  margin-top: 10px;
+  justify-content: flex-start;
+}
+
+.taHeaderTitle {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.08px;
+}
+
+.taHeaderMeta {
+  font-size: 12px;
+  color: var(--ta-muted);
+  font-weight: 650;
+}
+
+.taBiasPill {
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.08px;
+  border: 1px solid var(--ta-divider);
+}
+
+.taBiasPill--pos { background: var(--ta-pos); }
+.taBiasPill--neu { background: var(--ta-neu); }
+.taBiasPill--neg { background: var(--ta-neg); }
+
+.taConf {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 0 6px;
+}
+
+.taDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  border: 1px solid var(--ta-divider);
+  background: transparent;
+}
+
+.taDot.isOn {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+@media (prefers-color-scheme: dark) {
+  .taDot.isOn { background: rgba(255, 255, 255, 0.72); }
+}
+
+.taChips {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.taChip {
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ta-divider);
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ta-muted);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+@media (prefers-color-scheme: dark) {
+  .taChip { background: rgba(255, 255, 255, 0.02); }
+}
+
+.taHeaderActions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.taModeToggle {
+  display: inline-flex;
+  border: 1px solid var(--ta-divider);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.taModeBtn {
+  padding: 6px 10px;
+  background: transparent;
+  border: 0;
+  font-size: 12px;
+  font-weight: 750;
+  color: var(--ta-muted);
+  cursor: pointer;
+}
+
+.taModeBtn.isOn {
+  color: var(--ta-text);
+  background: rgba(0, 0, 0, 0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+  .taModeBtn.isOn { background: rgba(255, 255, 255, 0.08); }
+}
+
+.taActionBtn {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--ta-divider);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 750;
+  color: var(--ta-text);
+  cursor: pointer;
+}
+
+.taActionBtn:focus,
+.taModeBtn:focus,
+.taLinkBtn:focus,
+.taInfoBtn:focus {
+  outline: 2px solid rgba(110, 168, 254, 0.55);
+  outline-offset: 2px;
+}
+
+.taGrid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 920px) {
+  .taGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+.taCard {
+  padding: 12px;
+  border-radius: var(--ta-radius-lg);
+  border: 1px solid var(--ta-glass-border);
+  background: var(--ta-glass-bg);
+  box-shadow: var(--ta-shadow);
+  backdrop-filter: blur(var(--ta-blur));
+  cursor: default;
+}
+
+.taCardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.taCardTitle {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08px;
+  color: var(--ta-muted);
+}
+
+.taInfoBtn {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--ta-divider);
+  background: transparent;
+  font-weight: 900;
+  color: var(--ta-muted);
+  cursor: pointer;
+}
+
+.taCardVis {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.taVis { width: 100%; max-width: 120px; height: auto; }
+
+.taCardState {
+  margin-top: 8px;
+  font-size: 14px;
+  font-weight: 850;
+  letter-spacing: 0.06px;
+}
+
+.taCardInterp {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ta-muted);
+  line-height: 1.28;
+}
+
+.taCardMoreRow {
+  margin-top: 8px;
+}
+
+.taCardExplain {
+  font-size: 11px;
+  line-height: 1.30;
+  color: var(--ta-muted);
+}
+
+.taBreaks {
+  padding: 12px;
+  background: linear-gradient(0deg, var(--ta-neg), var(--ta-neg)), var(--ta-glass-bg);
+}
+
+.taBreaksTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.taBreaksTitle {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.06px;
+}
+
+.taAnalysis {
+  padding: 12px;
+}
+
+.taAnalysisTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.taAnalysisTitle {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.06px;
+}
+
+.taNarrativeText {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ta-text);
+  white-space: pre-wrap;
+}
+
+.taLinkBtn {
+  margin-top: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ta-muted);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.taList,
+.taMiniList {
+  margin: 8px 0 0 18px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  color: var(--ta-text);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.taMiniList {
+  font-size: 12px;
+  color: var(--ta-muted);
+}
+
+.taDetails {
+  padding: 12px;
+  border-radius: var(--ta-radius-lg);
+  border: 1px solid var(--ta-glass-border);
+  background: var(--ta-glass-bg);
+  box-shadow: var(--ta-shadow);
+  backdrop-filter: blur(var(--ta-blur));
+}
+
+.taDetails summary {
+  cursor: pointer;
+  font-weight: 850;
+  color: var(--ta-muted);
+}
+
+/* Micro-visual strokes */
+.taArcBase { stroke: var(--ta-divider); stroke-width: 6; stroke-linecap: round; }
+.taArc { stroke-width: 6; stroke-linecap: round; stroke-dasharray: 130; stroke-dashoffset: 0; opacity: 0.22; }
+.taArc--positive { stroke: rgba(46, 204, 113, 0.85); }
+.taArc--neutral { stroke: rgba(120, 140, 255, 0.85); }
+.taArc--negative { stroke: rgba(255, 77, 77, 0.85); }
+.taArcDot { fill: var(--ta-text); }
+
+.taBarBase { fill: rgba(0, 0, 0, 0.08); }
+@media (prefers-color-scheme: dark) { .taBarBase { fill: rgba(255, 255, 255, 0.10); } }
+.taBarFill { fill: rgba(120, 140, 255, 0.55); }
+.taBarDot { fill: var(--ta-text); }
+
+.taBadgeLine { fill: rgba(0, 0, 0, 0.10); }
+@media (prefers-color-scheme: dark) { .taBadgeLine { fill: rgba(255, 255, 255, 0.12); } }
+.taBadgeDot--positive { fill: rgba(46, 204, 113, 0.75); }
+.taBadgeDot--neutral { fill: rgba(120, 140, 255, 0.75); }
+.taBadgeDot--negative { fill: rgba(255, 77, 77, 0.75); }
+.taBadgeDot--mixed { fill: rgba(200, 200, 210, 0.75); }
+
+.taStackLine { fill: rgba(0, 0, 0, 0.10); }
+@media (prefers-color-scheme: dark) { .taStackLine { fill: rgba(255, 255, 255, 0.12); } }
+.taStackDot--positive { fill: rgba(46, 204, 113, 0.75); }
+.taStackDot--negative { fill: rgba(255, 77, 77, 0.75); }
+.taStackDot--mixed { fill: rgba(200, 200, 210, 0.75); }
+
 /* Snapshot-specific tightening (Engine 2) */
 #recMain {
   font-size: 20px;

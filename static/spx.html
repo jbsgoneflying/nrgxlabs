@@ -360,46 +360,7 @@
           </div>
         </section>
 
-        <section class="surface hidden" id="technicalsSection">
-          <div class="sectionHeader">
-            <h2 class="sectionTitle">
-              Technicals (Daily)
-              <span class="tipWrap">
-                <button class="tipBtn" type="button" aria-label="Technicals help" aria-expanded="false">i</button>
-                <div class="tipPanel" role="tooltip">
-                  <div class="tipTitle">Technicals (daily, swing-focused)</div>
-                  <div class="tipBody">
-                    <p>Deterministic daily/EOD technicals + a rule-based narrative for swing context (no intraday).</p>
-                    <ul>
-                      <li><b>What it is</b>: EMA/RSI/MACD/Bollinger/Ichimoku + patterns + pivot structure.</li>
-                      <li><b>How to use</b>: treat as a map of trend/momentum/volatility and key levels/invalidation.</li>
-                    </ul>
-                  </div>
-                </div>
-              </span>
-            </h2>
-            <div class="sectionMeta muted" id="technicalsMeta">—</div>
-          </div>
-
-          <div class="metricGrid">
-            <div class="metricCard" style="grid-column: 1 / -1;">
-              <div class="metricLabel">Narrative</div>
-              <div id="technicalsSummary" class="metricValue metricValue--message">—</div>
-            </div>
-            <div class="metricCard" style="grid-column: 1 / -1;">
-              <div class="metricLabel">Key points</div>
-              <div id="technicalsBullets" class="metricCaption muted">—</div>
-            </div>
-            <div class="metricCard" style="grid-column: 1 / -1;">
-              <div class="metricLabel">Invalidation / what would change the view</div>
-              <div id="technicalsInvalidation" class="metricCaption muted">—</div>
-            </div>
-            <div class="metricCard" style="grid-column: 1 / -1;">
-              <div class="metricLabel">Data quality notes</div>
-              <div id="technicalsNotes" class="metricCaption muted">—</div>
-            </div>
-          </div>
-        </section>
+        <section class="surface hidden" id="technicalsSection"></section>
 
         <section class="surface" id="gammaMap">
           <div class="sectionHeader">
@@ -534,6 +495,7 @@
       </section>
     </main>
 
+    <script src="/static/ta_panel.js"></script>
     <script src="/static/spx.js"></script>
   </body>
 </html>
