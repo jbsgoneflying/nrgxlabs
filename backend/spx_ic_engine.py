@@ -21,7 +21,22 @@ LOG = logging.getLogger("spx_ic_engine")
 from backend.dealer_gamma_context import compute_dealer_gamma_context
 from backend.oi_clusters import compute_open_interest_clusters
 from backend.technicals import DailyBar as TechDailyBar
-from backend.technicals import compute_distances, compute_ema_levels, compute_ichimoku_levels, compute_vwap_proxy, fetch_live_price_optional
+from backend.technicals import (
+    _ema_series,
+    build_ta_narrative,
+    build_ta_signals,
+    compute_bollinger_series,
+    compute_distances,
+    compute_ema_levels,
+    compute_ichimoku_levels,
+    compute_macd_series,
+    compute_rsi_series,
+    compute_vwap_proxy,
+    detect_candlestick_patterns,
+    detect_elliott_pivot_structure,
+    detect_red_dog_reversal,
+    fetch_live_price_optional,
+)
 
 
 def _fmt_date(d: dt.date) -> str:
@@ -3529,8 +3544,158 @@ def compute_engine2_spx_ic(
         )
     closes_tech = [float(b.close) for b in tech_bars if b.close is not None and float(b.close) > 0]
     ema = compute_ema_levels(closes_tech, spans=[8, 21, 50, 100, 200]) if closes_tech else {}
-    ich = compute_ichimoku_levels(tech_bars) if tech_bars else {"enabled": False, "notes": ["No bars available."]}
+    ok_ohlc = bool(tech_bars) and (tech_bars[-1].high is not None) and (tech_bars[-1].low is not None) and (tech_bars[-1].close is not None)
+
+    # Close-based indicators (daily)
+    rsi: Dict[str, Any] = {"enabled": False, "period": 14, "value": None, "slope1d": None, "state": None, "notes": []}
+    macd: Dict[str, Any] = {
+        "enabled": False,
+        "fast": 12,
+        "slow": 26,
+        "signal": 9,
+        "macd": None,
+        "signalLine": None,
+        "hist": None,
+        "cross": None,
+        "histTrend": None,
+        "notes": [],
+    }
+    boll: Dict[str, Any] = {
+        "enabled": False,
+        "period": 20,
+        "stdev": 2.0,
+        "mid": None,
+        "upper": None,
+        "lower": None,
+        "bandwidthPct": None,
+        "percentB": None,
+        "state": None,
+        "squeeze": None,
+        "notes": [],
+    }
+    ema_slopes: Dict[str, Optional[float]] = {}
+    try:
+        for span in (21, 50, 200):
+            if len(closes_tech) >= int(span) + 6:
+                ser = _ema_series(closes_tech, int(span))
+                if len(ser) >= 6:
+                    ema_slopes[f"ema{int(span)}_slope5"] = float(ser[-1]) - float(ser[-6])
+            else:
+                ema_slopes[f"ema{int(span)}_slope5"] = None
+    except Exception:
+        ema_slopes = {}
+
+    if len(closes_tech) >= 16:
+        rsi_series = compute_rsi_series(closes_tech, period=14)
+        rv = rsi_series[-1]
+        rp = rsi_series[-2] if len(rsi_series) >= 2 else None
+        if rv is not None and math.isfinite(float(rv)):
+            slope = None
+            if rp is not None and math.isfinite(float(rp)):
+                slope = float(rv) - float(rp)
+            state = "overbought" if float(rv) >= 70.0 else "oversold" if float(rv) <= 30.0 else "neutral"
+            rsi = {
+                "enabled": True,
+                "period": 14,
+                "value": float(rv),
+                "slope1d": None if slope is None else float(slope),
+                "state": state,
+                "notes": ["RSI computed on daily closes (Wilder smoothing)."],
+            }
+
+    if len(closes_tech) >= 40:
+        m = compute_macd_series(closes_tech, fast=12, slow=26, signal=9)
+        macd_series = m.get("macd") or []
+        sig_series = m.get("signal") or []
+        hist_series = m.get("hist") or []
+        mv = macd_series[-1] if macd_series else None
+        sv = sig_series[-1] if sig_series else None
+        hv = hist_series[-1] if hist_series else None
+        cross = None
+        hist_trend = None
+        if len(macd_series) >= 2 and len(sig_series) >= 2:
+            mp = macd_series[-2]
+            sp = sig_series[-2]
+            if all(x is not None for x in (mp, sp, mv, sv)):
+                prev = float(mp) - float(sp)
+                cur = float(mv) - float(sv)
+                if prev <= 0 and cur > 0:
+                    cross = "bullish"
+                elif prev >= 0 and cur < 0:
+                    cross = "bearish"
+        if len(hist_series) >= 2 and hist_series[-2] is not None and hv is not None:
+            try:
+                hist_trend = "increasing" if float(hv) > float(hist_series[-2]) else "decreasing" if float(hv) < float(hist_series[-2]) else "flat"
+            except Exception:
+                hist_trend = None
+        if mv is not None and sv is not None:
+            macd = {
+                "enabled": True,
+                "fast": 12,
+                "slow": 26,
+                "signal": 9,
+                "macd": float(mv) if mv is not None else None,
+                "signalLine": float(sv) if sv is not None else None,
+                "hist": float(hv) if hv is not None else None,
+                "cross": cross,
+                "histTrend": hist_trend,
+                "notes": ["MACD computed on daily closes (12/26 EMA, 9 EMA signal)."],
+            }
+
+    if len(closes_tech) >= 40:
+        bb = compute_bollinger_series(closes_tech, period=20, stdev=2.0)
+        mid_s = bb.get("mid") or []
+        up_s = bb.get("upper") or []
+        lo_s = bb.get("lower") or []
+        bw_s = bb.get("bandwidthPct") or []
+        pb_s = bb.get("percentB") or []
+        mid_v = mid_s[-1] if mid_s else None
+        up_v = up_s[-1] if up_s else None
+        lo_v = lo_s[-1] if lo_s else None
+        bw_v = bw_s[-1] if bw_s else None
+        pb_v = pb_s[-1] if pb_s else None
+        state = None
+        if up_v is not None and lo_v is not None:
+            c0 = float(closes_tech[-1])
+            if c0 > float(up_v):
+                state = "above_upper"
+            elif c0 < float(lo_v):
+                state = "below_lower"
+            else:
+                state = "inside"
+        squeeze = None
+        bw_vals = [float(x) for x in bw_s[-120:] if x is not None and math.isfinite(float(x))]
+        if bw_v is not None and bw_vals:
+            # simple percentile: bottom 20% => squeeze
+            pr = None
+            try:
+                c = sum(1 for v in bw_vals if v <= float(bw_v))
+                pr = c / float(len(bw_vals))
+            except Exception:
+                pr = None
+            if pr is not None:
+                squeeze = bool(float(pr) <= 0.20)
+        if mid_v is not None and up_v is not None and lo_v is not None:
+            boll = {
+                "enabled": True,
+                "period": 20,
+                "stdev": 2.0,
+                "mid": float(mid_v),
+                "upper": float(up_v),
+                "lower": float(lo_v),
+                "bandwidthPct": None if bw_v is None else float(bw_v),
+                "percentB": None if pb_v is None else float(pb_v),
+                "state": state,
+                "squeeze": squeeze,
+                "notes": ["Bollinger Bands computed on daily closes (20 SMA, 2σ)."],
+            }
+
+    # OHLC-based
+    ich = compute_ichimoku_levels(tech_bars) if ok_ohlc else {"enabled": False, "notes": ["Insufficient OHLC for Ichimoku."]}
     vwap_proxy = compute_vwap_proxy(tech_bars, window=20) if tech_bars else {"enabled": False}
+    candles = detect_candlestick_patterns(tech_bars) if ok_ohlc else {"enabled": False, "patterns": [], "notes": ["Insufficient OHLC for candle patterns."]}
+    red_dog = detect_red_dog_reversal(tech_bars) if ok_ohlc else {"enabled": False, "bullish": False, "bearish": False, "notes": ["Insufficient OHLC for Red Dog."]}
+    elliott = detect_elliott_pivot_structure(tech_bars, threshold_pct=0.04) if closes_tech else {"enabled": False, "structure": "unclear", "notes": ["Insufficient closes for pivots."]}
     live_px = None
     # Prefer liveContext spot if available, else try live summaries for the underlying/proxy
     try:
@@ -3541,6 +3706,16 @@ def compute_engine2_spx_ic(
         live_px = fetch_live_price_optional(client, ticker=str(underlying).upper())
     level_map: Dict[str, Optional[float]] = {}
     level_map.update(ema)
+    if isinstance(boll, dict) and boll.get("enabled"):
+        try:
+            if boll.get("mid") is not None:
+                level_map["bbMid"] = float(boll["mid"])
+            if boll.get("upper") is not None:
+                level_map["bbUpper"] = float(boll["upper"])
+            if boll.get("lower") is not None:
+                level_map["bbLower"] = float(boll["lower"])
+        except Exception:
+            pass
     if isinstance(vwap_proxy, dict) and vwap_proxy.get("enabled") and vwap_proxy.get("value") is not None:
         try:
             level_map["vwapProxy"] = float(vwap_proxy["value"])
@@ -3557,6 +3732,37 @@ def compute_engine2_spx_ic(
             level_map["cloudBottomNow"] = float(cn["cloudBottom"])
     distances = compute_distances(live_price=live_px, levels=level_map)
     last_bar = tech_bars[-1] if tech_bars else None
+    last_close = None if (last_bar is None or last_bar.close is None) else float(last_bar.close)
+    px_for_narr = float(live_px) if (live_px is not None and float(live_px) > 0) else (float(last_close) if last_close is not None else (float(closes_tech[-1]) if closes_tech else 0.0))
+
+    signals = build_ta_signals(
+        price=float(px_for_narr),
+        ema_levels=ema,
+        ema_slopes=ema_slopes,
+        rsi=rsi,
+        macd=macd,
+        boll=boll,
+        ich=ich,
+        candles=candles,
+        red_dog=red_dog,
+        elliott=elliott,
+        distances=distances,
+    )
+    narrative = build_ta_narrative(
+        ticker=str(underlying).upper(),
+        price=float(px_for_narr),
+        last_close=float(last_close) if last_close is not None else float(px_for_narr),
+        ema_levels=ema,
+        ema_slopes=ema_slopes,
+        rsi=rsi,
+        macd=macd,
+        boll=boll,
+        ich=ich,
+        candles=candles,
+        red_dog=red_dog,
+        elliott=elliott,
+        signals=signals,
+    )
     technicals = {
         "enabled": bool(bool(tech_bars)),
         "ticker": str(underlying).upper(),
@@ -3565,9 +3771,41 @@ def compute_engine2_spx_ic(
         "lastDailyClose": None if (last_bar is None or last_bar.close is None) else round(float(last_bar.close), 4),
         "livePrice": None if live_px is None else round(float(live_px), 4),
         "ema": {k: (None if v is None else round(float(v), 4)) for k, v in (ema or {}).items()},
+        "rsi": {
+            **(rsi if isinstance(rsi, dict) else {"enabled": False}),
+            "value": (None if not isinstance(rsi, dict) or rsi.get("value") is None else round(float(rsi["value"]), 4)),
+            "slope1d": (None if not isinstance(rsi, dict) or rsi.get("slope1d") is None else round(float(rsi["slope1d"]), 4)),
+        },
+        "macd": (
+            {"enabled": False}
+            if not isinstance(macd, dict)
+            else {
+                **macd,
+                "macd": (None if macd.get("macd") is None else round(float(macd["macd"]), 6)),
+                "signalLine": (None if macd.get("signalLine") is None else round(float(macd["signalLine"]), 6)),
+                "hist": (None if macd.get("hist") is None else round(float(macd["hist"]), 6)),
+            }
+        ),
+        "bollinger": (
+            {"enabled": False}
+            if not isinstance(boll, dict)
+            else {
+                **boll,
+                "mid": (None if boll.get("mid") is None else round(float(boll["mid"]), 4)),
+                "upper": (None if boll.get("upper") is None else round(float(boll["upper"]), 4)),
+                "lower": (None if boll.get("lower") is None else round(float(boll["lower"]), 4)),
+                "bandwidthPct": (None if boll.get("bandwidthPct") is None else round(float(boll["bandwidthPct"]), 4)),
+                "percentB": (None if boll.get("percentB") is None else round(float(boll["percentB"]), 4)),
+            }
+        ),
+        "candles": candles,
+        "redDog": red_dog,
+        "elliott": elliott,
         "ichimoku": ich,
         "vwapProxy": ({"enabled": False} if not isinstance(vwap_proxy, dict) else {**vwap_proxy, "value": (None if vwap_proxy.get("value") is None else round(float(vwap_proxy["value"]), 4))}),
         "distances": distances,
+        "signals": signals,
+        "narrative": narrative,
         "notes": [
             "Indicators computed on daily bars (EOD).",
             "Live overlay uses ORATS Live spot/stockPrice when available (may reflect afterhours/last known).",

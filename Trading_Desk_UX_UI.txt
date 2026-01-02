@@ -1,0 +1,337 @@
+TRADING APP UI SPEC — “Technicals (Daily)” Block Redesign
+Target: Trading desk (speed of interpretation), Apple-like glass aesthetic
+Audience: Senior traders + analysts (scan first, expand for depth)
+Build instruction: Use this spec to implement a new component + styling + interaction patterns.
+
+============================================================
+1) GOALS / SUCCESS CRITERIA
+============================================================
+Primary goal: Reduce time-to-decision.
+- In 3 seconds: trader knows Bias (bull/bear/neutral) + Confidence.
+- In 10 seconds: trader knows what supports the bias + what breaks it.
+- Narrative remains available but never blocks scanning.
+
+Success metrics:
+- 80% of users can correctly answer:
+  1) “What’s the bias?”
+  2) “What are the key supports?”
+  3) “What invalidates it?”
+  after <10 seconds of exposure.
+- Traders can copy key levels in 1 click.
+- Visual hierarchy: header > grid cards > invalidation > narrative.
+
+============================================================
+2) INFORMATION ARCHITECTURE (NEW)
+============================================================
+Replace current single long narrative + bullets with:
+
+A) Decision Header (always visible)
+B) Indicator Cards Grid (always visible, max 6 cards)
+C) What Breaks the Trade (always visible)
+D) Expandable Narrative (collapsed by default)
+E) Data quality notes (collapsed if empty)
+
+Order is non-negotiable:
+Decision Header → Cards Grid → What Breaks the Trade → Narrative → Data Notes
+
+============================================================
+3) COMPONENTS OVERVIEW
+============================================================
+
+Component: TechnicalsDailyPanel
+- Props: symbol, timeframe, asOfDate, lastPrice, indicators, narrative, invalidations, dataQualityNotes
+- Behaviors:
+  - Default view is Scan Mode: narrative collapsed
+  - Expandable narrative section
+  - Each indicator card can show tooltip + optional “details” popover
+  - Optional “Desk Mode” toggle:
+      Scan Mode (cards only + short summary)
+      Explain Mode (auto-expands narrative and adds more text under cards)
+
+------------------------------------------------------------
+3A) DECISION HEADER (Top strip)
+------------------------------------------------------------
+Purpose: instantly answer “What’s the bias and how strong?”
+
+Layout:
+- Left: “{SYMBOL} — Daily Technicals”
+- Right: “EOD: {YYYY-MM-DD} • Price: {price}”
+- Below line (or same row on wide screens):
+  - Bias pill: [BULLISH BIAS | NEUTRAL | BEARISH BIAS]
+  - Confidence dots: ●●●●○ (based on 0–1 confidence)
+  - 2–3 “support chips” (short phrases) e.g. “Above EMA200”, “Above Cloud”, “Squeeze”
+
+Rules:
+- Only bias pill gets semantic tint (green/amber/red).
+- Confidence is dot-based, not a raw number (number can exist in tooltip).
+- Support chips are neutral glass tags (no color unless critical).
+
+Mapping:
+- confidence 0.0–0.2 => 1 dot
+- 0.21–0.4 => 2 dots
+- 0.41–0.6 => 3 dots
+- 0.61–0.8 => 4 dots
+- 0.81–1.0 => 5 dots
+
+------------------------------------------------------------
+3B) INDICATOR CARDS GRID (Instrument Panel)
+------------------------------------------------------------
+Purpose: show the core indicators as “glanceable instruments”.
+
+Hard constraints:
+- MAX 6 cards visible
+- 2 columns on mobile/narrow; 3 columns on desktop/wide
+- Each card has exactly 3 layers:
+  1) Micro-visual (dial/arc/bar)
+  2) State label (1–3 words + optional arrow)
+  3) One-line interpretation (<= ~90 chars)
+
+Card anatomy:
+- Title row: “RSI (14)” + small “i” tooltip icon
+- Visual area: thin arc / bar with dot marker
+- State label: e.g. “Neutral (45.7 ↓)”
+- One-liner: e.g. “Bull regimes often hold 40–50 on pullbacks.”
+- Optional: “View details” (revealed on hover, or via kebab menu)
+
+Micro-visual types (use the right one; do NOT force speedometer everywhere):
+1) ArcDial (semi-circle) — for continuum indicators like RSI
+2) CompressionBar — for volatility / bandwidth / squeeze indicators
+3) RegimeBadge — for binary/regime signals (Above EMA200, Above Cloud)
+4) StackedLinesMini — OPTIONAL simplified EMA stack depiction (no chart)
+
+Recommended 6 cards (priority order):
+1) Trend Regime (EMA200) — RegimeBadge
+2) EMA Stack (21/50/200) — StackedLinesMini or RegimeBadge (“Mixed”)
+3) RSI (14) — ArcDial
+4) MACD — RegimeBadge (Cross / No Cross / Histogram rising)
+5) Volatility (BB bandwidth) — CompressionBar
+6) Ichimoku (Cloud bias) — RegimeBadge (Above/Inside/Below + Bias)
+
+Notes:
+- “What Breaks the Trade” should NOT be a card. It’s a separate panel.
+- Avoid “all green”. Many statuses are neutral by design.
+- No needle animations; transitions should be subtle opacity/position.
+
+------------------------------------------------------------
+3C) “WHAT BREAKS THE TRADE” PANEL (Kill-switch)
+------------------------------------------------------------
+Purpose: risk-first / invalidation clarity.
+Rename section exactly: “What Breaks the Trade”
+
+Visual treatment:
+- Slightly distinct glass panel
+- Very subtle warning tint (NOT saturated red)
+- Small icon: exclamation in circle (not a danger triangle)
+
+Content:
+- 1–3 bullets max
+- Each bullet begins with the condition then outcome:
+  - “Daily close back into cloud → regime shifts to chop/mean reversion”
+  - “Loss of EMA200 (~244.66) → material swing deterioration”
+
+Behavior:
+- Always visible
+- Add “Copy levels” button if key numeric levels exist (EMA200, swing low, etc.)
+- Copy output format:
+  - “EMA200: 244.66 | EMA50: 269.54 | EMA21: 273.96 | Price: 271.86”
+
+------------------------------------------------------------
+3D) EXPANDABLE NARRATIVE (Progressive disclosure)
+------------------------------------------------------------
+Default: collapsed.
+
+Collapsed view:
+- Header “Analysis”
+- 4 bullet summary extracted from narrative:
+  - One sentence each, no wrap if possible (truncate with ellipsis)
+- “Expand” link
+
+Expanded view:
+- Show full narrative text as currently produced (verbatim)
+- Provide “Collapse” link
+- Provide optional “Copy narrative” action
+
+------------------------------------------------------------
+3E) DATA QUALITY NOTES
+------------------------------------------------------------
+If empty: hide entire section.
+If present: collapsed by default.
+
+============================================================
+4) VISUAL DESIGN — APPLE-LIKE GLASS (TOKENS)
+============================================================
+Do not hardcode. Use tokens / CSS vars.
+
+Base tokens (suggested; adjust to app theme):
+- radius-lg: 16px
+- radius-md: 12px
+- blur: 18–22px
+- glass-bg: rgba(255,255,255,0.06) (dark) or rgba(255,255,255,0.65) (light)
+- glass-border: rgba(255,255,255,0.14)
+- shadow: subtle (low spread, low alpha)
+- text-primary: near-white (dark) / near-black (light)
+- text-secondary: muted by ~35%
+- divider: 1px rgba(255,255,255,0.10)
+
+Color usage rules (critical):
+- Use semantic tint ONLY for Bias pill and the “What Breaks the Trade” panel.
+- Cards should mostly be neutral.
+- Within cards, use small accent hints:
+  - Positive: gentle green tint at 10–15% opacity
+  - Neutral: gray/blue tint
+  - Negative: gentle red tint at 10–15% opacity
+- Do NOT use neon/saturated colors.
+
+Typography:
+- Titles: system font (SF Pro / Inter) semibold
+- Numbers: monospace (SF Mono / ui-monospace)
+- Body: regular
+- Keep line-height generous (1.35–1.5)
+
+============================================================
+5) INTERACTION DETAILS
+============================================================
+A) Hover tooltips (desktop):
+- Hover “i” icon in card header shows:
+  - Indicator definition
+  - Current value
+  - “Why it matters” one-liner
+
+B) Click/tap card:
+- Opens lightweight popover with:
+  - Value + trend vs yesterday (↑/↓)
+  - 2–3 supporting sub-bullets
+  - Optional “Pin to top” (future enhancement)
+
+C) Desk Mode Toggle (optional but recommended):
+- Toggle labeled: “Scan / Explain”
+- Scan: narrative collapsed, one-liners only
+- Explain: narrative expanded + slightly more descriptive subtext
+
+D) Copy actions:
+- “Copy levels” in What Breaks panel
+- “Copy snapshot” in header:
+  - Outputs a concise text block:
+    “AAPL Daily | Bias: Bullish (4/5) | Price 271.86 | Above EMA200 244.66 | RSI 45.7↓ | BB Squeeze 4.99% | MACD no cross | Cloud bullish”
+
+============================================================
+6) DATA MODEL / STATE MAPPING (FOR GPT IMPLEMENTATION)
+============================================================
+Define an indicator schema like:
+
+IndicatorCard {
+  id: string
+  title: string
+  valueText: string         // “45.7”
+  deltaText?: string        // “↓ vs yesterday”
+  state: 'positive'|'neutral'|'negative'|'mixed'
+  stateLabel: string        // “Neutral”
+  interpretation: string    // one-line
+  visualType: 'arc'|'bar'|'badge'|'stack'
+  visualParams: object      // depends on visualType
+  tooltip?: { definition, why, rawValue, rawDelta }
+  details?: { bullets: string[], levels?: {label,value}[] }
+}
+
+BiasHeader {
+  bias: 'bullish'|'neutral'|'bearish'
+  confidence: number (0..1)
+  supportChips: string[] (2–3 items)
+}
+
+InvalidationPanel {
+  bullets: string[] (1–3)
+  keyLevels?: {label,value}[]
+}
+
+============================================================
+7) VISUAL PARAMS — SPECIFIC GUIDANCE PER INDICATOR
+============================================================
+
+1) Trend Regime (EMA200)
+- visualType: badge
+- state:
+  - price > EMA200 => positive
+  - price near EMA200 (within ~1–2%) => neutral
+  - price < EMA200 => negative
+- stateLabel examples:
+  - “Above EMA200”
+  - “At EMA200”
+  - “Below EMA200”
+- interpretation:
+  - “Primary swing regime divider.”
+
+2) EMA Stack (21/50/200)
+- visualType: stack (or badge if simpler)
+- state:
+  - aligned bullish (21>50>200 + price above) => positive
+  - mixed => mixed/neutral
+  - bearish alignment => negative
+- interpretation:
+  - “Stack alignment frames pullback risk.”
+
+3) RSI (14)
+- visualType: arc
+- arc ranges: 0–100; emphasize 40–60 neutral zone
+- state mapping:
+  - >60 => positive (momentum)
+  - 40–60 => neutral
+  - <40 => negative
+- Add arrow if falling/rising vs yesterday.
+
+4) MACD
+- visualType: badge
+- state mapping:
+  - fresh bullish cross or histogram rising strongly => positive
+  - no cross / flat => neutral
+  - bearish cross / histogram falling => negative
+- interpretation:
+  - “Acceleration check (cross + histogram).”
+
+5) Volatility (BB Bandwidth)
+- visualType: bar (compression)
+- state mapping:
+  - bandwidth very low vs baseline => neutral/attention (not “good”)
+  - expanding => directional confirmation context
+- interpretation:
+  - “Compression often precedes breakout; wait for follow-through.”
+
+6) Ichimoku (Cloud)
+- visualType: badge
+- state mapping:
+  - above cloud + bullish bias => positive
+  - inside cloud => neutral/chop
+  - below cloud => negative
+- interpretation:
+  - “Trend strength proxy; avoid cloud re-entry.”
+
+============================================================
+8) IMPLEMENTATION NOTES (CURSOR / GPT5.2)
+============================================================
+- Build as a single component file + small helper components:
+  - DecisionHeader
+  - IndicatorCard
+  - ArcDial
+  - CompressionBar
+  - RegimeBadge
+  - InvalidationPanel
+  - ExpandableNarrative
+- Use CSS variables and a theme wrapper for glass tokens.
+- Keep animations minimal:
+  - opacity fade on expand/collapse
+  - no sweeping needles
+- Ensure accessibility:
+  - color is not the only signal (use labels/arrows/icons)
+  - keyboard focus states for interactive elements
+
+============================================================
+9) ACCEPTANCE CHECKLIST
+============================================================
+[ ] Bias + confidence visible without scrolling
+[ ] Max 6 cards; each card has visual + state label + one-liner
+[ ] What Breaks panel is always visible + copy levels works
+[ ] Narrative collapsed by default + expands cleanly
+[ ] Glass style preserved; no heavy borders; no neon colors
+[ ] Traders can scan and answer bias/support/invalidation quickly
+
+END OF SPEC
