@@ -905,12 +905,24 @@ function renderEngine2DecisionPanel(payload) {
   const reg = payload?.current?.regime || {};
   const score = (reg?.score100 !== null && reg?.score100 !== undefined) ? Number(reg.score100) : null;
   const bucket = String(reg?.bucket || "—");
+  const regComp = reg?.components || {};
+  const regChips = [];
+  if (regComp.trend !== null && regComp.trend !== undefined) regChips.push(`trend ${Number(regComp.trend).toFixed(2)}`);
+  if (regComp.volatility !== null && regComp.volatility !== undefined) regChips.push(`vol ${Number(regComp.volatility).toFixed(2)}`);
+  if (regComp.stress !== null && regComp.stress !== undefined) regChips.push(`stress ${Number(regComp.stress).toFixed(2)}`);
+  if (regComp.event !== null && regComp.event !== undefined) regChips.push(`event ${Number(regComp.event).toFixed(2)}`);
+  if (regComp.dispersion !== null && regComp.dispersion !== undefined) regChips.push(`disp ${Number(regComp.dispersion).toFixed(2)}`);
 
   const macro = payload?.current?.macro || {};
   const multVal = (macro?.multiplier !== null && macro?.multiplier !== undefined) ? Number(macro.multiplier) : null;
   const flags = macro?.flags || {};
   const hi = ["CPI","FOMC","NFP"].some(k => flags && flags[k]);
   const macroBucket = (Number.isFinite(multVal) && (multVal >= 1.25 || hi)) ? "MACRO" : "NORMAL";
+  const hiCount = macro?.highImpactUS?.count;
+  const hiTop = Array.isArray(macro?.highImpactUS?.top) ? macro.highImpactUS.top : [];
+  const top3 = hiTop.slice(0, 3);
+  const moreN = Math.max(0, hiTop.length - top3.length);
+  const macroChipList = ["CPI", "FOMC", "NFP", "OPEX", "REFUNDING"].filter((k) => flags && flags[k]).slice(0, 2);
 
   const vwap = payload?.current?.vwap || {};
   const vwapEnabled = !!vwap?.enabled;
@@ -937,6 +949,60 @@ function renderEngine2DecisionPanel(payload) {
   const row10 = rows.find(r => Number(r?.w) === 1.0) || rows[0] || null;
   const odds10 = (row10 && row10.breachEitherPct !== null && row10.breachEitherPct !== undefined) ? Number(row10.breachEitherPct) : null;
   const n10 = row10 ? Number(row10?.n) : null;
+  const row15 = rows.find(r => Number(r?.w) === 1.5) || null;
+  const row20 = rows.find(r => Number(r?.w) === 2.0) || null;
+
+  const lc = payload?.liveContext || null;
+  const weekly = lc?.weeklyFriday || null;
+  const nearest = lc?.nearestDaily || null;
+
+  function _dgSummary(view) {
+    const dg = view?.dealerGamma || null;
+    if (!(view && view.enabled && dg && dg.netGammaSign)) {
+      const notes = Array.isArray(view?.notes) ? view.notes.filter(Boolean) : [];
+      const warn = Array.isArray(view?.warnings) ? view.warnings.filter(Boolean) : [];
+      return { main: "—", sub: notes[0] || warn[0] || "Live context unavailable." };
+    }
+    const sign = String(dg.netGammaSign || "").toUpperCase();
+    const mag = String(dg.magnitudeBucket || "").toUpperCase();
+    const symUsed = String(view.symbolUsed || "—").toUpperCase();
+    const exp = String(view.expiry || "—");
+    const band = Math.round(Number(dg.bandPct || 0.05) * 100);
+    const oi = view?.oiClusters || null;
+    const putWall = oi && typeof oi === "object" ? oi.putWall : null;
+    const callWall = oi && typeof oi === "object" ? oi.callWall : null;
+    const putStrike = putWall && (putWall.peakStrike ?? putWall.maxStrike);
+    const callStrike = callWall && (callWall.peakStrike ?? callWall.maxStrike);
+    const putTxt = putWall && Number.isFinite(Number(putStrike)) ? `${Number(putStrike).toFixed(0)} (${Number(putWall.totalOI || 0).toFixed(0)})` : "—";
+    const callTxt = callWall && Number.isFinite(Number(callStrike)) ? `${Number(callStrike).toFixed(0)} (${Number(callWall.totalOI || 0).toFixed(0)})` : "—";
+    return {
+      main: `${symUsed} · ${sign} · ${mag}`,
+      sub: `expiry=${exp} · band=±${band}% · walls: put=${putTxt} | call=${callTxt}`,
+    };
+  }
+
+  function _oiDetail(view) {
+    const oi = view?.oiClusters || null;
+    const enabled = !!(view && view.enabled && oi && typeof oi === "object");
+    if (!enabled) return { meta: "—", put: "Put: —", call: "Call: —" };
+    const spot = Number(oi.spot);
+    const step = Number(oi.strikeStep);
+    const band = Number(oi.bandPct);
+    const expiry = String(oi.expiry || view.expiry || "—");
+    const meta = `expiry=${expiry} · spot=${fmt0(spot)} · band=±${Math.round((Number.isFinite(band) ? band : 0.05) * 100)}% · step=${fmt0(step)}`;
+    const puts = _pickMeaningfulClusters(oi.putClusters, spot, step).map(_fmtClusterLine);
+    const calls = _pickMeaningfulClusters(oi.callClusters, spot, step).map(_fmtClusterLine);
+    return {
+      meta,
+      put: puts.length ? `Put: ${puts.join(" | ")}` : "Put: —",
+      call: calls.length ? `Call: ${calls.join(" | ")}` : "Call: —",
+    };
+  }
+
+  const wSum = _dgSummary(weekly);
+  const nSum = _dgSummary(nearest);
+  const wOi = _oiDetail(weekly);
+  const nOi = _oiDetail(nearest);
 
   const dots = Array.from({ length: 5 }).map((_, i) => `<span class="taDot ${i < 3 ? "isOn" : ""}"></span>`).join("");
   const chips = [
@@ -952,7 +1018,7 @@ function renderEngine2DecisionPanel(payload) {
   const snap = `${sym} (Engine 2) | asOf ${asOf} | spot ${spotTxt} | regime ${Number.isFinite(score) ? score.toFixed(1) : "—"}/100 ${bucket} | macro ${Number.isFinite(multVal) ? multVal.toFixed(2) + "×" : "—"} ${macroBucket} | odds(1.0x) ${Number.isFinite(odds10) ? odds10.toFixed(2) + "%" : "—"} | VWAP ${Number.isFinite(vwapVal) ? vwapVal.toFixed(2) : "—"} (${vwapDist})`;
 
   host.innerHTML = `
-    <div class="taPanel">
+    <div class="taPanel e2Conditions">
       <div class="taHeader">
         <div class="taHeaderRow">
           <div class="taHeaderTitle">${escapeHtml(sym)} — Engine 2</div>
@@ -973,23 +1039,60 @@ function renderEngine2DecisionPanel(payload) {
           <div class="taCardTop"><div class="taCardTitle">Regime score</div></div>
           <div class="taCardState mono">${Number.isFinite(score) ? escapeHtml(score.toFixed(1)) + " / 100" : "—"}</div>
           <div class="taCardInterp">Bucket: ${escapeHtml(bucket)}</div>
+          ${regChips.length ? `<div class="taCardInterp muted">${regChips.slice(0, 5).map(escapeHtml).join(" · ")}</div>` : ``}
         </div>
         <div class="taCard">
           <div class="taCardTop"><div class="taCardTitle">Macro multiplier</div></div>
           <div class="taCardState mono">${Number.isFinite(multVal) ? escapeHtml(multVal.toFixed(2)) + "×" : "—"}</div>
-          <div class="taCardInterp">Bucket: ${escapeHtml(macroBucket)}</div>
+          <div class="taCardInterp">Bucket: ${escapeHtml(macroBucket)}${macroChipList.length ? ` · ${macroChipList.map(escapeHtml).join(" · ")}` : ""}</div>
+          ${top3.length ? `<div class="taCardInterp muted">${top3.map((x) => `<div class="macroEventLine">${escapeHtml(String(x))}</div>`).join("")}${moreN ? `<div class="ref">+${escapeHtml(String(moreN))} more</div>` : ""}</div>` : ``}
         </div>
         <div class="taCard">
           <div class="taCardTop"><div class="taCardTitle">Breach odds (1.0×)</div></div>
           <div class="taCardState mono">${Number.isFinite(odds10) ? escapeHtml(odds10.toFixed(2)) + "%" : "—"}</div>
           <div class="taCardInterp">${Number.isFinite(n10) ? `n=${escapeHtml(String(n10))}` : "—"}</div>
+          <div class="taCardInterp muted">${row15 ? `1.5× ${fmtPct(row15?.breachEitherPct, 2)} (n=${escapeHtml(String(row15?.n ?? "—"))})` : ""}${row20 ? `<br/>2.0× ${fmtPct(row20?.breachEitherPct, 2)} (n=${escapeHtml(String(row20?.n ?? "—"))})` : ""}</div>
         </div>
         <div class="taCard">
           <div class="taCardTop"><div class="taCardTitle">VWAP (daily)</div></div>
           <div class="taCardState mono">${Number.isFinite(vwapVal) ? escapeHtml(vwapVal.toFixed(2)) : "—"}</div>
           <div class="taCardInterp">${escapeHtml(vwapDist)}</div>
         </div>
+        <div class="taCard">
+          <div class="taCardTop"><div class="taCardTitle">Dealer gamma (weekly)</div></div>
+          <div class="taCardState">${escapeHtml(wSum.main)}</div>
+          <div class="taCardInterp muted">${escapeHtml(wSum.sub)}</div>
+        </div>
+        <div class="taCard">
+          <div class="taCardTop"><div class="taCardTitle">Dealer gamma (nearest)</div></div>
+          <div class="taCardState">${escapeHtml(nSum.main)}</div>
+          <div class="taCardInterp muted">${escapeHtml(nSum.sub)}</div>
+        </div>
       </div>
+
+      <details class="taDetails e2Details" style="margin-top:12px;">
+        <summary>This Week Details</summary>
+        <div class="finePrint muted" style="margin-top:10px;">
+          ${Number.isFinite(Number(hiCount)) ? `High-impact US events: ${escapeHtml(String(hiCount))}. ` : ""}Full macro list + OI clusters (kept out of the scan grid).
+        </div>
+        <div style="margin-top:10px;">
+          ${hiTop.length ? `<ul class="taMiniList">${hiTop.map((x) => `<li>${escapeHtml(String(x))}</li>`).join("")}</ul>` : `<div class="muted">—</div>`}
+        </div>
+        <div class="taGrid" style="margin-top:10px;">
+          <div class="taCard">
+            <div class="taCardTop"><div class="taCardTitle">OI clusters (weekly)</div></div>
+            <div class="taCardState mono">${escapeHtml(wOi.meta)}</div>
+            <div class="taCardInterp muted">${escapeHtml(wOi.put)}</div>
+            <div class="taCardInterp muted">${escapeHtml(wOi.call)}</div>
+          </div>
+          <div class="taCard">
+            <div class="taCardTop"><div class="taCardTitle">OI clusters (nearest)</div></div>
+            <div class="taCardState mono">${escapeHtml(nOi.meta)}</div>
+            <div class="taCardInterp muted">${escapeHtml(nOi.put)}</div>
+            <div class="taCardInterp muted">${escapeHtml(nOi.call)}</div>
+          </div>
+        </div>
+      </details>
     </div>
   `;
 
@@ -1013,112 +1116,11 @@ function render(payload) {
   if (results) results.classList.toggle("hidden", false);
   if (status) status.classList.remove("isError", "isRunning", "isOk");
 
-  const meta = $("snapshotMeta");
-  if (meta) meta.textContent = `asOf=${payload?.asOfDate || "—"} · entry=${payload?.params?.entryDay || "—"} · lookback=${payload?.params?.years || "—"}y · seasonality=${payload?.params?.seasonalityMode || "—"}`;
-
   // Scan-first decision header (instrument panel style)
   try { renderEngine2DecisionPanel(payload); } catch { /* ignore */ }
 
   const like = payload?.oddsLikeNow || {};
-  const recMain = $("recMain");
-  const recNote = $("recNote");
-  if (recMain) {
-    const rb = like?.regimeBucket || "—";
-    const mb = like?.macroBucket || "—";
-    const sb = like?.seasonBucket || "—";
-    const n = like?.weeksUsed;
-    recMain.textContent = `Bucket: ${rb} · ${mb} · ${sb}`;
-    if (Number.isFinite(Number(n))) recMain.textContent += ` · n=${Number(n)}`;
-  }
-  if (recNote) {
-    const rows = Array.isArray(like?.byWidth) ? like.byWidth : [];
-    const notes = Array.isArray(like?.notes) ? like.notes.filter(Boolean) : [];
-    const oddsItems = rows.map((r) => {
-      const w = Number(r?.w);
-      const n = (r?.n !== null && r?.n !== undefined) ? String(r.n) : "—";
-      const be = r?.breachEitherPct;
-      const wTxt = Number.isFinite(w) ? `${w.toFixed(2)}× EM` : "—";
-      const beTxt = (be === null || be === undefined) ? "—" : fmtPct(be, 2);
-      return `<li><span class="pill pill--mini neutral">${escapeHtml(wTxt)}</span> <span class="mono">${escapeHtml(beTxt)}</span> <span class="ref">n=${escapeHtml(n)}</span></li>`;
-    });
-    recNote.innerHTML = rows.length
-      ? `<ul class="taMiniList">${oddsItems.join("")}</ul>${notes.length ? `<details class="taDetails"><summary>Details</summary><div class="finePrint muted">${escapeHtml(notes.join(" "))}</div></details>` : ""}`
-      : "—";
-  }
-
-  const reg = payload?.current?.regime || {};
-  const regimeMain = $("regimeMain");
-  const regimeNote = $("regimeNote");
-  if (regimeMain) {
-    const s = reg.score100 !== null && reg.score100 !== undefined ? Number(reg.score100).toFixed(1) : "—";
-    const b = reg.bucket || "—";
-    regimeMain.textContent = `${s} / 100 · ${b}`;
-  }
-  if (regimeNote) {
-    const c = reg?.components || {};
-    const chips = [];
-    if (c.trend !== null && c.trend !== undefined) chips.push({ k: "trend", v: Number(c.trend).toFixed(2) });
-    if (c.volatility !== null && c.volatility !== undefined) chips.push({ k: "vol", v: Number(c.volatility).toFixed(2) });
-    if (c.stress !== null && c.stress !== undefined) chips.push({ k: "stress", v: Number(c.stress).toFixed(2) });
-    if (c.event !== null && c.event !== undefined) chips.push({ k: "event", v: Number(c.event).toFixed(2) });
-    if (c.dispersion !== null && c.dispersion !== undefined) chips.push({ k: "disp", v: Number(c.dispersion).toFixed(2) });
-    regimeNote.innerHTML = chips.length
-      ? `<div class="chipRow">${chips.map(x => `<span class="chip"><span class="k">${escapeHtml(x.k)}</span><span class="mono">${escapeHtml(x.v)}</span></span>`).join("")}</div>`
-      : "—";
-  }
-
-  const und = payload?.underlying || {};
-  const underlying = $("underlying");
-  const underlyingNote = $("underlyingNote");
-  if (underlying) underlying.textContent = und.symbol || "—";
-  if (underlyingNote) underlyingNote.textContent = (und.isProxy ? `Proxy used. ${Array.isArray(und.notes) ? und.notes.join(" ") : ""}` : "Direct") || "—";
-
-  // Actionable VWAP level (daily; proxy)
-  const vwap = payload?.current?.vwap || {};
-  const vwapMain = $("vwapMain");
-  const vwapNote = $("vwapNote");
-  if (vwapMain || vwapNote) {
-    const enabled = !!vwap?.enabled;
-    if (!enabled) {
-      if (vwapMain) vwapMain.textContent = "—";
-      if (vwapNote) {
-        const notes = Array.isArray(vwap?.notes) ? vwap.notes.filter(Boolean) : [];
-        vwapNote.textContent = notes[0] || "VWAP level unavailable.";
-      }
-    } else {
-      if (vwapMain) vwapMain.textContent = fmt2(vwap?.value);
-      if (vwapNote) {
-        const lp = vwap?.livePrice;
-        const bd = vwap?.barDateUsed || "—";
-        const mode = String(vwap?.mode || "");
-        const modeLabel = (mode === "orats_daily_vwap")
-          ? "ORATS daily VWAP"
-          : (mode === "rolling_daily_typical_price_vwap")
-            ? `Rolling VWAP proxy (window=${String(vwap?.window ?? "—")})`
-            : (mode === "daily_typical_price")
-              ? "Typical price (H+L+C)/3"
-              : (mode ? mode : "—");
-
-        const d = vwap?.distance || null;
-        const side = String(d?.side || "");
-        const dp = Number(d?.diffPts);
-        const dpc = Number(d?.diffPct);
-
-        const spotTxt = Number.isFinite(Number(lp)) ? Number(lp).toFixed(2) : "—";
-        let distTxt = "distance=—";
-        if (Number.isFinite(dp)) {
-          const absPts = Math.abs(dp).toFixed(2);
-          const pctTxt = Number.isFinite(dpc) ? `${Math.abs(dpc).toFixed(2)}%` : "—";
-          if (side === "above") distTxt = `spot above by ${absPts} pts (${pctTxt})`;
-          else if (side === "below") distTxt = `spot below by ${absPts} pts (${pctTxt})`;
-          else if (side === "at") distTxt = `spot ≈ VWAP`;
-          else distTxt = `Δ=${dp.toFixed(2)} pts`;
-        }
-
-        vwapNote.textContent = `bar=${String(bd)} · spot=${spotTxt} · ${distTxt} · ${modeLabel}`;
-      }
-    }
-  }
+  // Snapshot section removed: regime/macro/odds/VWAP/live context are rendered in the decision header + details drawer.
   try {
     if (typeof window.renderTechnicalsDailyPanel === "function") {
       // Engine 2 uses payload.underlying.symbol as the displayed symbol.
@@ -1132,132 +1134,6 @@ function render(payload) {
   // Dealer Gamma Map (clean hover chart)
   // Fetch after a successful run so the panel stays in sync with the user's session.
   loadGammaMap();
-
-  const macro = payload?.current?.macro || {};
-  const macroMain = $("macroMain");
-  const macroNote = $("macroNote");
-  const macroMult = $("macroMult");
-  const macroFlags = $("macroFlags");
-  if (macroMain) {
-    const c = macro?.highImpactUS?.count;
-    const top = Array.isArray(macro?.highImpactUS?.top) ? macro.highImpactUS.top : [];
-    macroMain.textContent = (c !== null && c !== undefined) ? `High-impact US events: ${c}` : "—";
-    if (macroNote) {
-      if (top.length) {
-        macroNote.innerHTML = `<div class="macroEventList">${top.map(x => `<div class="macroEventLine">${escapeHtml(x)}</div>`).join("")}</div>`;
-      } else if (Array.isArray(macro?.notes) && macro.notes.length) {
-        macroNote.textContent = macro.notes.join(" ");
-      } else {
-        // If Benzinga is enabled and returns no high-impact events, show a clear "none" state.
-        const count = (c !== null && c !== undefined) ? Number(c) : null;
-        macroNote.textContent = (count === 0) ? "No high-impact US events detected for this window." : "—";
-      }
-    }
-  }
-  const multVal = (macro?.multiplier !== null && macro?.multiplier !== undefined) ? Number(macro.multiplier) : null;
-  if (macroMult) macroMult.textContent = (multVal !== null && Number.isFinite(multVal)) ? Number(multVal).toFixed(2) + "×" : "—";
-
-  // Tooltip range + interpretation (if present in DOM)
-  const macroCapEl = $("macroCap");
-  const macroRelEl = $("macroRel");
-  if (macroCapEl || macroRelEl) {
-    const cap = getMacroCap();
-    if (macroCapEl) macroCapEl.textContent = Number(cap).toFixed(2);
-    if (macroRelEl) {
-      macroRelEl.textContent = (multVal !== null && Number.isFinite(multVal))
-        ? `${Number(multVal).toFixed(2)}× → ${macroLevel(multVal, cap)}`
-        : "—";
-    }
-  }
-
-  if (macroFlags) {
-    const f = macro?.flags || {};
-    const bits = ["CPI","FOMC","NFP","OPEX","REFUNDING"].filter(k => f && f[k]);
-    const mult = Number(macro?.multiplier);
-    const hi = ["CPI","FOMC","NFP"].some(k => f && f[k]);
-    const bucket = (Number.isFinite(mult) && (mult >= 1.25 || hi)) ? "MACRO" : "NORMAL";
-    const pills = [`<span class="pill pill--mini neutral">${escapeHtml(bucket)}</span>`]
-      .concat(bits.map(k => `<span class="pill pill--mini neutral">${escapeHtml(k)}</span>`));
-    macroFlags.innerHTML = `<div class="pillRow">${pills.join("")}</div>`;
-    macroFlags.classList.remove("hidden");
-  }
-
-  const bt = payload?.backtest || {};
-  const btMain = $("btMain");
-  const btNote = $("btNote");
-  if (btMain) btMain.textContent = (bt.rowsUsed !== null && bt.rowsUsed !== undefined) ? `${bt.rowsUsed}` : "—";
-  if (btNote) btNote.textContent = "Weeks used in backtest (filtered for missing prices/IV).";
-
-  // Live dealer gamma context (informational only) — render BOTH weekly + nearest-daily views
-  const lc = payload?.liveContext || null;
-  const weekly = lc?.weeklyFriday || null;
-  const daily = lc?.nearestDaily || null;
-
-  // Backwards compatibility: if backend returns legacy liveContext shape, treat it as weekly.
-  const weeklyFallback = (!weekly && lc && lc.dealerGamma) ? {
-    enabled: !!lc.enabled,
-    symbolUsed: lc.symbolUsed,
-    expiry: lc.expiry,
-    dealerGamma: lc.dealerGamma,
-    oiClusters: lc.oiClusters,
-    warnings: lc.warnings,
-    notes: lc.notes,
-  } : null;
-
-  function renderLive(prefix, view) {
-    const dgMain = $(prefix === "W" ? "dgMainW" : "dgMainD");
-    const dgNote = $(prefix === "W" ? "dgNoteW" : "dgNoteD");
-    const dgTop = $(prefix === "W" ? "dgTopW" : "dgTopD");
-    const dgOi = $(prefix === "W" ? "dgOiW" : "dgOiD");
-    const oiMeta = $(prefix === "W" ? "oiMetaW" : "oiMetaD");
-    const oiPut = $(prefix === "W" ? "oiPutW" : "oiPutD");
-    const oiCall = $(prefix === "W" ? "oiCallW" : "oiCallD");
-    if (!dgMain || !dgNote || !dgTop || !dgOi || !oiMeta || !oiPut || !oiCall) return;
-
-    const dg = view?.dealerGamma || null;
-    const oi = view?.oiClusters || null;
-    const enabled = !!(view && view.enabled && dg && dg.netGammaSign);
-    if (!enabled) {
-      dgMain.textContent = "—";
-      const notes = Array.isArray(view?.notes) ? view.notes.filter(Boolean) : [];
-      const warn = Array.isArray(view?.warnings) ? view.warnings.filter(Boolean) : [];
-      dgNote.textContent = notes[0] || warn[0] || "Live context unavailable.";
-      dgTop.textContent = "";
-      dgOi.textContent = "—";
-      oiMeta.textContent = "—";
-      oiPut.textContent = "Put: —";
-      oiCall.textContent = "Call: —";
-      return;
-    }
-
-    dgMain.textContent = `${String(dg.netGammaSign || "").toUpperCase()} · ${String(dg.magnitudeBucket || "").toUpperCase()}`;
-    dgNote.textContent = `symbol=${String(view.symbolUsed || "—")} · expiry=${String(view.expiry || "—")} · spot=${Number(dg.spot || 0).toFixed(2)} · band=±${Math.round(Number(dg.bandPct || 0.05) * 100)}% · weighting=${String(dg.weightingMode || "—")}`;
-
-    const tops = Array.isArray(dg.topGammaStrikes) ? dg.topGammaStrikes : [];
-    dgTop.textContent = tops.length ? `Top strikes: ${tops.map(x => `${Number(x.strike).toFixed(0)}${String(x.side || "")}`).join(" · ")}` : "";
-
-    const putWall = oi && typeof oi === "object" ? oi.putWall : null;
-    const callWall = oi && typeof oi === "object" ? oi.callWall : null;
-    const putStrike = putWall && (putWall.peakStrike ?? putWall.maxStrike);
-    const callStrike = callWall && (callWall.peakStrike ?? callWall.maxStrike);
-    const putTxt = putWall && Number.isFinite(Number(putStrike)) ? `${Number(putStrike).toFixed(0)} (${Number(putWall.totalOI || 0).toFixed(0)})` : "—";
-    const callTxt = callWall && Number.isFinite(Number(callStrike)) ? `${Number(callStrike).toFixed(0)} (${Number(callWall.totalOI || 0).toFixed(0)})` : "—";
-    dgOi.textContent = `OI walls: put=${putTxt} | call=${callTxt}`;
-
-    // OI clusters card
-    const spot = Number(oi?.spot);
-    const step = Number(oi?.strikeStep);
-    const band = Number(oi?.bandPct);
-    oiMeta.textContent = `expiry=${String(oi?.expiry || view.expiry || "—")} · spot=${fmt0(spot)} · band=±${Math.round((Number.isFinite(band) ? band : 0.05) * 100)}% · step=${fmt0(step)}`;
-
-    const puts = _pickMeaningfulClusters(oi?.putClusters, spot, step).map(_fmtClusterLine);
-    const calls = _pickMeaningfulClusters(oi?.callClusters, spot, step).map(_fmtClusterLine);
-    oiPut.textContent = puts.length ? `Put: ${puts.join(" | ")}` : "Put: —";
-    oiCall.textContent = calls.length ? `Call: ${calls.join(" | ")}` : "Call: —";
-  }
-
-  renderLive("W", weekly || weeklyFallback);
-  renderLive("D", daily);
 
   const oddsMeta = $("oddsMeta");
   if (oddsMeta) {

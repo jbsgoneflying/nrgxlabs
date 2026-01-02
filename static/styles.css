@@ -377,30 +377,26 @@ body {
   -webkit-backdrop-filter: blur(14px) saturate(160%);
 }
 
-/* Snapshot now uses TA panel structure; preserve the “odds” card spanning. */
-.snapshotPanel #recCard {
-  grid-column: 1 / -1;
+/* Engine 2 Conditions: keep scan cards compact, push verbosity into "This Week Details" */
+.e2Conditions .taCardInterp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
 }
 
-.snapshotPanel .taHeaderTitle .tipWrap {
-  margin-left: 8px;
+.e2Conditions details .taCardInterp {
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  display: block;
+  overflow: visible;
 }
 
-.snapshotPanel .taCardTitle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.snapshotPanel .tipBtn {
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  border: 1px solid var(--ta-divider);
-  background: transparent;
-  font-weight: 900;
-  color: var(--ta-muted);
-  cursor: pointer;
+.e2Conditions .macroEventLine {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Engine 1: Summary + Regime overlay now use TA panel structure */
