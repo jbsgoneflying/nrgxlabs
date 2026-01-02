@@ -76,6 +76,14 @@ function renderEngine1DecisionPanel(payload) {
   const s = payload?.summary || {};
   const br = Number(s?.breach_rate_pct);
   const os = Number(s?.avg_above_breach_pct);
+  const breaches = (s?.breaches !== null && s?.breaches !== undefined) ? Number(s.breaches) : null;
+  const used = (s?.events_used !== null && s?.events_used !== undefined) ? Number(s.events_used) : null;
+  const found = (s?.events_found !== null && s?.events_found !== undefined) ? Number(s.events_found) : null;
+
+  const b = payload?.baseline || {};
+  const avgRatio = (b?.avg_ratio_realized_to_implied !== null && b?.avg_ratio_realized_to_implied !== undefined)
+    ? Number(b.avg_ratio_realized_to_implied)
+    : null;
 
   const rg = payload?.regime || {};
   const gate = String(rg?.guidance?.tradeGate || "");
@@ -94,12 +102,17 @@ function renderEngine1DecisionPanel(payload) {
   if (!t || t === "—") return;
 
   const pxTxt = Number.isFinite(price) ? price.toFixed(2) : "—";
+  const metaRight = [
+    `EOD: ${escapeHtml(barDate || "—")}`,
+    `Price: <span class="mono">${escapeHtml(pxTxt)}</span>`,
+    (Number.isFinite(breaches) && Number.isFinite(used) && Number.isFinite(found)) ? `${Number(breaches)} breaches / ${Number(used)} usable (found ${Number(found)})` : "",
+  ].filter(Boolean).join(" • ");
   host.innerHTML = `
     <div class="taPanel">
       <div class="taHeader">
         <div class="taHeaderRow">
           <div class="taHeaderTitle">${escapeHtml(t)} — Engine 1</div>
-          <div class="taHeaderMeta">EOD: ${escapeHtml(barDate || "—")} • Price: <span class="mono">${escapeHtml(pxTxt)}</span></div>
+          <div class="taHeaderMeta">${metaRight}</div>
         </div>
         <div class="taHeaderRow taHeaderRow--sub">
           <div class="taBiasPill taBiasPill--neu">RISK CHECK</div>
@@ -123,6 +136,16 @@ function renderEngine1DecisionPanel(payload) {
           <div class="taCardInterp">Tail severity conditional on breach.</div>
         </div>
         <div class="taCard">
+          <div class="taCardTop"><div class="taCardTitle">Avg realized / implied</div></div>
+          <div class="taCardState mono">${Number.isFinite(avgRatio) ? escapeHtml(avgRatio.toFixed(2)) + "×" : "—"}</div>
+          <div class="taCardInterp">Baseline ratio across usable events.</div>
+        </div>
+        <div class="taCard">
+          <div class="taCardTop"><div class="taCardTitle">Events used</div></div>
+          <div class="taCardState mono">${Number.isFinite(used) && Number.isFinite(found) ? `${escapeHtml(String(used))} / ${escapeHtml(String(found))}` : "—"}</div>
+          <div class="taCardInterp">Usable / Found in lookback window.</div>
+        </div>
+        <div class="taCard">
           <div class="taCardTop"><div class="taCardTitle">Regime</div></div>
           <div class="taCardState">${escapeHtml(label)}</div>
           <div class="taCardInterp">Market + single-name stress overlay.</div>
@@ -133,6 +156,8 @@ function renderEngine1DecisionPanel(payload) {
           <div class="taCardInterp">OK / Caution / No trade (risk-first).</div>
         </div>
       </div>
+
+      <div id="actionSummary" class="taCardInterp muted" style="margin-top:10px;" aria-live="polite">—</div>
     </div>
   `;
 
@@ -1616,16 +1641,8 @@ function render(payload) {
   const toggle = $("earningsToggle");
   if (toggle) toggle.textContent = "Show earnings history";
 
+  // Summary metrics are now displayed in the scan-first Risk Check panel (no duplicate Summary section).
   const s = payload.summary || {};
-  const rate = s.breach_rate_pct;
-  $("breachRate").textContent = fmtPct(rate);
-  $("breachMeta").textContent = `${s.breaches || 0} breaches / ${s.events_used || 0} usable (found ${s.events_found || 0})`;
-
-  $("avgAbove").textContent = fmtPct(s.avg_above_breach_pct);
-
-  const b = payload.baseline || {};
-  $("avgRatio").textContent = fmtX(b.avg_ratio_realized_to_implied);
-  $("eventsUsed").textContent = `${s.events_used ?? "—"} / ${s.events_found ?? "—"}`;
 
   // Scan-first decision header (instrument panel style)
   try { renderEngine1DecisionPanel(payload); } catch { /* ignore */ }

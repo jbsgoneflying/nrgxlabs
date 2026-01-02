@@ -419,6 +419,23 @@ body {
 
 .e1Panel #bufferTargetGrid.miniGrid { margin-top: 10px; }
 
+/* Engine 1 Conditions: keep scan cards compact, push verbosity into Live details */
+.e1Conditions .taCardInterp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
+.e1Conditions #bufferTargetCard .taCardInterp,
+.e1Conditions details .taCardInterp {
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  display: block;
+  overflow: visible;
+}
+
 /* Regime overlay should match TA “instrument cards” (glass + depth). */
 .metricGrid.metricGrid--regime .metricCard {
   background: var(--surface);
