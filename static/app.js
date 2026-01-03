@@ -273,8 +273,9 @@ function openGoNoGoModal(go) {
       const metrics = goMetricsLine(c);
       const explain = (c?.explain !== null && c?.explain !== undefined) ? String(c.explain) : "";
       const notes = Array.isArray(c?.value?.notes) ? c.value.notes : [];
+      const isLiq = String(c?.id || "") === "SN_LIQUIDITY";
       const noteLines = notes
-        .slice(0, 3)
+        .slice(0, isLiq ? 6 : 3)
         .map((x) => String(x ?? "").trim())
         .filter(Boolean);
       const showExplain = (!metrics || !metrics.trim()) || (String(c?.state || "").toUpperCase() !== "PASS");

@@ -210,11 +210,46 @@ def _fetch_underlying_liquidity(client, *, ticker: str) -> Dict[str, Any]:
         row = {}
         notes.append(f"cores unavailable: {type(e).__name__}: {e}")
 
-    px = _to_float(row.get("spotPrice")) or _to_float(row.get("stockPrice"))
-    avg_dvol = _to_float(row.get("avgDollarVol20") or row.get("avgDolVol20") or row.get("avgDVol20"))
+    # Field aliasing + sniffing (ORATS field names can vary across plans/feeds).
+    def _sniff(keys: List[str], *, must: List[str], avoid: List[str]) -> Optional[str]:
+        # deterministic: scan sorted keys
+        for k in sorted(keys):
+            kk = k.lower()
+            if any(a in kk for a in avoid):
+                continue
+            if all(m in kk for m in must):
+                return k
+        return None
+
+    keys = list(row.keys()) if isinstance(row, dict) else []
+
+    px = _to_float(row.get("spotPrice")) or _to_float(row.get("stockPrice")) or _to_float(row.get("price")) or _to_float(row.get("last"))
+    if px is None and keys:
+        kpx = _sniff(keys, must=["price"], avoid=["avg", "vol", "dollar"])
+        if kpx:
+            px = _to_float(row.get(kpx))
+            if px is not None:
+                notes.append(f"Price inferred from /cores field '{kpx}'.")
+
+    avg_dvol = _to_float(row.get("avgDollarVol20") or row.get("avgDolVol20") or row.get("avgDVol20") or row.get("avgDollarVol20d") or row.get("avgDollarVolume20"))
     if avg_dvol is not None:
         source = "cores"
-    avg_vol = _to_float(row.get("avgVolume20") or row.get("avgVol20"))
+
+    if avg_dvol is None and keys:
+        kd = _sniff(keys, must=["dollar", "vol", "20"], avoid=[])
+        if kd:
+            avg_dvol = _to_float(row.get(kd))
+            if avg_dvol is not None:
+                source = f"cores:{kd}"
+                notes.append(f"avgDollarVol20d inferred from /cores field '{kd}'.")
+
+    avg_vol = _to_float(row.get("avgVolume20") or row.get("avgVol20") or row.get("avgVolume") or row.get("avgVol"))
+    if avg_vol is None and keys:
+        kv = _sniff(keys, must=["avg", "vol", "20"], avoid=["dollar", "iv"])
+        if kv:
+            avg_vol = _to_float(row.get(kv))
+            if avg_vol is not None:
+                notes.append(f"avgVolume20 inferred from /cores field '{kv}'.")
     if avg_dvol is None and px is not None and avg_vol is not None and px > 0 and avg_vol > 0:
         avg_dvol = float(px) * float(avg_vol)
         source = source or "cores_price_x_avgVolume20"
@@ -225,6 +260,9 @@ def _fetch_underlying_liquidity(client, *, ticker: str) -> Dict[str, Any]:
         if not row:
             notes.append("No /cores snapshot row returned.")
         else:
+            if keys:
+                # Keep short but informative.
+                notes.append("cores keys: " + ", ".join(sorted(keys)[:12]) + ("…" if len(keys) > 12 else ""))
             has_dvol_field = any(row.get(k) is not None for k in ("avgDollarVol20", "avgDolVol20", "avgDVol20"))
             if not has_dvol_field:
                 notes.append("Missing /cores avgDollarVol20* fields.")
@@ -249,8 +287,8 @@ def _fetch_underlying_liquidity(client, *, ticker: str) -> Dict[str, Any]:
                 source = "dailies_close_x_volume"
             else:
                 notes.append(f"/hist/dailies insufficient volume rows (bars={len(bars)}, usable_close_x_vol={len(pairs)}).")
-        except Exception:
-            pass
+        except Exception as e:
+            notes.append(f"/hist/dailies range failed: {type(e).__name__}: {e}")
 
     # Fallback #2: if range pulls are empty/unreliable for this symbol, probe day-by-day (cached) to get last ~20 bars.
     if avg_dvol is None:
@@ -266,8 +304,8 @@ def _fetch_underlying_liquidity(client, *, ticker: str) -> Dict[str, Any]:
                 source = "dailies_probe_close_x_volume"
             else:
                 notes.append(f"Per-day dailies probe insufficient volume rows (bars={len(bars)}, usable_close_x_vol={len(pairs)}).")
-        except Exception:
-            pass
+        except Exception as e:
+            notes.append(f"/hist/dailies probe failed: {type(e).__name__}: {e}")
 
     enabled = bool(row) or (avg_dvol is not None) or (px is not None)
     return {"enabled": enabled, "price": px, "avgDollarVol20d": avg_dvol, "marketCap": mcap, "notes": notes, "source": source}
