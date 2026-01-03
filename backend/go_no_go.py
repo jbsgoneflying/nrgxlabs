@@ -1007,16 +1007,35 @@ def compute_go_no_go(
             hi = int(dte_target) + 10
             mrows = client.hist_monies_implied(ticker=t, trade_date=trade_date, fields=fields_m, dte=f"{lo},{hi}").rows or []
             mrows = [r for r in mrows if isinstance(r, dict)]
+            # Prefer nearest expiry to *today* (ET), not a fixed DTE.
+            today_et = _now_et_date()
             best = None
-            best_dist = None
+            best_gap = None
             for r in mrows:
-                dte_v = _to_float(r.get("dte"))
-                if dte_v is None:
+                ed = str(r.get("expirDate") or "")[:10]
+                if not ed:
                     continue
-                dist = abs(float(dte_v) - float(dte_target))
-                if best is None or best_dist is None or dist < best_dist:
+                try:
+                    ed_dt = dt.date.fromisoformat(ed)
+                except Exception:
+                    continue
+                gap = (ed_dt - today_et).days
+                if gap < 0:
+                    continue
+                if best is None or best_gap is None or gap < best_gap:
                     best = r
-                    best_dist = dist
+                    best_gap = gap
+            # Fallback: if nothing is >= today, pick closest to dte_target (legacy behavior).
+            if best is None:
+                best_dist = None
+                for r in mrows:
+                    dte_v = _to_float(r.get("dte"))
+                    if dte_v is None:
+                        continue
+                    dist = abs(float(dte_v) - float(dte_target))
+                    if best is None or best_dist is None or dist < best_dist:
+                        best = r
+                        best_dist = dist
             if best and best.get("expirDate"):
                 opt_expiry = str(best.get("expirDate"))[:10]
         except Exception:
@@ -1047,7 +1066,7 @@ def compute_go_no_go(
                 ]
             )
             try:
-                rows = client.hist_strikes(ticker=t, trade_date=trade_date, fields=fields_s, dte=f"{max(1,dte_target-2)},{dte_target+10}").rows or []
+                rows = client.hist_strikes(ticker=t, trade_date=trade_date, fields=fields_s, dte=f"{max(0,dte_target-2)},{dte_target+10}").rows or []
                 rows = [r for r in rows if isinstance(r, dict) and str(r.get("expirDate") or "")[:10] == opt_expiry]
             except Exception:
                 rows = []
@@ -1102,6 +1121,13 @@ def compute_go_no_go(
                             opt_state, opt_code, opt_explain = "PASS", None, "Options liquidity looks sufficient in delta band."
     else:
         opt_state, opt_code, opt_explain = "MISSING", "SN_OPT_QUOTES_MISSING", "Missing trade date for options chain."
+
+    # Always record options-side outcome for debug (especially important when underlying liquidity is missing).
+    try:
+        liq_notes.append(f"Options liquidity: {opt_state}{(' ' + str(opt_code)) if opt_code else ''} — {opt_explain}")
+        liq_notes.append(f"Expiry selected: {opt_expiry or '—'} (tradeDate={trade_date or '—'}; todayET={_now_et_date().isoformat()})")
+    except Exception:
+        pass
 
     # Decide final liquidity state:
     # - Prefer the spec'd underlying $vol20 gate when available
