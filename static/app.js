@@ -63,6 +63,348 @@ function fmt0(v) {
   return Number.isFinite(n) ? n.toFixed(0) : "—";
 }
 
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function toCsv(rows) {
+  const esc = (v) => {
+    const s = String(v ?? "");
+    if (s.includes(",") || s.includes('"') || s.includes("\n")) return `"${s.replaceAll('"', '""')}"`;
+    return s;
+  };
+  if (!rows || !rows.length) return "";
+  const cols = Object.keys(rows[0]);
+  const head = cols.join(",");
+  const body = rows.map(r => cols.map(c => esc(r[c])).join(",")).join("\n");
+  return `${head}\n${body}\n`;
+}
+
+function _mdTable(headers, rows) {
+  const esc = (v) => String(v ?? "").replaceAll("\n", " ").replaceAll("|", "\\|");
+  const head = `| ${headers.map(esc).join(" | ")} |`;
+  const bar = `| ${headers.map(() => "---").join(" | ")} |`;
+  const body = (rows || []).map((r) => `| ${headers.map((h) => esc(r[h])).join(" | ")} |`).join("\n");
+  return [head, bar, body].filter(Boolean).join("\n");
+}
+
+function _scrubVerdictText(s) {
+  // Remove explicit decisioning words without destroying surrounding content.
+  // Use word boundaries to avoid mangling tickers like GOOG.
+  let t = String(s ?? "");
+  const reps = [
+    [/GO\/NO-?GO/gi, ""],
+    [/\bNO-?GO\b/gi, ""],
+    [/\bGO\b/gi, ""],
+    [/\bPASS\b/gi, ""],
+    [/\bFAIL\b/gi, ""],
+    [/\bMISSING\b/gi, ""],
+    [/All checks passed/gi, ""],
+    [/One or more checks failed\s*\/\s*missing/gi, ""],
+  ];
+  for (const [re, r] of reps) t = t.replace(re, r);
+  t = t.replace(/\s{2,}/g, " ").replace(/\s+([,.;:])/g, "$1").trim();
+  return t;
+}
+
+function sanitizeRiskChecks(go) {
+  const g = (go && typeof go === "object") ? go : {};
+  const checks = Array.isArray(g.checks) ? g.checks : [];
+  const warns = Array.isArray(g.warnings) ? g.warnings : [];
+
+  const cleanChecks = checks.map((c) => {
+    const v = (c && typeof c.value === "object") ? c.value : (c?.value ?? null);
+    const notes = Array.isArray(v?.notes) ? v.notes.map(_scrubVerdictText).filter(Boolean) : [];
+    const out = {
+      id: c?.id ?? null,
+      label: c?.label ?? null,
+      code: c?.code ?? null,
+      // Intentionally omit: state (PASS/FAIL/MISSING)
+      explain: _scrubVerdictText(c?.explain ?? ""),
+      value: (v && typeof v === "object") ? { ...v, notes } : v,
+    };
+    // Ensure state is removed even if present.
+    if (out.value && typeof out.value === "object") delete out.value.state;
+    return out;
+  });
+
+  const cleanWarnings = warns.map((w) => ({
+    id: w?.id ?? null,
+    label: _scrubVerdictText(w?.label ?? w?.id ?? ""),
+    // omit any state-like markers
+  }));
+
+  return {
+    checks: cleanChecks,
+    warnings: cleanWarnings,
+    notes: Array.isArray(g?.notes) ? g.notes.map(_scrubVerdictText).filter(Boolean) : [],
+  };
+}
+
+function sanitizeEngine1Payload(payload) {
+  // Remove goNoGo entirely from exported Engine1 JSON.
+  if (!payload || typeof payload !== "object") return payload;
+  const out = JSON.parse(JSON.stringify(payload));
+  delete out.goNoGo;
+  return out;
+}
+
+function _engine1ExportFileNameBase(payload) {
+  const t = String(payload?.ticker || "TICKER").toUpperCase();
+  const asOf = String(payload?.technicals?.asOfDate || payload?.regime?.asOfDate || "").slice(0, 10) || "asof";
+  return `engine1-export-${t}-${asOf}`;
+}
+
+async function _ensureEngine1LevelsPayload(ticker) {
+  if (typeof lastEngine1LevelsPayload !== "undefined" && lastEngine1LevelsPayload) return lastEngine1LevelsPayload;
+  const t = String(ticker || lastEngine1Ticker || $("ticker")?.value || "").trim().toUpperCase();
+  if (!t) return null;
+  const v = engine1GammaState?.view || "weekly";
+  const url =
+    `/api/levels?ticker=${encodeURIComponent(t)}`
+    + `&view=${encodeURIComponent(v)}`
+    + `&points=90&window_days=180&include_heatmap=1`
+    + `&heatmap_view=${encodeURIComponent(engine1GexState?.view || "composite")}`
+    + `&heatmap_mode=${encodeURIComponent(engine1GexState?.mode || "slope")}`
+    + `&slope_window=5&flip_adjacent_n=5`;
+  try {
+    const p = await fetchJson(url);
+    lastEngine1LevelsPayload = p;
+    return p;
+  } catch {
+    return null;
+  }
+}
+
+function buildEngine1SnapshotMarkdown({ payload, levels, uiState, riskChecks }) {
+  const t = String(payload?.ticker || "—").toUpperCase();
+  const tech = payload?.technicals || {};
+  const asOf = String(tech?.asOfDate || payload?.regime?.asOfDate || "—").slice(0, 10);
+  const px = tech?.narrative?.priceUsed ?? tech?.livePrice ?? tech?.lastDailyClose;
+  const pxTxt = Number.isFinite(Number(px)) ? Number(px).toFixed(2) : "—";
+
+  const summary = payload?.summary || {};
+  const baseline = payload?.baseline || {};
+  const regime = payload?.regime || {};
+  const quarters = payload?.quarters || {};
+  const events = Array.isArray(payload?.events) ? payload.events : [];
+
+  const lines = [];
+  lines.push(`# ${t} — Engine 1 Export`);
+  lines.push("");
+  lines.push(`- generatedAt: ${new Date().toISOString()}`);
+  lines.push(`- asOf: ${asOf}`);
+  lines.push(`- priceUsed: ${pxTxt}`);
+  lines.push(`- url: ${String(uiState?.url || "")}`);
+  lines.push("");
+
+  lines.push("## UI state");
+  lines.push("```json");
+  lines.push(JSON.stringify(uiState || {}, null, 2));
+  lines.push("```");
+  lines.push("");
+
+  lines.push("## Summary");
+  lines.push(`- breach_rate_pct: ${summary?.breach_rate_pct ?? "—"}`);
+  lines.push(`- avg_above_breach_pct: ${summary?.avg_above_breach_pct ?? "—"}`);
+  lines.push(`- events_used: ${summary?.events_used ?? "—"} (found ${summary?.events_found ?? "—"})`);
+  lines.push("");
+
+  lines.push("## Baseline");
+  lines.push(`- avg_ratio_realized_to_implied: ${baseline?.avg_ratio_realized_to_implied ?? "—"}`);
+  lines.push("");
+
+  lines.push("## Regime");
+  if (regime?.label) lines.push(`- label: ${regime.label}`);
+  if (regime?.guidance) lines.push(`- guidance: ${JSON.stringify(regime.guidance)}`);
+  lines.push("");
+
+  lines.push("## Risk checks (sanitized)");
+  lines.push("```json");
+  lines.push(JSON.stringify(riskChecks || {}, null, 2));
+  lines.push("```");
+  lines.push("");
+
+  lines.push("## Quarter seasonality");
+  const qRows = ["Q1", "Q2", "Q3", "Q4"].map((q) => {
+    const r = quarters?.[q] || {};
+    const s = r?.seasonality || {};
+    return {
+      quarter: q,
+      recommendation: r?.recommendation ?? "",
+      breach_delta_pp: s?.breach_delta_pp ?? "",
+      ratio_delta: s?.ratio_delta ?? "",
+      overshoot_delta_pp: s?.overshoot_delta_pp ?? "",
+      avg_ratio_realized_to_implied: r?.avg_ratio_realized_to_implied ?? "",
+      max_ratio_realized_to_implied: r?.max_ratio_realized_to_implied ?? "",
+    };
+  });
+  lines.push(_mdTable(Object.keys(qRows[0]), qRows));
+  lines.push("");
+
+  lines.push("## Earnings Events (all rows; advanced columns included)");
+  if (events.length) {
+    const eRows = events.map((e) => ({
+      earnDate: e?.earnDate ?? "",
+      anncTod: e?.anncTod ?? "",
+      timing: e?.timing ?? "",
+      pricingDateUsed: e?.pricingDateUsed ?? "",
+      impliedMovePct: e?.impliedMovePct ?? "",
+      realizedMovePct: e?.realizedMovePct ?? "",
+      signedMovePct: e?.signedMovePct ?? "",
+      breachSide: e?.breachSide ?? "",
+      dirOvershootPct: (e?.upOvershootPct ?? e?.downOvershootPct) ?? "",
+      breach: e?.breach ?? "",
+      regime: e?.regimeAtEvent?.label ?? "",
+      gate: e?.regimeAtEvent?.tradeGate ?? "",
+      aboveBreachPct: e?.aboveBreachPct ?? "",
+    }));
+    lines.push(_mdTable(Object.keys(eRows[0]), eRows));
+  } else {
+    lines.push("_No events rows._");
+  }
+  lines.push("");
+
+  lines.push("## Levels payload summary");
+  if (levels) {
+    const heat = levels?.levels?.gexHeatmap || null;
+    const keep = {
+      schemaVersion: levels?.schemaVersion,
+      ticker: levels?.ticker,
+      priceSeriesPoints: Array.isArray(levels?.priceSeries) ? levels.priceSeries.length : 0,
+      view: levels?.levels?.view,
+      symbolUsed: levels?.levels?.symbolUsed,
+      expiry: levels?.levels?.expiry,
+      spot: levels?.levels?.spot,
+      gammaFlipStrike: levels?.levels?.gammaFlipStrike,
+      heatmap: heat ? { enabled: heat.enabled, metrics: heat.metrics, stability: heat.stability, boundaries: heat.boundaries } : null,
+      warnings: levels?.levels?.warnings,
+      notes: levels?.levels?.notes,
+    };
+    lines.push("```json");
+    lines.push(JSON.stringify(keep, null, 2));
+    lines.push("```");
+  } else {
+    lines.push("_Levels payload unavailable._");
+  }
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+async function exportEngine1LLMBundle() {
+  const status = $("status");
+  const payload = lastPayload;
+  if (!payload) {
+    if (status) status.textContent = "Export: run Engine 1 first (no payload yet).";
+    return;
+  }
+  const t = String(payload?.ticker || $("ticker")?.value || "").trim().toUpperCase();
+
+  try {
+    if (status) status.textContent = "Exporting…";
+    const levels = await _ensureEngine1LevelsPayload(t);
+
+    const uiState = {
+      engine: "engine1",
+      url: String(window.location?.href || ""),
+      ticker: t,
+      k: String($("k")?.value || ""),
+      n: 20,
+      years: 5,
+      showAdvancedCols: true, // export always includes advanced columns
+      earningsExpanded: true, // export includes all rows
+      gammaView: String(engine1GammaState?.view || ""),
+      gammaLayers: { ...(engine1GammaState?.layers || {}) },
+      heatmapView: String(engine1GexState?.view || ""),
+      heatmapMode: String(engine1GexState?.mode || ""),
+    };
+
+    const riskChecks = sanitizeRiskChecks(payload?.goNoGo || null);
+    const sanitizedPayload = sanitizeEngine1Payload(payload);
+    const base = _engine1ExportFileNameBase(payload);
+
+    const zip = window.ZipStore ? new window.ZipStore() : null;
+    if (!zip) throw new Error("ZIP module missing (ZipStore not loaded).");
+
+    const md = buildEngine1SnapshotMarkdown({ payload: sanitizedPayload, levels, uiState, riskChecks });
+    zip.addText("snapshot.md", md);
+    zip.addText("payload.engine1.json", JSON.stringify(sanitizedPayload, null, 2));
+    zip.addText("risk_checks.json", JSON.stringify(riskChecks, null, 2));
+    zip.addText("ui_state.json", JSON.stringify(uiState, null, 2));
+    if (levels) zip.addText("payload.levels.json", JSON.stringify(levels, null, 2));
+
+    // Earnings events CSV (all rows + advanced fields)
+    const events = Array.isArray(payload?.events) ? payload.events : [];
+    const eventRows = events.map((e) => ({
+      earnDate: e?.earnDate ?? "",
+      anncTod: e?.anncTod ?? "",
+      timing: e?.timing ?? "",
+      pricingDateUsed: e?.pricingDateUsed ?? "",
+      impErnMv: e?.impErnMv ?? "",
+      impliedMovePct: e?.impliedMovePct ?? "",
+      closeDateUsed: e?.closeDateUsed ?? "",
+      closePx: e?.closePx ?? "",
+      openDateUsed: e?.openDateUsed ?? "",
+      openPx: e?.openPx ?? "",
+      realizedMovePct: e?.realizedMovePct ?? "",
+      signedMovePct: e?.signedMovePct ?? "",
+      breachSide: e?.breachSide ?? "",
+      dirOvershootPct: (e?.upOvershootPct ?? e?.downOvershootPct) ?? "",
+      breach: e?.breach ?? "",
+      regimeLabel: e?.regimeAtEvent?.label ?? "",
+      regimeTailMultiplier: e?.regimeAtEvent?.tailMultiplier ?? "",
+      regimeTradeGate: e?.regimeAtEvent?.tradeGate ?? "",
+      aboveBreachPct: e?.aboveBreachPct ?? "",
+      notes: Array.isArray(e?.notes) ? e.notes.join("; ") : "",
+    }));
+    zip.addText("tables/earnings_events.csv", toCsv(eventRows));
+
+    // Quarter seasonality CSV
+    const quarters = payload?.quarters || {};
+    const qRows = ["Q1", "Q2", "Q3", "Q4"].map((q) => {
+      const r = quarters?.[q] || {};
+      const s = r?.seasonality || {};
+      return {
+        quarter: q,
+        recommendation: r?.recommendation ?? "",
+        breach_delta_pp: s?.breach_delta_pp ?? "",
+        ratio_delta: s?.ratio_delta ?? "",
+        overshoot_delta_pp: s?.overshoot_delta_pp ?? "",
+        avg_ratio_realized_to_implied: r?.avg_ratio_realized_to_implied ?? "",
+        max_ratio_realized_to_implied: r?.max_ratio_realized_to_implied ?? "",
+      };
+    });
+    zip.addText("tables/quarter_seasonality.csv", toCsv(qRows));
+
+    // Risk checks CSV (one row per check; no state)
+    const rcRows = (riskChecks?.checks || []).map((c) => {
+      const v = (c && typeof c.value === "object") ? c.value : {};
+      const flat = { id: c?.id ?? "", label: c?.label ?? "", code: c?.code ?? "", explain: c?.explain ?? "" };
+      for (const [k, val] of Object.entries(v || {})) {
+        if (k === "notes") continue;
+        if (typeof val === "object") continue;
+        flat[`value.${k}`] = val;
+      }
+      flat["value.notes"] = Array.isArray(v?.notes) ? v.notes.join(" | ") : "";
+      return flat;
+    });
+    zip.addText("tables/risk_checks.csv", toCsv(rcRows));
+
+    downloadBlob(`${base}.zip`, zip.toBlob());
+    if (status) status.textContent = `Exported: ${base}.zip`;
+  } catch (e) {
+    if (status) status.textContent = `Export error: ${String(e?.message || e)}`;
+  }
+}
+
 let _tooltipsGlobalBound = false;
 function renderEngine1DecisionPanel(payload) {
   const host = $("e1DecisionSection");
@@ -130,6 +472,7 @@ function renderEngine1DecisionPanel(payload) {
           <div class="taChips">${chipHtml}</div>
           <div class="taHeaderActions">
             <button class="taActionBtn" type="button" id="e1CopySnapshot">Copy snapshot</button>
+            <button class="taActionBtn" type="button" id="e1ExportLLM">Export (LLM)</button>
           </div>
         </div>
       </div>
@@ -191,6 +534,13 @@ function renderEngine1DecisionPanel(payload) {
       ev.preventDefault();
       ev.stopPropagation();
       openGoNoGoModal(go);
+    });
+  }
+
+  const expBtn = $("e1ExportLLM");
+  if (expBtn) {
+    expBtn.addEventListener("click", async () => {
+      try { await exportEngine1LLMBundle(); } catch { /* ignore */ }
     });
   }
 }
