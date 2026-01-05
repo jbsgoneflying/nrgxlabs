@@ -895,6 +895,294 @@ function downloadText(filename, text) {
   URL.revokeObjectURL(url);
 }
 
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function _mdTable(headers, rows) {
+  const esc = (v) => String(v ?? "").replaceAll("\n", " ").replaceAll("|", "\\|");
+  const head = `| ${headers.map(esc).join(" | ")} |`;
+  const bar = `| ${headers.map(() => "---").join(" | ")} |`;
+  const body = (rows || []).map((r) => `| ${headers.map((h) => esc(r[h])).join(" | ")} |`).join("\n");
+  return [head, bar, body].filter(Boolean).join("\n");
+}
+
+function buildEngine2SnapshotMarkdown({ payload, levels, uiState }) {
+  const sym = String(payload?.underlying?.symbol || "—").toUpperCase();
+  const asOf = String(payload?.asOfDate || "—");
+  const spot = payload?.current?.vwap?.livePrice ?? payload?.liveContext?.weeklyFriday?.dealerGamma?.spot ?? payload?.liveContext?.spot;
+  const spotTxt = Number.isFinite(Number(spot)) ? Number(spot).toFixed(2) : "—";
+
+  const reg = payload?.current?.regime || {};
+  const macro = payload?.current?.macro || {};
+  const vwap = payload?.current?.vwap || {};
+  const like = payload?.oddsLikeNow || {};
+  const lc = payload?.liveContext || {};
+
+  const lines = [];
+  lines.push(`# ${sym} — Engine 2 Export`);
+  lines.push("");
+  lines.push(`- generatedAt: ${new Date().toISOString()}`);
+  lines.push(`- asOf: ${asOf}`);
+  lines.push(`- spot: ${spotTxt}`);
+  lines.push(`- url: ${String(uiState?.url || "")}`);
+  lines.push("");
+
+  lines.push("## UI state");
+  lines.push("```json");
+  lines.push(JSON.stringify(uiState || {}, null, 2));
+  lines.push("```");
+  lines.push("");
+
+  lines.push("## Regime");
+  lines.push(`- score100: ${reg?.score100 ?? "—"}`);
+  lines.push(`- bucket: ${reg?.bucket ?? "—"}`);
+  if (reg?.components) lines.push(`- components: ${JSON.stringify(reg.components)}`);
+  lines.push("");
+
+  lines.push("## Macro");
+  lines.push(`- multiplier: ${macro?.multiplier ?? "—"}`);
+  if (macro?.flags) lines.push(`- flags: ${JSON.stringify(macro.flags)}`);
+  const hiTop = Array.isArray(macro?.highImpactUS?.top) ? macro.highImpactUS.top : [];
+  if (hiTop.length) {
+    lines.push("");
+    lines.push("### High-impact US events");
+    hiTop.forEach((x) => lines.push(`- ${String(x)}`));
+  }
+  lines.push("");
+
+  lines.push("## Odds like now (by width)");
+  const bw = Array.isArray(like?.byWidth) ? like.byWidth : [];
+  if (bw.length) {
+    const table = bw.map((r) => ({
+      w: r?.w,
+      n: r?.n,
+      breachEitherPct: r?.breachEitherPct,
+      breachPutPct: r?.breachPutPct,
+      breachCallPct: r?.breachCallPct,
+      avgAbsRetPct: r?.avgAbsRetPct,
+    }));
+    lines.push(_mdTable(["w", "n", "breachEitherPct", "breachPutPct", "breachCallPct", "avgAbsRetPct"], table));
+  } else {
+    lines.push("_No odds rows._");
+  }
+  lines.push("");
+
+  lines.push("## VWAP");
+  lines.push(`- enabled: ${vwap?.enabled ?? false}`);
+  lines.push(`- value: ${vwap?.value ?? "—"}`);
+  lines.push(`- barDateUsed: ${vwap?.barDateUsed ?? "—"}`);
+  lines.push(`- livePrice: ${vwap?.livePrice ?? "—"}`);
+  if (vwap?.distance) lines.push(`- distance: ${JSON.stringify(vwap.distance)}`);
+  if (Array.isArray(vwap?.notes) && vwap.notes.length) lines.push(`- notes: ${vwap.notes.join(" | ")}`);
+  lines.push("");
+
+  function _viewSummary(view) {
+    const out = {};
+    out.enabled = !!view?.enabled;
+    out.symbolUsed = view?.symbolUsed;
+    out.expiry = view?.expiry;
+    out.spot = view?.spot;
+    out.bandPct = view?.bandPct;
+    out.atmIvPct = view?.atmIvPct;
+    out.gammaFlipStrike = view?.gammaFlipStrike;
+    out.dealerGamma = view?.dealerGamma;
+    out.oiClusters = view?.oiClusters;
+    out.addons = view?.addons;
+    out.warnings = view?.warnings;
+    out.notes = view?.notes;
+    return out;
+  }
+
+  lines.push("## Live context (weeklyFriday)");
+  lines.push("```json");
+  lines.push(JSON.stringify(_viewSummary(lc?.weeklyFriday || {}), null, 2));
+  lines.push("```");
+  lines.push("");
+
+  lines.push("## Live context (nearestDaily)");
+  lines.push("```json");
+  lines.push(JSON.stringify(_viewSummary(lc?.nearestDaily || {}), null, 2));
+  lines.push("```");
+  lines.push("");
+
+  lines.push("## Vol pressure");
+  lines.push("```json");
+  lines.push(JSON.stringify(lc?.volPressure || {}, null, 2));
+  lines.push("```");
+  lines.push("");
+
+  lines.push("## Levels payload (spx-levels)");
+  if (levels) {
+    const heat = levels?.levels?.gexHeatmap || null;
+    const keep = {
+      schemaVersion: levels?.schemaVersion,
+      priceSeriesPoints: Array.isArray(levels?.priceSeries) ? levels.priceSeries.length : 0,
+      view: levels?.levels?.view,
+      symbolUsed: levels?.levels?.symbolUsed,
+      expiry: levels?.levels?.expiry,
+      spot: levels?.levels?.spot,
+      gammaFlipStrike: levels?.levels?.gammaFlipStrike,
+      heatmap: heat
+        ? {
+            enabled: heat.enabled,
+            spot: heat.spot,
+            bandPct: heat.bandPct,
+            atmIvUsedPct: heat.atmIvUsedPct,
+            metrics: heat.metrics,
+            stability: heat.stability,
+            boundaries: heat.boundaries,
+            warnings: heat.warnings,
+            notes: heat.notes,
+          }
+        : null,
+      warnings: levels?.levels?.warnings,
+      notes: levels?.levels?.notes,
+    };
+    lines.push("```json");
+    lines.push(JSON.stringify(keep, null, 2));
+    lines.push("```");
+  } else {
+    lines.push("_Levels payload unavailable._");
+  }
+  lines.push("");
+
+  lines.push("## Notes / Warnings");
+  const notes = Array.isArray(payload?.notes) ? payload.notes : [];
+  const warns = Array.isArray(lc?.warnings) ? lc.warnings : [];
+  if (notes.length) lines.push(`- engineNotes: ${notes.join(" | ")}`);
+  if (warns.length) lines.push(`- liveWarnings: ${warns.join(" | ")}`);
+
+  return lines.join("\n");
+}
+
+function _engine2ExportFileNameBase(payload) {
+  const sym = String(payload?.underlying?.symbol || "SPX").toUpperCase();
+  const asOf = String(payload?.asOfDate || "").slice(0, 10) || "asof";
+  return `engine2-export-${sym}-${asOf}`;
+}
+
+async function _ensureEngine2LevelsPayload() {
+  if (lastGammaPayload) return lastGammaPayload;
+  const v = gammaState.view;
+  const under = encodeURIComponent(String(engine2UnderlyingState.symbol || "SPX"));
+  const payload = await fetchJson(
+    `/api/spx-levels?underlying=${under}&view=${encodeURIComponent(v)}&points=90&window_days=180&include_heatmap=1`
+    + `&heatmap_view=${encodeURIComponent(gexState.view)}`
+    + `&heatmap_mode=${encodeURIComponent(gexState.mode)}`
+    + `&slope_window=5&flip_adjacent_n=5`,
+    { timeoutMs: 45000 }
+  );
+  lastGammaPayload = payload;
+  return payload;
+}
+
+async function exportEngine2LLMBundle() {
+  const status = $("status");
+  const payload = lastPayload;
+  if (!payload) {
+    if (status) {
+      status.textContent = "Export: run Engine 2 first (no payload yet).";
+      status.classList.add("isError");
+      status.classList.remove("hidden");
+    }
+    return;
+  }
+
+  try {
+    if (status) {
+      status.textContent = "Exporting…";
+      status.classList.remove("isError");
+      status.classList.add("isRunning");
+      status.classList.remove("hidden");
+    }
+
+    const levels = await _ensureEngine2LevelsPayload().catch(() => null);
+
+    const uiState = {
+      engine: "engine2",
+      url: String(window.location?.href || ""),
+      underlyingSelected: String(engine2UnderlyingState.symbol || ""),
+      entryDay: String($("entryDay")?.value || ""),
+      seasonalityMode: String($("seasonalityMode")?.value || ""),
+      gammaView: String(gammaState.view || ""),
+      gammaLayers: { ...(gammaState.layers || {}) },
+      heatmapView: String(gexState.view || ""),
+      heatmapMode: String(gexState.mode || ""),
+    };
+
+    const base = _engine2ExportFileNameBase(payload);
+    const zip = window.ZipStore ? new window.ZipStore() : null;
+    if (!zip) throw new Error("ZIP module missing (ZipStore not loaded).");
+
+    // snapshot.md
+    const md = buildEngine2SnapshotMarkdown({ payload, levels, uiState });
+    zip.addText("snapshot.md", md);
+
+    // Raw payloads
+    zip.addText("payload.engine2.json", JSON.stringify(payload, null, 2));
+    if (levels) zip.addText("payload.levels.json", JSON.stringify(levels, null, 2));
+    zip.addText("ui_state.json", JSON.stringify(uiState, null, 2));
+
+    // Tables
+    const odds = Array.isArray(payload?.oddsLikeNow?.byWidth) ? payload.oddsLikeNow.byWidth : [];
+    const oddsRows = odds.map((r) => ({
+      width: r?.w,
+      n: r?.n,
+      breachEitherPct: r?.breachEitherPct,
+      breachPutPct: r?.breachPutPct,
+      breachCallPct: r?.breachCallPct,
+      avgAbsRetPct: r?.avgAbsRetPct,
+    }));
+    zip.addText("tables/odds_by_width.csv", toCsv(oddsRows));
+
+    const hiTop = Array.isArray(payload?.current?.macro?.highImpactUS?.top) ? payload.current.macro.highImpactUS.top : [];
+    const macroRows = hiTop.map((s, i) => {
+      const t = String(s || "");
+      const date = t.slice(0, 10);
+      const name = t.length > 11 ? t.slice(11) : "";
+      return { idx: i + 1, date, name, raw: t };
+    });
+    zip.addText("tables/macro_events.csv", toCsv(macroRows));
+
+    const vp = payload?.liveContext?.volPressure || {};
+    const vpRow = {
+      asOfDate: vp?.asOfDate,
+      state: vp?.state,
+      scoreZ: vp?.scoreZ,
+      ...(vp?.inputs || {}),
+      ...(vp?.z ? { z_dIv: vp.z.dIv, z_dSkew: vp.z.dSkew, z_ivRv: vp.z.ivRv, z_term: vp.z.term } : {}),
+    };
+    zip.addText("tables/vol_pressure_inputs.csv", toCsv([vpRow]));
+
+    const blob = zip.toBlob();
+    downloadBlob(`${base}.zip`, blob);
+
+    if (status) {
+      status.textContent = `Exported: ${base}.zip`;
+      status.classList.remove("isRunning", "isError");
+      status.classList.add("isOk");
+      status.classList.remove("hidden");
+      // auto-hide after a moment to keep UI clean
+      window.setTimeout(() => status.classList.add("hidden"), 4000);
+    }
+  } catch (e) {
+    if (status) {
+      status.textContent = `Export error: ${String(e?.message || e)}`;
+      status.classList.remove("isRunning");
+      status.classList.add("isError");
+      status.classList.remove("hidden");
+    }
+  }
+}
+
 function renderEngine2DecisionPanel(payload) {
   const host = $("e2DecisionSection");
   if (!host) return;
@@ -1092,6 +1380,7 @@ function renderEngine2DecisionPanel(payload) {
           <div class="taChips">${chipHtml}</div>
           <div class="taHeaderActions">
             <button class="taActionBtn" type="button" id="e2CopySnapshot">Copy snapshot</button>
+            <button class="taActionBtn" type="button" id="e2ExportLLM">Export (LLM)</button>
           </div>
         </div>
       </div>
@@ -1181,6 +1470,17 @@ function renderEngine2DecisionPanel(payload) {
       try {
         if (window.RavenUI?.copyToClipboard) await window.RavenUI.copyToClipboard(snap);
         else await navigator.clipboard.writeText(snap);
+      } catch {
+        // ignore
+      }
+    });
+  }
+
+  const expBtn = $("e2ExportLLM");
+  if (expBtn) {
+    expBtn.addEventListener("click", async () => {
+      try {
+        await exportEngine2LLMBundle();
       } catch {
         // ignore
       }
