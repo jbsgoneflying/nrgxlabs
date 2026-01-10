@@ -11,7 +11,8 @@ final class CalendarViewModel: ObservableObject {
         isLoading = true
         self.error = nil
         do {
-            response = try await client.get("api/calendar", query: ["view": "week", "includeEvents": "1"])
+            // Match the web app: show the full month (earnings + macro events).
+            response = try await client.get("api/calendar", query: ["view": "month", "includeEvents": "1"])
         } catch let appError as AppError {
             self.error = appError
         } catch {
