@@ -77,16 +77,34 @@ struct EarningsGroups: Decodable {
 }
 
 struct EarningsTicker: Decodable, Identifiable {
-    var id: String { ticker.uppercased() }
+    var id: String { ticker.uppercased() + "|" + (time ?? "") }
     var ticker: String
+    var time: String?
 
     init(ticker: String) {
         self.ticker = ticker
     }
 
+    enum CodingKeys: String, CodingKey {
+        case ticker
+        case symbol
+        case time
+    }
+
     init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        self.ticker = (try? container.decode(String.self)) ?? ""
+        // Backend may send either:
+        // - "AAPL"
+        // - { "ticker": "AAPL", "time": "AMC" }
+        if let s = try? decoder.singleValueContainer().decode(String.self) {
+            self.ticker = s
+            self.time = nil
+            return
+        }
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.ticker = (try? c.decode(String.self, forKey: .ticker))
+            ?? (try? c.decode(String.self, forKey: .symbol))
+            ?? ""
+        self.time = try? c.decodeIfPresent(String.self, forKey: .time)
     }
 }
 

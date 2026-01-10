@@ -147,7 +147,8 @@ private struct EarningsGroupRow: View {
     let tickers: [EarningsTicker]
 
     var body: some View {
-        if tickers.isEmpty { EmptyView() }
+        let shown = tickers.filter { !$0.ticker.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if shown.isEmpty { EmptyView() }
         HStack(spacing: 4) {
             Text(label)
                 .font(.caption)
@@ -155,8 +156,8 @@ private struct EarningsGroupRow: View {
                 .frame(width: 40, alignment: .leading)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    ForEach(tickers) { tk in
-                        Text(tk.ticker)
+                    ForEach(shown) { tk in
+                        Text(tk.ticker.uppercased())
                             .font(.subheadline)
                             .padding(.vertical, 4)
                             .padding(.horizontal, 8)
