@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from backend.benzinga_client import BenzingaClient
 from backend.config import FeatureFlags
+from backend.expected_move import compute_expected_move_from_chain, compute_strike_targets
 from backend.orats_client import OratsClient, OratsError
 
 LOG = logging.getLogger("spx_ic_engine")
@@ -695,6 +696,189 @@ def _filter_chain_by_expiry(rows: List[dict], *, expiry: str) -> List[dict]:
         if d0 == ex:
             out.append(r)
     return out
+
+
+def _pick_friday_weekly_expiry(exp_dates: List[str], *, today: dt.date) -> Optional[str]:
+    """
+    Pick the nearest Friday weekly expiry from available expiration dates.
+    Excludes dailies (0DTE, Mon-Thu) - only uses Friday expirations.
+    
+    Returns the nearest Friday that is >= today.
+    """
+    fridays: List[str] = []
+    for d in exp_dates:
+        try:
+            ed = _parse_date(str(d)[:10])
+            # Only include Fridays (weekday() == 4)
+            if ed.weekday() == 4 and ed >= today:
+                fridays.append(d)
+        except Exception:
+            continue
+    
+    if not fridays:
+        return None
+    
+    # Sort and return nearest Friday
+    fridays.sort()
+    return fridays[0]
+
+
+def compute_expected_move_weekly(
+    client: OratsClient,
+    *,
+    ticker: str,
+    today: dt.date,
+    symbols: Optional[Tuple[str, ...]] = None,
+) -> Dict[str, Any]:
+    """
+    Compute expected move for Engine 2 using ONLY weekly (Friday) options.
+    
+    This explicitly excludes dailies (0DTE, Mon-Thu expiries) and only uses
+    the nearest Friday weekly expiration for the expected move calculation.
+    
+    Args:
+        client: OratsClient instance
+        ticker: Underlying ticker (SPX, SPY, QQQ)
+        today: Current date
+        symbols: Optional tuple of symbols to try (e.g., ("SPXW", "SPX", "SPY"))
+    
+    Returns:
+        Dict with expected move data
+    """
+    t = str(ticker).strip().upper()
+    warnings: List[str] = []
+    
+    result: Dict[str, Any] = {
+        "ticker": t,
+        "asOfDate": today.isoformat(),
+        "expiry": None,
+        "dte": None,
+        "source": None,
+        "spotPrice": None,
+        "forwardPrice": None,
+        "straddlePV": None,
+        "expectedMoveDollars": None,
+        "expectedMovePct": None,
+        "discountFactor": None,
+        "strikesUsedForForward": 0,
+        "warnings": [],
+        "notes": ["Using weekly (Friday) options only - dailies excluded."],
+    }
+    
+    # Default symbols for each underlying
+    if symbols is None:
+        if t == "SPX":
+            symbols = ("SPXW", "SPX", "SPY")
+        elif t == "QQQ":
+            symbols = ("QQQ",)
+        else:
+            symbols = (t,)
+    
+    # Try each symbol until we find one with a valid Friday weekly chain
+    fields = (
+        "ticker,tradeDate,expirDate,strike,spotPrice,stockPrice,"
+        "callBidPrice,callAskPrice,putBidPrice,putAskPrice,"
+        "callOpenInterest,putOpenInterest"
+    )
+    
+    used_symbol: Optional[str] = None
+    exp_date: Optional[dt.date] = None
+    chain_rows: List[dict] = []
+    spot: Optional[float] = None
+    
+    for sym in symbols:
+        try:
+            # Get available expirations
+            exp_dates: List[str] = []
+            try:
+                exp_resp = client.live_expirations(ticker=sym)
+                for r in (exp_resp.rows or []):
+                    if isinstance(r, dict):
+                        d0 = str(r.get("expirDate") or r.get("expiry") or "")[:10]
+                        if d0 and len(d0) >= 10:
+                            exp_dates.append(d0)
+            except Exception:
+                pass
+            
+            # If no expirations from live_expirations, try inferring from strikes
+            if not exp_dates:
+                try:
+                    all_rows = client.live_strikes(ticker=sym, fields=fields).rows or []
+                    exp_dates = _infer_live_expiries_from_strikes(all_rows)
+                except Exception:
+                    continue
+            
+            # Pick the nearest Friday weekly expiry
+            friday_exp = _pick_friday_weekly_expiry(exp_dates, today=today)
+            if not friday_exp:
+                warnings.append(f"{sym}: No Friday weekly expiry found.")
+                continue
+            
+            exp_date = _parse_date(friday_exp)
+            
+            # Get strikes for this Friday expiry
+            try:
+                resp = client.live_strikes_by_expiry(ticker=sym, expiry=friday_exp, fields=fields)
+                chain_rows = [r for r in (resp.rows or []) if isinstance(r, dict)]
+            except Exception:
+                # Fall back to filtering full chain
+                try:
+                    all_rows = client.live_strikes(ticker=sym, fields=fields).rows or []
+                    chain_rows = _filter_chain_by_expiry(all_rows, expiry=friday_exp)
+                except Exception:
+                    chain_rows = []
+            
+            if not chain_rows:
+                warnings.append(f"{sym}: No chain rows for Friday expiry {friday_exp}.")
+                continue
+            
+            # Get spot price
+            for r in chain_rows:
+                s = _to_float(r.get("spotPrice")) or _to_float(r.get("stockPrice"))
+                if s and s > 0:
+                    spot = s
+                    break
+            
+            if spot is None:
+                warnings.append(f"{sym}: Could not determine spot price.")
+                continue
+            
+            used_symbol = sym
+            break
+            
+        except Exception as e:
+            warnings.append(f"{sym}: Error - {type(e).__name__}")
+            continue
+    
+    if not chain_rows or spot is None or exp_date is None:
+        result["warnings"] = warnings + ["No valid weekly Friday chain found."]
+        return result
+    
+    result["expiry"] = exp_date.isoformat()
+    result["dte"] = (exp_date - today).days
+    result["spotPrice"] = round(spot, 2)
+    
+    # Compute expected move using the chain
+    em_result = compute_expected_move_from_chain(
+        chain_rows,
+        spot=spot,
+        expiry=exp_date,
+        as_of=today,
+        risk_free_rate=0.05,
+    )
+    
+    # Merge results
+    result["source"] = "live"
+    result["forwardPrice"] = em_result.get("forwardPrice")
+    result["straddlePV"] = em_result.get("straddlePV")
+    result["expectedMoveDollars"] = em_result.get("expectedMoveDollars")
+    result["expectedMovePct"] = em_result.get("expectedMovePct")
+    result["discountFactor"] = em_result.get("discountFactor")
+    result["strikesUsedForForward"] = em_result.get("strikesUsedForForward", 0)
+    result["symbolUsed"] = used_symbol
+    result["warnings"] = warnings + (em_result.get("warnings") or [])
+    
+    return result
 
 
 def _live_chain_with_fallback(
@@ -4019,6 +4203,52 @@ def compute_engine2_spx_ic(
     except Exception:
         vwap_level = {"enabled": False, "notes": ["VWAP level unavailable."]}
 
+    # --- Expected Move (weekly Friday options only - excludes dailies) ---
+    expected_move: Dict[str, Any] = {"enabled": False, "notes": ["Expected move unavailable."]}
+    strike_targets: Optional[Dict[str, Any]] = None
+    try:
+        # Determine symbols to try based on underlying
+        em_symbols: Tuple[str, ...]
+        if underlying == "SPX":
+            em_symbols = ("SPXW", "SPX", "SPY")
+        elif underlying == "QQQ":
+            em_symbols = ("QQQ",)
+        else:
+            em_symbols = (underlying,)
+        
+        em_result = compute_expected_move_weekly(
+            client,
+            ticker=underlying,
+            today=now,
+            symbols=em_symbols,
+        )
+        
+        if em_result.get("expectedMovePct") is not None:
+            expected_move = {
+                "enabled": True,
+                **em_result,
+            }
+            
+            # Compute strike targets if we have EM and spot
+            em_pct = em_result.get("expectedMovePct")
+            spot_for_targets = em_result.get("spotPrice")
+            if em_pct is not None and spot_for_targets is not None and float(spot_for_targets) > 0:
+                strike_targets = compute_strike_targets(
+                    expected_move_pct=float(em_pct),
+                    spot_price=float(spot_for_targets),
+                )
+        else:
+            expected_move = {
+                "enabled": False,
+                **em_result,
+            }
+        mark("compute.expected_move")
+    except Exception as e:
+        expected_move = {
+            "enabled": False,
+            "notes": [f"Expected move computation failed: {type(e).__name__}"],
+        }
+
     telemetry["counts"]["backtest.rowsUsed"] = int(len(week_rows))
     mark("compute.total")
     LOG.info(
@@ -4045,6 +4275,8 @@ def compute_engine2_spx_ic(
         "underlying": {"symbol": underlying, "isProxy": bool(is_proxy), "notes": proxy_notes},
         "current": {"regime": regime_now, "macro": macro_now, "vwap": vwap_level},
         "liveContext": live_context,
+        "expectedMove": expected_move,
+        "strikeTargets": strike_targets,
         "oddsLikeNow": {
             "regimeBucket": regime_bucket_now,
             "macroBucket": macro_bucket_now,

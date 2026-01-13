@@ -1587,6 +1587,23 @@ function renderEngine2DecisionPanel(payload) {
     ? `iv7=${_vpNum(vpInp.iv7, 2)} · rv10=${_vpNum(vpInp.rv10, 2)} · term=${_vpNum(vpInp.termSlope, 2)}`
     : "Vol pressure unavailable.";
 
+  // --- Expected Move (weekly Friday options only) ---
+  const em = payload?.expectedMove || {};
+  const emEnabled = !!em?.enabled;
+  const emPct = emEnabled ? Number(em?.expectedMovePct) : null;
+  const emDollars = emEnabled ? Number(em?.expectedMoveDollars) : null;
+  const emExpiry = String(em?.expiry || "").slice(0, 10);
+  const emDte = (em?.dte !== null && em?.dte !== undefined) ? Number(em.dte) : null;
+  const emSource = String(em?.source || "").toLowerCase();
+  const emSourceLabel = emSource === "live" ? "Live" : emSource === "eod" ? "EOD" : emSource ? emSource : "—";
+  const emSymbol = String(em?.symbolUsed || "").toUpperCase();
+
+  // --- Strike Targets ---
+  const st = payload?.strikeTargets || null;
+  const stWhite = st?.whitePts;
+  const stBlue = st?.bluePts;
+  const stRed = st?.redPts;
+
   const dots = Array.from({ length: 5 }).map((_, i) => `<span class="taDot ${i < 3 ? "isOn" : ""}"></span>`).join("");
   const chips = [
     `Regime: ${bucket}`,
@@ -1666,6 +1683,27 @@ function renderEngine2DecisionPanel(payload) {
           <div class="taCardTop"><div class="taCardTitle">Vol pressure</div></div>
           <div class="taCardState mono">${escapeHtml(vpState)}${Number.isFinite(vpScore) ? ` · z=${escapeHtml(vpScore.toFixed(2))}` : ""}</div>
           <div class="taCardInterp muted">${escapeHtml(vpSub)}</div>
+        </div>
+        <div class="taCard">
+          <div class="taCardTop">
+            <div class="taCardTitle">Expected Move</div>
+            <span class="info" title="Risk-neutral expected move computed from weekly Friday ATM straddle. Daily options are excluded.">ⓘ</span>
+          </div>
+          <div class="taCardState mono">${Number.isFinite(emPct) ? escapeHtml(emPct.toFixed(2)) + "%" : "—"}</div>
+          <div class="taCardInterp">${Number.isFinite(emDollars) ? `$${escapeHtml(emDollars.toFixed(2))} pts` : "—"} · ${emExpiry ? `Exp: ${escapeHtml(emExpiry)}` : "—"}${Number.isFinite(emDte) ? ` (${emDte}d)` : ""}</div>
+          <div class="taCardInterp muted">${emSymbol ? escapeHtml(emSymbol) : ""} · ${escapeHtml(emSourceLabel)} · Weekly Friday only</div>
+        </div>
+        <div class="taCard">
+          <div class="taCardTop">
+            <div class="taCardTitle">Strike Targets (EM)</div>
+            <span class="info" title="Wing strike distances based on expected move. White = 2× EM pts, Blue = 1.5× White, Red = 2× White. Use for short-strike targeting.">ⓘ</span>
+          </div>
+          <div class="emTargetGrid">
+            <div class="emRow emBox--white"><span class="k">1.0× EM</span><span class="v mono">${Number.isFinite(stWhite) ? escapeHtml(stWhite.toFixed(2)) + " pts" : "—"}</span></div>
+            <div class="emRow emBox--blue"><span class="k">1.5× EM</span><span class="v mono">${Number.isFinite(stBlue) ? escapeHtml(stBlue.toFixed(2)) + " pts" : "—"}</span></div>
+            <div class="emRow emBox--red"><span class="k">2.0× EM</span><span class="v mono">${Number.isFinite(stRed) ? escapeHtml(stRed.toFixed(2)) + " pts" : "—"}</span></div>
+          </div>
+          <div class="taCardInterp">Wing distance from spot.</div>
         </div>
       </div>
 
