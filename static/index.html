@@ -143,6 +143,50 @@
         <section class="surface hidden" id="e1DecisionSection" aria-label="Decision header"></section>
         <!-- Summary merged into Risk Check (Decision Header) -->
 
+        <section class="surface hidden" id="holdRiskSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Earnings Hold Risk
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Hold risk help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Earnings Hold Risk</div>
+                  <div class="tipBody">
+                    <p>Close-based breach probabilities for earnings day and next day (not open-gap). Quantifies <b>holding through earnings</b> risk.</p>
+                    <ul>
+                      <li><b>Unconditional</b>: all events — breach rate if you hold to close.</li>
+                      <li><b>Flat open</b>: events where gap was ≤0.25× EM — helps isolate intraday drift risk.</li>
+                      <li><b>Drift</b>: post-gap continuation (EO→EC, EC→NC) — shows how much the move extends after open.</li>
+                    </ul>
+                    <p><b>Desk view</b>: use this alongside open-gap stats to decide hold vs exit strategies.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="holdRiskMeta">—</div>
+          </div>
+
+          <div class="metricGrid metricGrid--holdRisk">
+            <div class="metricCard">
+              <div class="metricLabel">Unconditional (all events)</div>
+              <div id="holdRiskUnconditional" class="holdRiskGrid"></div>
+              <div id="holdRiskUnconditionalNote" class="metricCaption muted">—</div>
+            </div>
+
+            <div class="metricCard">
+              <div class="metricLabel">Conditional (flat open ≤0.25× EM)</div>
+              <div id="holdRiskConditional" class="holdRiskGrid"></div>
+              <div id="holdRiskConditionalNote" class="metricCaption muted">—</div>
+            </div>
+
+            <div class="metricCard">
+              <div class="metricLabel">Post-Event Drift</div>
+              <div id="holdRiskDrift" class="holdRiskGrid"></div>
+              <div id="holdRiskDriftNote" class="metricCaption muted">—</div>
+            </div>
+          </div>
+        </section>
+
         <!-- AskRaven removed -->
 
         <section class="surface">
@@ -542,50 +586,6 @@
             <div class="rvLine" id="rvFlagged">—</div>
             <div class="rvLine" id="rvMissed">—</div>
             <div class="rvLine" id="rvRates">—</div>
-          </div>
-        </section>
-
-        <section class="surface hidden" id="holdRiskSection">
-          <div class="sectionHeader">
-            <h2 class="sectionTitle">
-              Earnings Hold Risk
-              <span class="tipWrap">
-                <button class="tipBtn" type="button" aria-label="Hold risk help" aria-expanded="false">i</button>
-                <div class="tipPanel" role="tooltip">
-                  <div class="tipTitle">Earnings Hold Risk</div>
-                  <div class="tipBody">
-                    <p>Close-based breach probabilities for earnings day and next day (not open-gap). Quantifies <b>holding through earnings</b> risk.</p>
-                    <ul>
-                      <li><b>Unconditional</b>: all events — breach rate if you hold to close.</li>
-                      <li><b>Flat open</b>: events where gap was ≤0.25× EM — helps isolate intraday drift risk.</li>
-                      <li><b>Drift</b>: post-gap continuation (EO→EC, EC→NC) — shows how much the move extends after open.</li>
-                    </ul>
-                    <p><b>Desk view</b>: use this alongside open-gap stats to decide hold vs exit strategies.</p>
-                  </div>
-                </div>
-              </span>
-            </h2>
-            <div class="sectionMeta muted" id="holdRiskMeta">—</div>
-          </div>
-
-          <div class="metricGrid metricGrid--holdRisk">
-            <div class="metricCard">
-              <div class="metricLabel">Unconditional (all events)</div>
-              <div id="holdRiskUnconditional" class="holdRiskGrid"></div>
-              <div id="holdRiskUnconditionalNote" class="metricCaption muted">—</div>
-            </div>
-
-            <div class="metricCard">
-              <div class="metricLabel">Conditional (flat open ≤0.25× EM)</div>
-              <div id="holdRiskConditional" class="holdRiskGrid"></div>
-              <div id="holdRiskConditionalNote" class="metricCaption muted">—</div>
-            </div>
-
-            <div class="metricCard">
-              <div class="metricLabel">Post-Event Drift</div>
-              <div id="holdRiskDrift" class="holdRiskGrid"></div>
-              <div id="holdRiskDriftNote" class="metricCaption muted">—</div>
-            </div>
           </div>
         </section>
 
