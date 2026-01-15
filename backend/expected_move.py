@@ -1088,16 +1088,41 @@ def compute_earnings_hold_risk(
     # Unconditional sample size = events valid for EC breach
     valid_unconditional = [ev for ev in events if ev.is_valid_for_unconditional()]
     unconditional_sample_size = len(valid_unconditional)
-    
+
     # Flat open sample size = events that passed the flat open gate
     flat_events = filter_flat_open_events(events, flat_open_gate)
     flat_open_sample_size = len(flat_events)
 
-    # Compute max observed close deviation for flat open events
+    # Compute max observed close deviation for ALL events (unconditional)
     # max(abs(EC - PC) / EM) and max(abs(NC - PC) / EM)
     # Shows how close to pain even when no breach occurred
-    max_ec_deviation: Optional[float] = None
-    max_nc_deviation: Optional[float] = None
+    uncond_max_ec_deviation: Optional[float] = None
+    uncond_max_nc_deviation: Optional[float] = None
+
+    if valid_unconditional:
+        ec_deviations = []
+        for ev in valid_unconditional:
+            deviation = abs(ev.earnings_day_close - ev.prior_close) / (
+                ev.prior_close * ev.expected_move_pct / 100.0
+            )
+            ec_deviations.append(deviation)
+        if ec_deviations:
+            uncond_max_ec_deviation = round(max(ec_deviations), 2)
+
+    valid_next_day = [ev for ev in events if ev.is_valid_for_next_day()]
+    if valid_next_day:
+        nc_deviations = []
+        for ev in valid_next_day:
+            deviation = abs(ev.next_day_close - ev.prior_close) / (
+                ev.prior_close * ev.expected_move_pct / 100.0
+            )
+            nc_deviations.append(deviation)
+        if nc_deviations:
+            uncond_max_nc_deviation = round(max(nc_deviations), 2)
+
+    # Compute max observed close deviation for FLAT OPEN events (conditional)
+    cond_max_ec_deviation: Optional[float] = None
+    cond_max_nc_deviation: Optional[float] = None
 
     if flat_events:
         ec_deviations = []
@@ -1105,23 +1130,21 @@ def compute_earnings_hold_risk(
 
         for ev in flat_events:
             if ev.is_valid_for_unconditional():
-                # abs(EC - PC) / (PC * EM%)
                 deviation = abs(ev.earnings_day_close - ev.prior_close) / (
                     ev.prior_close * ev.expected_move_pct / 100.0
                 )
                 ec_deviations.append(deviation)
 
             if ev.is_valid_for_next_day():
-                # abs(NC - PC) / (PC * EM%)
                 deviation = abs(ev.next_day_close - ev.prior_close) / (
                     ev.prior_close * ev.expected_move_pct / 100.0
                 )
                 nc_deviations.append(deviation)
 
         if ec_deviations:
-            max_ec_deviation = round(max(ec_deviations), 2)
+            cond_max_ec_deviation = round(max(ec_deviations), 2)
         if nc_deviations:
-            max_nc_deviation = round(max(nc_deviations), 2)
+            cond_max_nc_deviation = round(max(nc_deviations), 2)
 
     # Build the output schema per master plan
     result: Dict[str, Any] = {
@@ -1135,13 +1158,17 @@ def compute_earnings_hold_risk(
         "unconditional": {
             "earnings_close": _rates_to_schema(unconditional["earnings_close"]),
             "next_day_close": _rates_to_schema(unconditional["next_day_close"]),
+            "max_observed_deviation": {
+                "earnings_close": uncond_max_ec_deviation,
+                "next_day_close": uncond_max_nc_deviation,
+            },
         },
         "conditional_flat_open": {
             "earnings_close": _rates_to_schema(conditional["earnings_close"]),
             "next_day_close": _rates_to_schema(conditional["next_day_close"]),
             "max_observed_deviation": {
-                "earnings_close": max_ec_deviation,
-                "next_day_close": max_nc_deviation,
+                "earnings_close": cond_max_ec_deviation,
+                "next_day_close": cond_max_nc_deviation,
             },
         },
         "drift": {

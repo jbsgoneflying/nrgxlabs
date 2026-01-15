@@ -2500,6 +2500,9 @@ function renderHoldRisk(payload) {
     return "holdRiskRow--high";
   };
 
+  // Helper to format deviation
+  const fmtDev = (d) => (d === null || d === undefined) ? "—" : `${Number(d).toFixed(2)}× EM`;
+
   // Render unconditional rates
   const uncondEl = $("holdRiskUnconditional");
   const uncondNoteEl = $("holdRiskUnconditionalNote");
@@ -2507,6 +2510,7 @@ function renderHoldRisk(payload) {
     const uncond = hr.unconditional || {};
     const ec = uncond.earnings_close || {};
     const nc = uncond.next_day_close || {};
+    const maxDev = uncond.max_observed_deviation || {};
     uncondEl.innerHTML = `
       <div class="holdRiskSubhead">Earnings Close</div>
       <div class="holdRiskRow ${riskClass(ec["1.0"])}"><span class="hrLabel">1.0× EM</span><span class="hrValue">${fmtRate(ec["1.0"])}</span></div>
@@ -2516,6 +2520,9 @@ function renderHoldRisk(payload) {
       <div class="holdRiskRow ${riskClass(nc["1.0"])}"><span class="hrLabel">1.0× EM</span><span class="hrValue">${fmtRate(nc["1.0"])}</span></div>
       <div class="holdRiskRow ${riskClass(nc["1.5"])}"><span class="hrLabel">1.5× EM</span><span class="hrValue">${fmtRate(nc["1.5"])}</span></div>
       <div class="holdRiskRow ${riskClass(nc["2.0"])}"><span class="hrLabel">2.0× EM</span><span class="hrValue">${fmtRate(nc["2.0"])}</span></div>
+      <div class="holdRiskSubhead">Max Observed Deviation</div>
+      <div class="holdRiskRow holdRiskRow--maxdev"><span class="hrLabel">Earnings Close</span><span class="hrValue">${fmtDev(maxDev.earnings_close)}</span></div>
+      <div class="holdRiskRow holdRiskRow--maxdev"><span class="hrLabel">Next Day Close</span><span class="hrValue">${fmtDev(maxDev.next_day_close)}</span></div>
     `;
   }
   if (uncondNoteEl) {
@@ -2531,7 +2538,6 @@ function renderHoldRisk(payload) {
     const ec = cond.earnings_close || {};
     const nc = cond.next_day_close || {};
     const maxDev = cond.max_observed_deviation || {};
-    const fmtDev = (d) => (d === null || d === undefined) ? "—" : `${Number(d).toFixed(2)}× EM`;
     condEl.innerHTML = `
       <div class="holdRiskSubhead">Earnings Close</div>
       <div class="holdRiskRow ${riskClass(ec["1.0"])}"><span class="hrLabel">1.0× EM</span><span class="hrValue">${fmtRate(ec["1.0"])}</span></div>
