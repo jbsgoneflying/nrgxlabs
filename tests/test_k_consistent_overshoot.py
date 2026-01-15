@@ -26,6 +26,14 @@ class OneEventClient:
         return FakeResp(self._earnings if ticker == "TST" else [])
 
     def hist_dailies(self, ticker: str, trade_date: str, fields: str):
+        # Handle range queries (e.g., "2025-01-01,2025-03-31") for bulk fetch
+        if "," in trade_date:
+            start, end = trade_date.split(",")
+            rows = []
+            for (t, d), row in self._dailies.items():
+                if t == ticker and start <= d <= end:
+                    rows.append(row)
+            return FakeResp(rows)
         row = self._dailies.get((ticker, trade_date))
         return FakeResp([row] if row else [])
 
@@ -35,9 +43,13 @@ class OneEventClient:
 
     # Minimal range-mode support for regime overlay/backtest (avoid slow fallback loops).
     def get(self, path: str, params: dict):
-        if path == "/hist/dailies" and params.get("ticker") == "SPY":
-            to_date = str(params.get("toDate") or "2025-03-01")[:10]
-            end = dt.date.fromisoformat(to_date)
+        ticker = params.get("ticker", "")
+        from_date = params.get("fromDate", "")
+        to_date = params.get("toDate", "")
+        
+        if path == "/hist/dailies" and ticker == "SPY":
+            to_date_str = str(to_date or "2025-03-01")[:10]
+            end = dt.date.fromisoformat(to_date_str)
             rows = []
             px = 100.0
             for i in range(0, 40):
@@ -45,9 +57,25 @@ class OneEventClient:
                 px *= 1.001
                 rows.append({"ticker": "SPY", "tradeDate": d.isoformat(), "clsPx": px, "open": px})
             return FakeResp(rows)
-        if path == "/hist/cores" and params.get("ticker") == "TST":
-            to_date = str(params.get("toDate") or "2025-03-01")[:10]
-            end = dt.date.fromisoformat(to_date)
+        if path == "/hist/dailies" and ticker == "TST" and from_date and to_date:
+            # Handle range queries for TST dailies (bulk fetch)
+            rows = []
+            for (t, d), row in self._dailies.items():
+                if t == ticker and from_date <= d <= to_date:
+                    rows.append(row)
+            return FakeResp(rows)
+        if path == "/hist/cores" and ticker == "TST":
+            # Support both range and single lookups
+            if from_date and to_date:
+                # Range query for bulk fetch
+                rows = []
+                for (t, d), row in self._cores.items():
+                    if t == ticker and from_date <= d <= to_date:
+                        rows.append(row)
+                return FakeResp(rows)
+            # For regime overlay
+            to_date_str = str(to_date or "2025-03-01")[:10]
+            end = dt.date.fromisoformat(to_date_str)
             rows = []
             for i in range(0, 40):
                 d = end - dt.timedelta(days=(40 - i))

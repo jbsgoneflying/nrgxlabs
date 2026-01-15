@@ -31,12 +31,76 @@ class ReplayOratsClient:
             self._by_key[(path, params)] = c.get("rows") or []
 
     def get(self, path: str, params: Dict[str, Any]) -> ReplayResp:
+        # Handle range queries for bulk fetch (fromDate/toDate parameters)
+        # These aggregate matching single-date records from the tape
+        if path in ("/hist/dailies", "/hist/cores") and "fromDate" in params and "toDate" in params:
+            return self._handle_range_query(path, params)
+        
         key = (str(path), tuple((k, v) for k, v in _stable_params(params)))
         rows = self._by_key.get(key)
         if rows is None:
             # Unknown call -> empty (mirrors 404->empty behavior used for probing)
             rows = []
         return ReplayResp(rows=rows, raw=rows)
+    
+    def _handle_range_query(self, path: str, params: Dict[str, Any]) -> ReplayResp:
+        """
+        Handle range queries by aggregating records from the tape.
+        
+        This supports the bulk fetch optimization in earnings_logic.py while
+        maintaining compatibility with existing recorded tapes.
+        
+        Strategy:
+        1. First, look for single-date entries within the requested range
+        2. Also look for range entries (fromDate/toDate) that overlap with the request
+        """
+        ticker = str(params.get("ticker", ""))
+        from_date = str(params.get("fromDate", ""))
+        to_date = str(params.get("toDate", ""))
+        
+        if not ticker or not from_date or not to_date:
+            return ReplayResp(rows=[], raw=[])
+        
+        # Collect all matching records from the tape
+        aggregated_rows: List[dict] = []
+        seen_dates: set = set()
+        
+        for (tape_path, tape_params), rows in self._by_key.items():
+            if tape_path != path:
+                continue
+            
+            # Extract params dict from tuple of tuples
+            params_dict = {k: v for k, v in tape_params}
+            tape_ticker = params_dict.get("ticker", "")
+            
+            if tape_ticker != ticker:
+                continue
+            
+            # Check for single-date entries (tradeDate param)
+            tape_date = params_dict.get("tradeDate", "")
+            if tape_date:
+                if from_date <= tape_date <= to_date:
+                    for row in rows:
+                        td = row.get("tradeDate", "")
+                        if td and td not in seen_dates:
+                            aggregated_rows.append(row)
+                            seen_dates.add(td)
+                continue
+            
+            # Check for range entries (fromDate/toDate params)
+            tape_from = params_dict.get("fromDate", "")
+            tape_to = params_dict.get("toDate", "")
+            if tape_from and tape_to:
+                # Check for overlap: not (tape_to < from_date or tape_from > to_date)
+                if not (tape_to < from_date or tape_from > to_date):
+                    # Filter rows within the requested range
+                    for row in rows:
+                        td = row.get("tradeDate", "")
+                        if td and from_date <= td <= to_date and td not in seen_dates:
+                            aggregated_rows.append(row)
+                            seen_dates.add(td)
+        
+        return ReplayResp(rows=aggregated_rows, raw=aggregated_rows)
 
     # Convenience wrappers used by the app
     def hist_earnings(self, ticker: str) -> ReplayResp:
@@ -49,6 +113,10 @@ class ReplayOratsClient:
         return self.get("/hist/cores", {"ticker": ticker, "tradeDate": trade_date, "fields": fields})
 
     def hist_dailies(self, ticker: str, trade_date: str, fields: str) -> ReplayResp:
+        # Handle comma-separated date range (used by _fetch_dailies_range for bulk fetch)
+        if "," in trade_date:
+            from_date, to_date = trade_date.split(",")
+            return self.get("/hist/dailies", {"ticker": ticker, "fromDate": from_date, "toDate": to_date, "fields": fields})
         return self.get("/hist/dailies", {"ticker": ticker, "tradeDate": trade_date, "fields": fields})
 
     def hist_strikes(self, *, ticker: str, trade_date: str, fields: str, dte: str | None = None, delta: str | None = None) -> ReplayResp:

@@ -19,6 +19,7 @@ _ADDITIVE_KEYS = {
     "technicals",
     "expectedMove",
     "strikeTargets",
+    "earningsHoldRisk",  # Hold risk extension (informational only)
 }
 
 

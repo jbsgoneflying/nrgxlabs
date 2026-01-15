@@ -40,12 +40,34 @@ class NoBreachClient:
         return FakeResp(self._earnings if ticker == "TST" else [])
 
     def hist_dailies(self, ticker: str, trade_date: str, fields: str):
+        # Handle range queries for bulk fetch
+        if "," in trade_date:
+            start, end = trade_date.split(",")
+            rows = []
+            for (t, d), row in self._dailies.items():
+                if t == ticker and start <= d <= end:
+                    rows.append(row)
+            return FakeResp(rows)
         row = self._dailies.get((ticker, trade_date))
         return FakeResp([row] if row else [])
 
     def hist_cores(self, ticker: str, trade_date: str, fields: str):
         row = self._cores.get((ticker, trade_date))
         return FakeResp([row] if row else [])
+
+    def get(self, path: str, params: dict):
+        """Support for range queries in bulk fetch."""
+        if path == "/hist/cores":
+            ticker = params.get("ticker", "")
+            from_date = params.get("fromDate", "")
+            to_date = params.get("toDate", "")
+            if from_date and to_date:
+                rows = []
+                for (t, d), row in self._cores.items():
+                    if t == ticker and from_date <= d <= to_date:
+                        rows.append(row)
+                return FakeResp(rows)
+        return FakeResp([])
 
 
 def test_no_breaches_baseline_and_overshoot_null():

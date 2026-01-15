@@ -21,7 +21,13 @@ from backend.trade_builder import compute_trade_builder
 from backend.wing_recommendation import compute_wing_recommendation
 from backend.mc_simulator import bootstrap_tas_stability, optimize_wings_risk_only, run_monte_carlo
 from backend.technicals import compute_technicals_payload
-from backend.expected_move import compute_expected_move, compute_strike_targets
+from backend.expected_move import (
+    compute_expected_move,
+    compute_strike_targets,
+    HoldRiskEvent,
+    compute_earnings_hold_risk,
+    DEFAULT_FLAT_OPEN_GATE,
+)
 
 
 LOG = logging.getLogger(__name__)
@@ -609,6 +615,126 @@ def _pct_move(a: float, b: float) -> float:
     return abs(b - a) / a * 100.0
 
 
+def _build_hold_risk_events(
+    parsed_events: List[Tuple[dt.date, dict]],
+    dailies_cache: Dict[str, DailyBar],
+    cores_cache: Dict[str, dict],
+) -> List[HoldRiskEvent]:
+    """
+    Build HoldRiskEvent objects from parsed earnings events.
+    
+    Per master plan time anchors:
+    - PC = Prior Close: close of trading day before earnings
+    - EO = Earnings Day Open: market open on earnings day
+    - EC = Earnings Day Close: close of earnings day session
+    - NC = Next Day Close: close of trading day following earnings
+    
+    The "earnings day" semantics depend on timing:
+    
+    For AMC (announced after close on earnDate):
+        - PC = earnDate close (close BEFORE earnings known)
+        - EO = (earnDate + 1) open (first price AFTER earnings)
+        - EC = (earnDate + 1) close (first full session AFTER earnings)
+        - NC = (earnDate + 2) close (second session AFTER earnings)
+    
+    For BMO (announced before open on earnDate):
+        - PC = (earnDate - 1) close (close BEFORE earnings known)
+        - EO = earnDate open (first price AFTER earnings)
+        - EC = earnDate close (first full session AFTER earnings)
+        - NC = (earnDate + 1) close (second session AFTER earnings)
+    
+    Args:
+        parsed_events: List of (earn_date, raw_event_dict) tuples
+        dailies_cache: Dict of date_str -> DailyBar from bulk fetch
+        cores_cache: Dict of date_str -> cores row from bulk fetch
+    
+    Returns:
+        List of HoldRiskEvent objects with all available price anchors
+    """
+    hold_risk_events: List[HoldRiskEvent] = []
+    
+    for earn_date, raw in parsed_events:
+        annc_tod = raw.get("anncTod") or raw.get("annc_tod") or raw.get("anncTOD")
+        timing = classify_timing(annc_tod)
+        
+        # Skip unknown timing events - they can't be properly anchored
+        if timing == "UNK":
+            continue
+        
+        # Initialize price anchors
+        prior_close: Optional[float] = None
+        earnings_day_open: Optional[float] = None
+        earnings_day_close: Optional[float] = None
+        next_day_close: Optional[float] = None
+        expected_move_pct: Optional[float] = None
+        
+        # Get pricing date for EM lookup (same logic as existing breach stats)
+        pricing_date: Optional[dt.date] = None
+        
+        if timing == "AMC":
+            # AMC: earnings announced after close on earnDate
+            # PC = earnDate close
+            earn_bar = dailies_cache.get(_fmt_date(earn_date))
+            if earn_bar and earn_bar.clsPx is not None:
+                prior_close = earn_bar.clsPx
+            
+            pricing_date = earn_date
+            
+            # EO, EC = next trading day open/close
+            next_bar = _find_next_trading_day_cached(dailies_cache, earn_date, max_steps=10)
+            if next_bar:
+                earnings_day_open = next_bar.open
+                earnings_day_close = next_bar.clsPx
+                
+                # NC = day after next trading day close
+                if next_bar.tradeDate:
+                    try:
+                        next_td = _parse_date(next_bar.tradeDate)
+                        nc_bar = _find_next_trading_day_cached(dailies_cache, next_td, max_steps=10)
+                        if nc_bar and nc_bar.clsPx is not None:
+                            next_day_close = nc_bar.clsPx
+                    except Exception:
+                        pass
+        
+        elif timing == "BMO":
+            # BMO: earnings announced before open on earnDate
+            # PC = prior trading day close
+            prior_bar = _find_prior_trading_day_cached(dailies_cache, earn_date, max_steps=10)
+            if prior_bar:
+                prior_close = prior_bar.clsPx
+                pricing_date = _parse_date(prior_bar.tradeDate) if prior_bar.tradeDate else None
+            
+            # EO, EC = earnDate open/close
+            earn_bar = dailies_cache.get(_fmt_date(earn_date))
+            if earn_bar:
+                earnings_day_open = earn_bar.open
+                earnings_day_close = earn_bar.clsPx
+            
+            # NC = next trading day close
+            next_bar = _find_next_trading_day_cached(dailies_cache, earn_date, max_steps=10)
+            if next_bar and next_bar.clsPx is not None:
+                next_day_close = next_bar.clsPx
+        
+        # Get expected move from cores on pricing date
+        if pricing_date is not None:
+            cores_row, _ = _find_cores_row_cached(cores_cache, pricing_date, max_steps=5)
+            if cores_row:
+                imp_raw = cores_row.get("impErnMv")
+                expected_move_pct = _imp_to_pct(imp_raw)
+        
+        hold_risk_events.append(HoldRiskEvent(
+            earn_date=_fmt_date(earn_date),
+            timing=timing,
+            prior_close=prior_close,
+            earnings_day_open=earnings_day_open,
+            earnings_day_close=earnings_day_close,
+            next_day_close=next_day_close,
+            expected_move_pct=expected_move_pct,
+        ))
+    
+    return hold_risk_events
+
+
 def _current_snapshot(client: OratsClient, *, ticker: str, as_of_date: str) -> Dict[str, Any]:
     """
     Current-ish snapshot for UI (does not affect model stats).
@@ -926,6 +1052,16 @@ def compute_breach_stats(
     else:
         _dailies_cache = {}
         _cores_cache = {}
+
+    # ---------------------------------------------------------------------
+    # EARNINGS HOLD RISK: Build HoldRiskEvent objects for close-based metrics
+    # This is per the engine_1_earnings_hold_risk_master_plan.md specification.
+    # Informational risk analytics only - does not affect trade gating.
+    # ---------------------------------------------------------------------
+    _hold_risk_events: List[HoldRiskEvent] = []
+    if parsed:
+        _hold_risk_events = _build_hold_risk_events(parsed, _dailies_cache, _cores_cache)
+        LOG.debug("Built %d HoldRiskEvent objects for %s", len(_hold_risk_events), t)
 
     # Step 2-5: per-event computations
     out_events: List[Dict[str, Any]] = []
@@ -1576,6 +1712,61 @@ def compute_breach_stats(
     }
     if event_risk is not None:
         out["eventRisk"] = event_risk
+
+    # ---------------------------------------------------------------------
+    # EARNINGS HOLD RISK: Compute close-based breach probabilities
+    # Per master plan: informational risk analytics only, no trade gating.
+    # ---------------------------------------------------------------------
+    try:
+        if _hold_risk_events:
+            earnings_hold_risk_payload = compute_earnings_hold_risk(
+                events=_hold_risk_events,
+                flat_open_gate=DEFAULT_FLAT_OPEN_GATE,
+                em_source="ORATS_EARNINGS_IMPLIED",
+                lookback_label=f"{len(_hold_risk_events)}_events",
+            )
+            out["earningsHoldRisk"] = earnings_hold_risk_payload
+        else:
+            out["earningsHoldRisk"] = {
+                "em_source": "ORATS_EARNINGS_IMPLIED",
+                "flat_open_gate": DEFAULT_FLAT_OPEN_GATE,
+                "lookback": "0_events",
+                "sample_size": {"unconditional": 0, "flat_open": 0},
+                "unconditional": {
+                    "earnings_close": {"1.0": None, "1.5": None, "2.0": None},
+                    "next_day_close": {"1.0": None, "1.5": None, "2.0": None},
+                },
+                "conditional_flat_open": {
+                    "earnings_close": {"1.0": None, "1.5": None, "2.0": None},
+                    "next_day_close": {"1.0": None, "1.5": None, "2.0": None},
+                },
+                "drift": {
+                    "earnings_intraday": {"1.0": None, "1.5": None, "2.0": None},
+                    "next_day": {"1.0": None, "1.5": None, "2.0": None},
+                },
+                "notes": ["No valid earnings events for hold risk computation."],
+            }
+    except Exception as e:
+        LOG.warning("Earnings hold risk computation failed for %s: %s", t, e)
+        out["earningsHoldRisk"] = {
+            "em_source": "ORATS_EARNINGS_IMPLIED",
+            "flat_open_gate": DEFAULT_FLAT_OPEN_GATE,
+            "lookback": "0_events",
+            "sample_size": {"unconditional": 0, "flat_open": 0},
+            "unconditional": {
+                "earnings_close": {"1.0": None, "1.5": None, "2.0": None},
+                "next_day_close": {"1.0": None, "1.5": None, "2.0": None},
+            },
+            "conditional_flat_open": {
+                "earnings_close": {"1.0": None, "1.5": None, "2.0": None},
+                "next_day_close": {"1.0": None, "1.5": None, "2.0": None},
+            },
+            "drift": {
+                "earnings_intraday": {"1.0": None, "1.5": None, "2.0": None},
+                "next_day": {"1.0": None, "1.5": None, "2.0": None},
+            },
+            "notes": [f"Hold risk computation failed: {type(e).__name__}: {e}"],
+        }
 
     # --- Market dealer gamma context (live, informational; index-level only) ---
     # Never affects historical earnings stats, seasonality, or regime training.

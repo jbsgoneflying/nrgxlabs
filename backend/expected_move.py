@@ -651,3 +651,469 @@ def compute_strike_targets(
         "basedOnEmPct": expected_move_pct,
         "basedOnSpot": spot_price,
     }
+
+
+# =============================================================================
+# EARNINGS HOLD RISK MODULE
+# =============================================================================
+#
+# This module implements the Earnings Hold Risk Extension as specified in:
+# engine_1_earnings_hold_risk_master_plan.md
+#
+# Purpose: Quantify close-based breach probabilities for earnings day and
+# the following day, including conditional flat open logic and post-event
+# drift risk. This is informational risk analytics only - no trade gating.
+#
+# Time Anchors:
+#   PC = Prior Close: close of trading day before earnings
+#   EO = Earnings Day Open: market open on earnings day
+#   EC = Earnings Day Close: close of earnings day session
+#   NC = Next Day Close: close of trading day following earnings
+#
+# =============================================================================
+
+
+@dataclass
+class HoldRiskEvent:
+    """
+    Represents a single historical earnings event with all price anchors
+    required for hold risk calculations.
+    
+    All prices are in dollars. EM is the implied expected move percentage.
+    """
+    earn_date: str  # YYYY-MM-DD
+    timing: str  # AMC, BMO, or UNK
+    prior_close: Optional[float]  # PC
+    earnings_day_open: Optional[float]  # EO
+    earnings_day_close: Optional[float]  # EC
+    next_day_close: Optional[float]  # NC
+    expected_move_pct: Optional[float]  # EM as percentage (e.g., 5.0 for 5%)
+    
+    def is_valid_for_unconditional(self) -> bool:
+        """Check if this event has all required fields for unconditional breach metrics."""
+        return (
+            self.prior_close is not None and self.prior_close > 0 and
+            self.earnings_day_close is not None and
+            self.expected_move_pct is not None and self.expected_move_pct > 0
+        )
+    
+    def is_valid_for_conditional(self) -> bool:
+        """Check if this event has all required fields for conditional (flat open) metrics."""
+        return (
+            self.is_valid_for_unconditional() and
+            self.earnings_day_open is not None
+        )
+    
+    def is_valid_for_next_day(self) -> bool:
+        """Check if this event has next day close for extended metrics."""
+        return (
+            self.is_valid_for_unconditional() and
+            self.next_day_close is not None
+        )
+    
+    def is_valid_for_drift(self) -> bool:
+        """Check if this event has all fields for drift metrics."""
+        return (
+            self.earnings_day_open is not None and
+            self.earnings_day_close is not None and
+            self.next_day_close is not None and
+            self.expected_move_pct is not None and self.expected_move_pct > 0
+        )
+
+
+@dataclass
+class BreachRateResult:
+    """
+    Result container for breach rate calculations.
+    
+    Always exposes sample_size alongside the rate per master plan requirements.
+    Rates are expressed as decimals (0.0 to 1.0), not percentages.
+    """
+    rate: Optional[float]  # Breach rate as decimal (None if insufficient data)
+    sample_size: int  # Number of events used in calculation
+    breach_count: int  # Number of breaches observed
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to JSON-serializable dict with rate as decimal."""
+        return {
+            "rate": round(self.rate, 6) if self.rate is not None else None,
+            "sample_size": self.sample_size,
+            "breach_count": self.breach_count,
+        }
+
+
+# K-multiples used for all breach calculations per master plan
+HOLD_RISK_K_VALUES: Tuple[float, ...] = (1.0, 1.5, 2.0)
+
+# Default flat open gate per master plan: abs(EO - PC) <= 0.25 * EM
+DEFAULT_FLAT_OPEN_GATE: float = 0.25
+
+
+def _compute_breach(
+    baseline: float,
+    target: float,
+    em_pct: float,
+    k: float,
+) -> bool:
+    """
+    Determine if a breach occurred.
+    
+    Breach condition: abs(target - baseline) >= k * EM
+    
+    Args:
+        baseline: Reference price (e.g., prior close)
+        target: Target price (e.g., earnings day close)
+        em_pct: Expected move as percentage (e.g., 5.0 for 5%)
+        k: Multiple of EM for breach threshold
+    
+    Returns:
+        True if breach occurred, False otherwise
+    """
+    if baseline <= 0 or em_pct <= 0:
+        return False
+    
+    # Convert EM percentage to price threshold
+    em_decimal = em_pct / 100.0
+    threshold = baseline * em_decimal * k
+    
+    # Compute absolute move
+    abs_move = abs(target - baseline)
+    
+    return abs_move >= threshold
+
+
+def _is_flat_open(
+    prior_close: float,
+    earnings_open: float,
+    em_pct: float,
+    gate: float = DEFAULT_FLAT_OPEN_GATE,
+) -> bool:
+    """
+    Check if the earnings day open qualifies as "flat" per the gate condition.
+    
+    Flat open condition: abs(EO - PC) <= gate * EM
+    
+    Args:
+        prior_close: PC price
+        earnings_open: EO price
+        em_pct: Expected move as percentage
+        gate: Multiple of EM for flat threshold (default 0.25)
+    
+    Returns:
+        True if open is flat, False otherwise
+    """
+    if prior_close <= 0 or em_pct <= 0:
+        return False
+    
+    em_decimal = em_pct / 100.0
+    threshold = prior_close * em_decimal * gate
+    abs_gap = abs(earnings_open - prior_close)
+    
+    return abs_gap <= threshold
+
+
+def compute_breach_rate(
+    events: List[HoldRiskEvent],
+    baseline_field: str,
+    target_field: str,
+    k: float,
+) -> BreachRateResult:
+    """
+    Compute breach rate for a set of events at a given k-multiple.
+    
+    This is a reusable, deterministic helper that returns both breach rate
+    and sample size per master plan requirements.
+    
+    Args:
+        events: List of HoldRiskEvent objects
+        baseline_field: Field name for baseline price ('prior_close', 'earnings_day_open', 'earnings_day_close')
+        target_field: Field name for target price ('earnings_day_close', 'next_day_close')
+        k: Multiple of EM for breach threshold
+    
+    Returns:
+        BreachRateResult with rate, sample_size, and breach_count
+    """
+    valid_events = []
+    
+    for ev in events:
+        baseline = getattr(ev, baseline_field, None)
+        target = getattr(ev, target_field, None)
+        em = ev.expected_move_pct
+        
+        if baseline is not None and baseline > 0 and target is not None and em is not None and em > 0:
+            valid_events.append((baseline, target, em))
+    
+    if not valid_events:
+        return BreachRateResult(rate=None, sample_size=0, breach_count=0)
+    
+    breach_count = sum(
+        1 for baseline, target, em in valid_events
+        if _compute_breach(baseline, target, em, k)
+    )
+    
+    sample_size = len(valid_events)
+    rate = breach_count / sample_size if sample_size > 0 else None
+    
+    return BreachRateResult(rate=rate, sample_size=sample_size, breach_count=breach_count)
+
+
+def filter_flat_open_events(
+    events: List[HoldRiskEvent],
+    gate: float = DEFAULT_FLAT_OPEN_GATE,
+) -> List[HoldRiskEvent]:
+    """
+    Filter events to only those that pass the flat open gate.
+    
+    Flat open gate: abs(EO - PC) <= gate * EM
+    
+    Args:
+        events: List of HoldRiskEvent objects
+        gate: Multiple of EM for flat threshold (default 0.25)
+    
+    Returns:
+        Filtered list of events where the open was flat
+    """
+    flat_events = []
+    
+    for ev in events:
+        if not ev.is_valid_for_conditional():
+            continue
+        
+        if _is_flat_open(
+            prior_close=ev.prior_close,
+            earnings_open=ev.earnings_day_open,
+            em_pct=ev.expected_move_pct,
+            gate=gate,
+        ):
+            flat_events.append(ev)
+    
+    return flat_events
+
+
+def compute_unconditional_breach_rates(
+    events: List[HoldRiskEvent],
+    k_values: Tuple[float, ...] = HOLD_RISK_K_VALUES,
+) -> Dict[str, Dict[str, BreachRateResult]]:
+    """
+    Compute unconditional close breach rates.
+    
+    Baseline: Prior Close (PC)
+    
+    Metrics:
+    - earnings_close: abs(EC - PC) >= k * EM
+    - next_day_close: abs(NC - PC) >= k * EM
+    
+    Args:
+        events: List of HoldRiskEvent objects
+        k_values: Tuple of k-multiples to compute
+    
+    Returns:
+        Dict with 'earnings_close' and 'next_day_close' keys,
+        each containing a dict of k -> BreachRateResult
+    """
+    results: Dict[str, Dict[str, BreachRateResult]] = {
+        "earnings_close": {},
+        "next_day_close": {},
+    }
+    
+    # Filter to events valid for unconditional metrics
+    valid_ec = [ev for ev in events if ev.is_valid_for_unconditional()]
+    valid_nc = [ev for ev in events if ev.is_valid_for_next_day()]
+    
+    for k in k_values:
+        k_str = str(k)
+        
+        # Earnings Day Close vs Prior Close
+        results["earnings_close"][k_str] = compute_breach_rate(
+            valid_ec, "prior_close", "earnings_day_close", k
+        )
+        
+        # Next Day Close vs Prior Close
+        results["next_day_close"][k_str] = compute_breach_rate(
+            valid_nc, "prior_close", "next_day_close", k
+        )
+    
+    return results
+
+
+def compute_conditional_breach_rates(
+    events: List[HoldRiskEvent],
+    gate: float = DEFAULT_FLAT_OPEN_GATE,
+    k_values: Tuple[float, ...] = HOLD_RISK_K_VALUES,
+) -> Dict[str, Dict[str, BreachRateResult]]:
+    """
+    Compute conditional breach rates for events with flat opens.
+    
+    This answers the trading question: "If earnings gap is flat,
+    what's the probability of breach by close?"
+    
+    Filter: abs(EO - PC) <= gate * EM
+    Baseline: Prior Close (PC)
+    
+    Args:
+        events: List of HoldRiskEvent objects
+        gate: Flat open gate (default 0.25)
+        k_values: Tuple of k-multiples to compute
+    
+    Returns:
+        Dict with 'earnings_close' and 'next_day_close' keys,
+        each containing a dict of k -> BreachRateResult
+    """
+    flat_events = filter_flat_open_events(events, gate)
+    
+    results: Dict[str, Dict[str, BreachRateResult]] = {
+        "earnings_close": {},
+        "next_day_close": {},
+    }
+    
+    # Filter flat events for each metric
+    valid_ec = [ev for ev in flat_events if ev.is_valid_for_unconditional()]
+    valid_nc = [ev for ev in flat_events if ev.is_valid_for_next_day()]
+    
+    for k in k_values:
+        k_str = str(k)
+        
+        # Earnings Day Close vs Prior Close (conditional on flat open)
+        results["earnings_close"][k_str] = compute_breach_rate(
+            valid_ec, "prior_close", "earnings_day_close", k
+        )
+        
+        # Next Day Close vs Prior Close (conditional on flat open)
+        results["next_day_close"][k_str] = compute_breach_rate(
+            valid_nc, "prior_close", "next_day_close", k
+        )
+    
+    return results
+
+
+def compute_drift_rates(
+    events: List[HoldRiskEvent],
+    k_values: Tuple[float, ...] = HOLD_RISK_K_VALUES,
+) -> Dict[str, Dict[str, BreachRateResult]]:
+    """
+    Compute post-event drift rates.
+    
+    These metrics rebase risk once the earnings gap is known
+    and implied volatility has collapsed.
+    
+    Metrics:
+    - earnings_intraday: abs(EC - EO) >= k * EM (baseline: EO)
+    - next_day: abs(NC - EC) >= k * EM (baseline: EC)
+    
+    Args:
+        events: List of HoldRiskEvent objects
+        k_values: Tuple of k-multiples to compute
+    
+    Returns:
+        Dict with 'earnings_intraday' and 'next_day' keys,
+        each containing a dict of k -> BreachRateResult
+    """
+    results: Dict[str, Dict[str, BreachRateResult]] = {
+        "earnings_intraday": {},
+        "next_day": {},
+    }
+    
+    # Filter to events valid for drift metrics
+    valid_drift = [ev for ev in events if ev.is_valid_for_drift()]
+    
+    for k in k_values:
+        k_str = str(k)
+        
+        # Earnings Intraday Drift: EC - EO
+        results["earnings_intraday"][k_str] = compute_breach_rate(
+            valid_drift, "earnings_day_open", "earnings_day_close", k
+        )
+        
+        # Next Day Drift: NC - EC
+        results["next_day"][k_str] = compute_breach_rate(
+            valid_drift, "earnings_day_close", "next_day_close", k
+        )
+    
+    return results
+
+
+def _rates_to_schema(
+    rates_dict: Dict[str, BreachRateResult],
+) -> Dict[str, Optional[float]]:
+    """
+    Convert BreachRateResult dict to master plan schema format.
+    
+    Schema format: {"1.0": rate, "1.5": rate, "2.0": rate}
+    Rates are expressed as decimals (0.0 to 1.0).
+    """
+    return {
+        k: (round(v.rate, 6) if v.rate is not None else None)
+        for k, v in rates_dict.items()
+    }
+
+
+def compute_earnings_hold_risk(
+    events: List[HoldRiskEvent],
+    flat_open_gate: float = DEFAULT_FLAT_OPEN_GATE,
+    k_values: Tuple[float, ...] = HOLD_RISK_K_VALUES,
+    em_source: str = "ORATS_EARNINGS_IMPLIED",
+    lookback_label: str = "36_events",
+) -> Dict[str, Any]:
+    """
+    Compute the full earnings hold risk payload per master plan schema.
+    
+    This is the main entry point for Engine1 integration. It computes all
+    metric groups and packages them into the specified output schema.
+    
+    Args:
+        events: List of HoldRiskEvent objects with all price anchors
+        flat_open_gate: Multiple of EM for flat open condition (default 0.25)
+        k_values: Tuple of k-multiples to compute (default 1.0, 1.5, 2.0)
+        em_source: Label for the EM source used
+        lookback_label: Label for the lookback window (e.g., "36_events")
+    
+    Returns:
+        Dict matching the master plan earnings_hold_risk schema:
+        {
+            "em_source": str,
+            "flat_open_gate": float,
+            "lookback": str,
+            "sample_size": {"unconditional": N1, "flat_open": N2},
+            "unconditional": {...},
+            "conditional_flat_open": {...},
+            "drift": {...}
+        }
+    """
+    # Compute all metric groups
+    unconditional = compute_unconditional_breach_rates(events, k_values)
+    conditional = compute_conditional_breach_rates(events, flat_open_gate, k_values)
+    drift = compute_drift_rates(events, k_values)
+    
+    # Determine sample sizes
+    # Unconditional sample size = events valid for EC breach
+    valid_unconditional = [ev for ev in events if ev.is_valid_for_unconditional()]
+    unconditional_sample_size = len(valid_unconditional)
+    
+    # Flat open sample size = events that passed the flat open gate
+    flat_events = filter_flat_open_events(events, flat_open_gate)
+    flat_open_sample_size = len(flat_events)
+    
+    # Build the output schema per master plan
+    result: Dict[str, Any] = {
+        "em_source": em_source,
+        "flat_open_gate": flat_open_gate,
+        "lookback": lookback_label,
+        "sample_size": {
+            "unconditional": unconditional_sample_size,
+            "flat_open": flat_open_sample_size,
+        },
+        "unconditional": {
+            "earnings_close": _rates_to_schema(unconditional["earnings_close"]),
+            "next_day_close": _rates_to_schema(unconditional["next_day_close"]),
+        },
+        "conditional_flat_open": {
+            "earnings_close": _rates_to_schema(conditional["earnings_close"]),
+            "next_day_close": _rates_to_schema(conditional["next_day_close"]),
+        },
+        "drift": {
+            "earnings_intraday": _rates_to_schema(drift["earnings_intraday"]),
+            "next_day": _rates_to_schema(drift["next_day"]),
+        },
+    }
+    
+    return result
