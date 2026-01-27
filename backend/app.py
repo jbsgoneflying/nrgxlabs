@@ -483,6 +483,15 @@ def spx_page():
     return FileResponse(str(spx_path))
 
 
+@app.get("/red-dog")
+def red_dog_page():
+    """Engine 3: Red Dog Reversal Scanner page."""
+    red_dog_path = STATIC_DIR / "red-dog.html"
+    if not red_dog_path.exists():
+        raise HTTPException(status_code=500, detail="Missing static/red-dog.html")
+    return FileResponse(str(red_dog_path))
+
+
 @app.get("/api/spx-ic")
 def spx_ic(
     underlying: str = Query("SPX", description="Underlying: SPX|SPY|QQQ"),

@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raven-Tech.co · Engine 3 · Red Dog Reversal</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="Raven-Tech.co — Engine 3 Red Dog Reversal scanner with A+ quality scoring for SP100 + Nasdaq100 (ORATS EOD)." />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <style>
+      /* Engine 3 specific styles */
+      .watchlistGrid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      .signalCard {
+        padding: 14px;
+        border-radius: var(--radius-card);
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.78);
+        box-shadow: 0 1px 0 rgba(255,255,255,0.85) inset;
+        transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+        cursor: pointer;
+      }
+
+      .signalCard:hover {
+        border-color: rgba(15, 23, 42, 0.16);
+        background: rgba(255,255,255,0.88);
+        transform: translateY(-1px);
+      }
+
+      .signalCardHeader {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+
+      .signalCardTicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .signalCardSymbol {
+        font-size: 18px;
+        font-weight: 900;
+        letter-spacing: -0.2px;
+      }
+
+      .signalCardDirection {
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+      }
+
+      .signalCardDirection.bullish {
+        background: rgba(52, 199, 89, 0.14);
+        border: 1px solid rgba(52, 199, 89, 0.30);
+        color: rgba(12, 70, 38, 0.96);
+      }
+
+      .signalCardDirection.bearish {
+        background: rgba(255, 59, 48, 0.14);
+        border: 1px solid rgba(255, 59, 48, 0.30);
+        color: rgba(86, 17, 12, 0.96);
+      }
+
+      .signalCardGrade {
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-size: 13px;
+        font-weight: 900;
+        letter-spacing: 0.1px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.70);
+      }
+
+      .signalCardGrade.grade-aplus {
+        background: rgba(52, 199, 89, 0.14);
+        border-color: rgba(52, 199, 89, 0.30);
+        color: rgba(12, 70, 38, 0.96);
+      }
+
+      .signalCardGrade.grade-a {
+        background: rgba(0, 122, 255, 0.12);
+        border-color: rgba(0, 122, 255, 0.25);
+        color: rgba(0, 90, 200, 0.95);
+      }
+
+      .signalCardGrade.grade-b {
+        background: rgba(255, 159, 10, 0.12);
+        border-color: rgba(255, 159, 10, 0.28);
+        color: rgba(180, 100, 0, 0.95);
+      }
+
+      .signalCardGrade.grade-c {
+        background: rgba(11, 11, 15, 0.06);
+        border-color: rgba(11, 11, 15, 0.12);
+        color: rgba(11, 11, 15, 0.70);
+      }
+
+      .signalCardBody {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .signalCardMetric {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+        font-size: 12px;
+      }
+
+      .signalCardMetric .k {
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .signalCardMetric .v {
+        font-weight: 700;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      .signalCardIndicators {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .indicatorChip {
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 700;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.60);
+      }
+
+      .indicatorChip.active {
+        background: rgba(52, 199, 89, 0.12);
+        border-color: rgba(52, 199, 89, 0.25);
+        color: rgba(12, 70, 38, 0.90);
+      }
+
+      .indicatorChip.inactive {
+        color: var(--muted2);
+      }
+
+      .statsGrid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      @media (max-width: 980px) {
+        .statsGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .watchlistGrid { grid-template-columns: 1fr; }
+      }
+
+      .emptyState {
+        padding: 40px 20px;
+        text-align: center;
+        color: var(--muted);
+      }
+
+      .emptyStateTitle {
+        font-size: 16px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+
+      .emptyStateBody {
+        font-size: 13px;
+        font-weight: 500;
+      }
+
+      .filterChips {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+      }
+
+      .signalCardNotes {
+        margin-top: 8px;
+        font-size: 11px;
+        color: var(--muted);
+        font-weight: 500;
+        line-height: 1.35;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
+          <div class="appHeaderText">
+            <div class="appTitle">Raven-Tech.co</div>
+            <div class="appSubtitle">Engine 3 · Red Dog Reversal · Mean reversion scanner with A+ scoring (ORATS EOD)</div>
+          </div>
+        </div>
+        <div class="tbInputs topNav">
+          <a class="primaryButton" href="/" style="text-decoration:none;">Calendar</a>
+          <a class="primaryButton" href="/breach" style="text-decoration:none;">Engine 1</a>
+          <a id="engine2Link" class="primaryButton" href="/spx" style="text-decoration:none;">Engine 2</a>
+          <a class="primaryButton" href="/red-dog" style="text-decoration:none; background: rgba(52, 199, 89, 0.12); border-color: rgba(52, 199, 89, 0.25);">Engine 3</a>
+        </div>
+      </header>
+
+      <section class="controlBar" aria-label="Engine 3 Controls">
+        <form id="e3Form" class="controlBarForm controlBarForm--engine2">
+          <div class="controlGroup">
+            <div class="controlLabel">
+              Direction Filter
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Direction help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Direction filter</div>
+                  <div class="tipBody">
+                    <p>Filter setups by direction:</p>
+                    <ul>
+                      <li><b>All</b>: Show both bullish and bearish setups</li>
+                      <li><b>Bullish</b>: Failed breakdowns (buy setups)</li>
+                      <li><b>Bearish</b>: Failed breakouts (short setups)</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
+            </div>
+            <select id="direction" class="controlSelect">
+              <option value="" selected>All</option>
+              <option value="bullish">Bullish</option>
+              <option value="bearish">Bearish</option>
+            </select>
+          </div>
+          <div class="controlGroup">
+            <div class="controlLabel">
+              Min Score
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Min score help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Minimum quality score</div>
+                  <div class="tipBody">
+                    <p>Filter setups by quality score (0-100):</p>
+                    <ul>
+                      <li><b>75+</b>: A+ setups (multiple confirmations)</li>
+                      <li><b>60+</b>: A grade setups</li>
+                      <li><b>45+</b>: B grade setups</li>
+                      <li><b>0+</b>: Show all detected patterns</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
+            </div>
+            <select id="minScore" class="controlSelect">
+              <option value="75">75+ (A+)</option>
+              <option value="60">60+ (A)</option>
+              <option value="50" selected>50+ (A/B)</option>
+              <option value="0">All</option>
+            </select>
+          </div>
+          <div class="controlSpacer"></div>
+          <button id="runBtn" class="primaryButton" type="submit">
+            <span class="btnSpinner" aria-hidden="true"></span>
+            Scan Universe
+          </button>
+        </form>
+        <div id="status" class="status">Click "Scan Universe" to find Red Dog Reversal setups in SP100 + Nasdaq100.</div>
+      </section>
+
+      <section class="results hidden" id="results">
+        <!-- Stats Summary -->
+        <section class="surface" id="statsSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Scan Summary
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Scan summary help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Scan summary</div>
+                  <div class="tipBody">
+                    <p>Overview of the current scan results:</p>
+                    <ul>
+                      <li><b>Universe</b>: Total tickers scanned (SP100 + Nasdaq100)</li>
+                      <li><b>Setups Found</b>: Red Dog patterns detected</li>
+                      <li><b>A+ Setups</b>: High-quality setups (score >= 75)</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="statsMeta">—</div>
+          </div>
+          <div class="statsGrid" id="statsGrid">
+            <div class="metricCard">
+              <div class="metricLabel">Universe Scanned</div>
+              <div id="statScanned" class="metricValue mono">—</div>
+              <div class="metricCaption muted">SP100 + Nasdaq100</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Setups Found</div>
+              <div id="statSetups" class="metricValue mono">—</div>
+              <div class="metricCaption muted">Red Dog patterns</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">A+ Setups</div>
+              <div id="statAPlus" class="metricValue mono">—</div>
+              <div class="metricCaption muted">Score >= 75</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Scan Duration</div>
+              <div id="statDuration" class="metricValue mono">—</div>
+              <div class="metricCaption muted">Processing time</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- A+ Watchlist -->
+        <section class="surface" id="aplusSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              A+ Watchlist
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="A+ watchlist help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">A+ Watchlist</div>
+                  <div class="tipBody">
+                    <p>High-quality Red Dog Reversal setups (score >= 75) with multiple confirmation factors:</p>
+                    <ul>
+                      <li><b>RSI extreme</b>: Oversold (<30) or overbought (>70)</li>
+                      <li><b>Stochastics extreme</b>: <20 or >80</li>
+                      <li><b>SMA20 deviation</b>: Price >9% from 20-day average</li>
+                      <li><b>Volume surge</b>: >1.5x average volume</li>
+                      <li><b>Strong close</b>: Close in favorable zone (>70% or <30% of range)</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="aplusMeta">—</div>
+          </div>
+          <div id="aplusGrid" class="watchlistGrid"></div>
+        </section>
+
+        <!-- Standard Setups -->
+        <section class="surface" id="standardSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Standard Setups
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Standard setups help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Standard Setups</div>
+                  <div class="tipBody">
+                    <p>Red Dog patterns with score 50-74. These have the pattern structure but fewer confirmation factors.</p>
+                    <p><b>Desk view</b>: Consider these with additional confirmation (support/resistance, broader market context).</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="standardMeta">—</div>
+          </div>
+          <div id="standardGrid" class="watchlistGrid"></div>
+        </section>
+
+        <!-- How to Trade Section -->
+        <section class="surface" id="howToSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">How to Trade Red Dog Reversals</h2>
+          </div>
+          <div class="taPanel">
+            <div class="taGrid taGrid--4">
+              <div class="taCard">
+                <div class="taCardTop"><div class="taCardTitle">Entry Rules</div></div>
+                <div class="taCardInterp">
+                  <ul class="taMiniList" style="margin-top:8px;">
+                    <li><b>Bullish</b>: Buy stop above reversal day's high</li>
+                    <li><b>Bearish</b>: Sell stop below reversal day's low</li>
+                    <li>Confirm open is within prior day's range</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="taCard">
+                <div class="taCardTop"><div class="taCardTitle">Stop Rules</div></div>
+                <div class="taCardInterp">
+                  <ul class="taMiniList" style="margin-top:8px;">
+                    <li><b>Bullish</b>: Stop at Low B (reversal day low)</li>
+                    <li><b>Bearish</b>: Stop at High B (reversal day high)</li>
+                    <li>Add buffer: ATR(14) × 0.25 or $0.10</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="taCard">
+                <div class="taCardTop"><div class="taCardTitle">Targets</div></div>
+                <div class="taCardInterp">
+                  <ul class="taMiniList" style="margin-top:8px;">
+                    <li><b>T1</b>: 1R (risk-reward 1:1)</li>
+                    <li><b>T2</b>: 2R (risk-reward 1:2)</li>
+                    <li><b>T3</b>: SMA20 mean reversion</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="taCard">
+                <div class="taCardTop"><div class="taCardTitle">Position Sizing</div></div>
+                <div class="taCardInterp">
+                  <ul class="taMiniList" style="margin-top:8px;">
+                    <li>Scale position to 1-2% account risk</li>
+                    <li>Take 50% off at T1</li>
+                    <li>Trail remainder with prior bar stop</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/static/ui_kit.js"></script>
+    <script src="/static/red-dog.js"></script>
+  </body>
+</html>
