@@ -14,10 +14,14 @@ struct BreachResponse: Decodable {
     var wingRecommendation: WingRecommendation?
     var regime: RegimeData?
     var goNoGo: GoNoGoDecision?
+    var current: CurrentSnapshot?
+    var expectedMove: ExpectedMove?
+    var nextEvent: NextEvent?
 
     enum CodingKeys: String, CodingKey {
         case enabled, schemaVersion, ticker, asOfDate, underlyingPrice
         case summary, quarters, events, wingRecommendation, regime, goNoGo
+        case current, expectedMove, nextEvent
     }
 
     init(from decoder: Decoder) throws {
@@ -38,7 +42,60 @@ struct BreachResponse: Decodable {
             print("Go/No-Go decode failed: \(error)")
             self.goNoGo = nil
         }
+        self.current = try? c.decodeIfPresent(CurrentSnapshot.self, forKey: .current)
+        self.expectedMove = try? c.decodeIfPresent(ExpectedMove.self, forKey: .expectedMove)
+        self.nextEvent = try? c.decodeIfPresent(NextEvent.self, forKey: .nextEvent)
     }
+}
+
+// MARK: - Current Snapshot (ORATS impErnMv)
+
+/// Current price/EM snapshot from ORATS cores endpoint.
+/// The `impliedMovePct` here is ORATS's implied earnings move (impErnMv),
+/// which is used for historical earnings event calculations.
+struct CurrentSnapshot: Decodable {
+    var asOfDate: String?
+    var stockPrice: Double?
+    var impErnMv: Double?
+    var impliedMovePct: Double?
+    var source: String?
+}
+
+// MARK: - Expected Move (ATM-forward straddle calculation)
+
+/// Expected move computed from ATM-forward straddle method.
+/// This is our calculated EM from the option chain.
+struct ExpectedMove: Decodable {
+    var ticker: String?
+    var asOfDate: String?
+    var expiry: String?
+    var dte: Int?
+    var source: String?
+    var spotPrice: Double?
+    var forwardPrice: Double?
+    var straddlePV: Double?
+    var expectedMoveDollars: Double?
+    var expectedMovePct: Double?
+    var discountFactor: Double?
+    var riskFreeRate: Double?
+    var strikesUsedForForward: Int?
+    var warnings: [String]?
+}
+
+// MARK: - Next Event
+
+/// Next earnings event metadata and planned implied move.
+struct NextEvent: Decodable {
+    var earnDateNext: String?
+    var timingPlanned: String?
+    var pricingDatePlanned: String?
+    var pricingDateTarget: String?
+    var pricingDateAsOf: String?
+    var impliedMovePctPlanned: Double?
+    var impliedMoveSource: String?
+    var source: String?
+    var confidence: String?
+    var notes: [String]?
 }
 
 struct BreachSummary: Decodable {

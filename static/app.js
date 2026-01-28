@@ -583,13 +583,20 @@ function renderEngine1DecisionPanel(payload) {
   const gateTxt = gate === "NO_TRADE" ? "No Trade" : gate === "CAUTION" ? "Caution" : gate === "OK" ? "OK" : "—";
   const label = String(rg?.label || "—");
 
-  // Expected Move data
+  // Expected Move data (ATM-forward straddle calculation)
   const em = payload?.expectedMove || {};
   const emPct = em?.expectedMovePct;
   const emDollars = em?.expectedMoveDollars;
   const emExpiry = String(em?.expiry || "").slice(0, 10);
   const emSource = String(em?.source || "").toLowerCase();
   const emSourceLabel = emSource === "live" ? "Live" : emSource === "eod" ? "EOD" : emSource === "impermnv" ? "EM" : emSource ? emSource : "—";
+
+  // ORATS EM data (impErnMv - used for earnings events calculations)
+  const cur = payload?.current || {};
+  const nextEv = payload?.nextEvent || {};
+  const oratsEmPct = cur?.impliedMovePct ?? nextEv?.impliedMovePctPlanned;
+  const oratsEmSource = cur?.source || (nextEv?.impliedMoveSource ? "nextEvent" : null);
+  const oratsEmAsOf = String(cur?.asOfDate || "").slice(0, 10);
 
   // Strike Targets data
   const st = payload?.strikeTargets || null;
@@ -674,8 +681,16 @@ function renderEngine1DecisionPanel(payload) {
         </div>
         <div class="taCard">
           <div class="taCardTop">
-            <div class="taCardTitle">Expected Move</div>
-            <span class="info" title="Risk-neutral expected absolute move to near-dated expiry. Computed via ATM-forward straddle (gold standard). Uses live data when market is open, EOD otherwise.">ⓘ</span>
+            <div class="taCardTitle">ORATS EM</div>
+            <span class="info" title="ORATS implied earnings move (impErnMv). This is the figure used for historical earnings event breach calculations. Sourced from ORATS cores endpoint.">ⓘ</span>
+          </div>
+          <div class="taCardState mono">${Number.isFinite(oratsEmPct) ? escapeHtml(oratsEmPct.toFixed(2)) + "%" : "—"}</div>
+          <div class="taCardInterp">${oratsEmAsOf ? `As of: ${escapeHtml(oratsEmAsOf)}` : "—"} · Used for earnings events</div>
+        </div>
+        <div class="taCard">
+          <div class="taCardTop">
+            <div class="taCardTitle">Straddle EM</div>
+            <span class="info" title="Risk-neutral expected absolute move to near-dated expiry. Computed via ATM-forward straddle method. Uses live data when market is open, EOD otherwise.">ⓘ</span>
           </div>
           <div class="taCardState mono">${Number.isFinite(emPct) ? escapeHtml(emPct.toFixed(2)) + "%" : "—"}</div>
           <div class="taCardInterp">${Number.isFinite(emDollars) ? `$${escapeHtml(emDollars.toFixed(2))} pts` : "—"} · ${emExpiry ? `Exp: ${escapeHtml(emExpiry)}` : ""} · ${emSourceLabel}</div>

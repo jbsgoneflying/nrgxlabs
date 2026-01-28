@@ -76,6 +76,7 @@ enum InfoContent {
     case vwap
     case historicalOdds
     case quarterSeasonality
+    case expectedMove
     case custom(title: String, body: String, bullets: [String]?, deskView: String?)
 
     var title: String {
@@ -90,6 +91,7 @@ enum InfoContent {
         case .vwap: return "VWAP"
         case .historicalOdds: return "Historical Odds"
         case .quarterSeasonality: return "Quarter Seasonality"
+        case .expectedMove: return "Expected Move"
         case .custom(let title, _, _, _): return title
         }
     }
@@ -116,6 +118,8 @@ enum InfoContent {
             return "Historical breach frequencies across different width multiples, conditioned on regime and macro bucket."
         case .quarterSeasonality:
             return "Breach rates broken down by fiscal quarter, showing seasonal patterns in earnings behavior."
+        case .expectedMove:
+            return "The expected price move over earnings, shown from two sources: ORATS EM (implied earnings move from ORATS data) and Straddle EM (calculated from ATM-forward straddle pricing)."
         case .custom(_, let body, _, _):
             return body
         }
@@ -142,6 +146,12 @@ enum InfoContent {
                 "Negative gamma: amplifying, trending",
                 "Magnitude matters: larger = stronger effect"
             ]
+        case .expectedMove:
+            return [
+                "ORATS EM: Implied earnings move from ORATS cores data — used for historical breach calculations",
+                "Straddle EM: Calculated from ATM-forward straddle pricing on the option chain",
+                "Both values should be similar; large divergence may indicate unusual market conditions"
+            ]
         case .custom(_, _, let bullets, _):
             return bullets
         default:
@@ -155,6 +165,8 @@ enum InfoContent {
             return "Use this to gauge position sizing. Higher breach rates warrant smaller positions or wider structures."
         case .wingRecommendation:
             return "These multipliers are suggestions based on historical data. Always consider current IV levels and your risk tolerance."
+        case .expectedMove:
+            return "ORATS EM is the figure used for historical earnings analysis and breach calculations. Straddle EM is a live calculation that may differ slightly due to market conditions."
         case .custom(_, _, _, let desk):
             return desk
         default:

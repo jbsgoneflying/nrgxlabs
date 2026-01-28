@@ -361,7 +361,62 @@ struct EngineOneScreen: View {
                     subtitle: "Historical sample size"
                 )
             }
+            
+            // Expected Move section - shows both ORATS EM and calculated EM
+            expectedMoveSection(response)
         }
+    }
+    
+    // MARK: - Expected Move Section
+    
+    @ViewBuilder
+    private func expectedMoveSection(_ response: BreachResponse) -> some View {
+        let oratsEM = response.current?.impliedMovePct
+        let calculatedEM = response.expectedMove?.expectedMovePct
+        let nextEventEM = response.nextEvent?.impliedMovePctPlanned
+        
+        // Only show if we have at least one EM value
+        if oratsEM != nil || calculatedEM != nil || nextEventEM != nil {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Expected Move")
+                        .font(.caption)
+                        .fontWeight(.heavy)
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                    
+                    Spacer()
+                    
+                    InfoButton { showingInfoSheet = .expectedMove }
+                }
+                .padding(.leading, 4)
+                .padding(.top, 8)
+                
+                MetricCardGrid(columns: 2) {
+                    // ORATS Implied Earnings Move (used for historical event calculations)
+                    MetricCard(
+                        title: "ORATS EM",
+                        value: formatPct(oratsEM ?? nextEventEM),
+                        subtitle: oratsEM != nil ? "Implied earnings move" : (nextEventEM != nil ? "Planned EM" : "—")
+                    )
+                    
+                    // Calculated ATM-forward straddle EM
+                    MetricCard(
+                        title: "Straddle EM",
+                        value: formatPct(calculatedEM),
+                        subtitle: formatEMSubtitle(response.expectedMove)
+                    )
+                }
+            }
+        }
+    }
+    
+    private func formatEMSubtitle(_ em: ExpectedMove?) -> String {
+        guard let em = em else { return "ATM-forward method" }
+        if let dte = em.dte {
+            return "\(dte) DTE straddle"
+        }
+        return "ATM-forward method"
     }
 
     // MARK: - Wing Recommendation
