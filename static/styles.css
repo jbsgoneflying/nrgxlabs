@@ -1633,12 +1633,14 @@ a.ravenTempDisabled {
   position: relative;
 }
 
-.navBtn[data-tooltip]:hover::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
+/* Nav tooltips now use JS positioning - see navTooltip in ui_kit.js */
+.navBtn[data-tooltip] {
+  position: relative;
+}
+
+/* Nav tooltip container (created by JS) */
+.navTooltip {
+  position: fixed;
   padding: 10px 16px;
   background: rgba(15, 23, 42, 0.94);
   color: #fff;
@@ -1650,24 +1652,29 @@ a.ravenTempDisabled {
   max-width: 340px;
   white-space: normal;
   text-align: center;
-  z-index: 17000; /* Above header (16000) */
-  z-index: 1000;
+  z-index: 99999;
   box-shadow: 0 8px 24px rgba(15, 20, 30, 0.25);
   pointer-events: none;
-  animation: navTooltipFadeIn 150ms ease-out;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 150ms ease-out, transform 150ms ease-out;
 }
 
-.navBtn[data-tooltip]:hover::before {
+.navTooltip.isVisible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Arrow for nav tooltip - positioned by JS via --arrow-left */
+.navTooltip::before {
   content: "";
   position: absolute;
-  top: calc(100% + 2px);
-  left: 50%;
+  top: -6px;
+  left: var(--arrow-left, 50%);
   transform: translateX(-50%);
   border: 6px solid transparent;
   border-bottom-color: rgba(15, 23, 42, 0.94);
-  z-index: 17000; /* Above header (16000) */
-  pointer-events: none;
-  animation: navTooltipFadeIn 150ms ease-out;
+  border-top: none;
 }
 
 @keyframes navTooltipFadeIn {

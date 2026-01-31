@@ -377,6 +377,82 @@ function installGlobalApiLoading({
 try { installGlobalApiLoading(); } catch { /* ignore */ }
 
 // ---------------------------------------------------------------------------
+// Nav Button Tooltips: Fixed positioning to escape header stacking context
+// ---------------------------------------------------------------------------
+
+(function initNavTooltips() {
+  let tooltip = null;
+  let currentBtn = null;
+  let hideTimeout = null;
+  
+  function create() {
+    if (tooltip) return tooltip;
+    tooltip = document.createElement("div");
+    tooltip.className = "navTooltip";
+    tooltip.setAttribute("role", "tooltip");
+    document.body.appendChild(tooltip);
+    return tooltip;
+  }
+  
+  function show(btn) {
+    if (!btn) return;
+    const text = btn.getAttribute("data-tooltip");
+    if (!text) return;
+    
+    create();
+    currentBtn = btn;
+    tooltip.textContent = text;
+    
+    // Clear any pending hide
+    if (hideTimeout) {
+      clearTimeout(hideTimeout);
+      hideTimeout = null;
+    }
+    
+    // Position below button, centered
+    const rect = btn.getBoundingClientRect();
+    const tooltipWidth = Math.min(340, Math.max(280, text.length * 7));
+    
+    let left = rect.left + rect.width / 2 - tooltipWidth / 2;
+    // Keep within viewport
+    left = Math.max(10, Math.min(left, window.innerWidth - tooltipWidth - 10));
+    
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${rect.bottom + 8}px`;
+    tooltip.style.width = `${tooltipWidth}px`;
+    
+    // Adjust arrow position
+    const arrowOffset = rect.left + rect.width / 2 - left;
+    tooltip.style.setProperty("--arrow-left", `${arrowOffset}px`);
+    
+    // Show with animation
+    requestAnimationFrame(() => {
+      tooltip.classList.add("isVisible");
+    });
+  }
+  
+  function hide() {
+    if (!tooltip) return;
+    tooltip.classList.remove("isVisible");
+    currentBtn = null;
+  }
+  
+  // Delegate hover events
+  document.addEventListener("mouseenter", (e) => {
+    const btn = e.target.closest?.(".navBtn[data-tooltip]");
+    if (btn) show(btn);
+  }, true);
+  
+  document.addEventListener("mouseleave", (e) => {
+    const btn = e.target.closest?.(".navBtn[data-tooltip]");
+    if (btn && btn === currentBtn) {
+      // Small delay to prevent flicker
+      hideTimeout = setTimeout(hide, 50);
+    }
+  }, true);
+})();
+
+// ---------------------------------------------------------------------------
 // Raven Loading Overlay: Full-screen loading with spinning logo and progress
 // ---------------------------------------------------------------------------
 
