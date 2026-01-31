@@ -1037,6 +1037,7 @@ def calendar(
     engine1Only: int = Query(0, ge=0, le=1),
     includeEvents: int = Query(1, ge=0, le=1),
     maxTickers: int = Query(12000, ge=200, le=50000),
+    forceFmp: int = Query(0, ge=0, le=1, description="Force FMP live data (bypass snapshot)"),
 ):
     """
     Earnings calendar endpoint for the front page.
@@ -1053,10 +1054,11 @@ def calendar(
             raise HTTPException(status_code=400, detail="Unsupported view. Allowed: month|week|day")
         e1 = bool(int(engine1Only))
         inc = bool(int(includeEvents))
+        force_fmp = bool(int(forceFmp))
 
         flags_fp = get_flags().cache_fingerprint()
         cache_ttl_s = int(float(os.getenv("CALENDAR_CACHE_TTL_S") or 0))
-        key = ("calendar", v, a, str(tz or ""), int(e1), int(inc), int(maxTickers), flags_fp)
+        key = ("calendar", v, a, str(tz or ""), int(e1), int(inc), int(maxTickers), int(force_fmp), flags_fp)
         if cache_ttl_s > 0:
             with _calendar_cache_lock:
                 cached = _calendar_cache.get(key)
@@ -1067,6 +1069,9 @@ def calendar(
         if fmp is None:
             raise HTTPException(status_code=503, detail="FMP unavailable (missing FMP_API_KEY).")
 
+        # If forceFmp=1, pass None for redis_store to skip snapshot lookup
+        store = None if force_fmp else get_store_optional()
+
         payload = build_calendar_payload(
             view=v,
             anchor=a,
@@ -1076,7 +1081,7 @@ def calendar(
             benzinga_client=_get_benzinga_client_optional(),
             fmp_client=fmp,
             max_tickers=int(maxTickers),
-            redis_store=get_store_optional(),
+            redis_store=store,
         )
         if cache_ttl_s > 0:
             with _calendar_cache_lock:

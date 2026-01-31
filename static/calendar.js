@@ -352,6 +352,8 @@ function buildCalendarUrl() {
   params.set("tz", "America/New_York");
   params.set("engine1Only", state.engine1Only ? "1" : "0");
   params.set("includeEvents", "1");
+  // Force FMP live data until ORATS snapshot has better coverage
+  params.set("forceFmp", "1");
   return `/api/calendar?${params.toString()}`;
 }
 
