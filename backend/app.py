@@ -36,6 +36,7 @@ from backend.calendar_snapshot import EARNINGS_SNAPSHOT_KEY, load_earnings_snaps
 from backend.fmp_snapshot import FMP_EARNINGS_SNAPSHOT_KEY, load_fmp_earnings_snapshot
 from backend.macro_event_stats import compute_macro_event_stats
 from backend.fmp_client import FmpClient, FmpError
+from backend.api_ninjas_client import ApiNinjasClient, ApiNinjasError
 from backend.engine3_screener import compute_engine3_scan, compute_single_ticker_scan
 from backend.engine4_screener import (
     run_universe_scan as compute_engine4_scan,
@@ -306,6 +307,9 @@ _bz_client: BenzingaClient | None = None
 _fmp_client_lock = threading.Lock()
 _fmp_client: FmpClient | None = None
 
+_api_ninjas_client_lock = threading.Lock()
+_api_ninjas_client: ApiNinjasClient | None = None
+
 _breach_cache = TTLCache(maxsize=512, ttl=6 * 60 * 60)  # 6 hours
 _breach_cache_lock = threading.Lock()
 
@@ -388,6 +392,26 @@ def _get_fmp_client_optional() -> FmpClient | None:
                     return None
                 _fmp_client = FmpClient.from_env()
         return _fmp_client
+    except Exception:
+        return None
+
+
+def _get_api_ninjas_client_optional() -> ApiNinjasClient | None:
+    """
+    Optional API Ninjas client (constructed if API_NINJAS_API_KEY is set).
+    Kept as a singleton to avoid re-reading env and for connection reuse.
+    """
+    global _api_ninjas_client
+    try:
+        if _api_ninjas_client is not None:
+            return _api_ninjas_client
+        with _api_ninjas_client_lock:
+            if _api_ninjas_client is None:
+                # Only construct if key is present.
+                if not (os.getenv("API_NINJAS_API_KEY") or "").strip():
+                    return None
+                _api_ninjas_client = ApiNinjasClient.from_env()
+        return _api_ninjas_client
     except Exception:
         return None
 
@@ -1085,6 +1109,7 @@ def calendar(
             max_tickers=int(maxTickers),
             redis_store=store,
             min_market_cap_b=min_mcap_b,
+            api_ninjas_client=_get_api_ninjas_client_optional(),
         )
         if cache_ttl_s > 0:
             with _calendar_cache_lock:

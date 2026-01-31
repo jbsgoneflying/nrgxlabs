@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from backend.benzinga_client import BenzingaClient
 from backend.fmp_client import FmpClient, FmpError
 from backend.orats_client import OratsClient
+from backend.api_ninjas_client import ApiNinjasClient, ApiNinjasError
 from backend.earnings_calendar import infer_timing_from_time_str
 from backend.market_calendar import market_structure_events_by_date, opex_events_by_date
 from backend.macro_events import macro_events_by_date
@@ -231,6 +232,7 @@ def build_calendar_payload(
     max_tickers: int,
     redis_store: Optional[RedisStore] = None,
     min_market_cap_b: float = 0.0,
+    api_ninjas_client: Optional[ApiNinjasClient] = None,
 ) -> Dict[str, Any]:
     v = str(view or "month").lower().strip()
     if v not in ("month", "week", "day"):
@@ -328,210 +330,61 @@ def build_calendar_payload(
                 return s2
         return s
 
-    # --- MERGE BOTH FMP AND ORATS DATA SOURCES ---
-    # Strategy: Get earnings from both sources and merge for best coverage
-    # - FMP provides dates (sometimes timing)
-    # - ORATS provides reliable BMO/AMC timing
+    # --- EARNINGS DATA: API NINJAS PRIMARY SOURCE ---
+    # Strategy: Use API Ninjas Premium as primary source (has reliable BMO/AMC timing)
+    # Fall back to legacy sources if API Ninjas unavailable
     
-    def _coerce_ticker_fmp(row: dict) -> str:
-        for k in ("symbol", "ticker", "Symbol", "Ticker"):
+    def _coerce_timing_ninja(row: dict) -> str:
+        """Convert API Ninjas earnings_timing to BMO/AMC/UNK."""
+        timing = str(row.get("earnings_timing") or "").lower().strip()
+        if timing == "before_market":
+            return "BMO"
+        elif timing in ("after_market", "during_market"):
+            return "AMC"
+        return "UNK"
+
+    def _coerce_ticker_ninja(row: dict) -> str:
+        """Extract ticker from API Ninjas row."""
+        for k in ("ticker", "symbol", "Ticker", "Symbol"):
             v = row.get(k)
             if v:
                 return str(v).strip().upper()
         return ""
 
-    def _coerce_date_fmp(row: dict) -> Optional[dt.date]:
-        for k in ("date", "earningDate", "earningsDate", "reportedDate", "Date"):
+    def _coerce_date_ninja(row: dict) -> Optional[dt.date]:
+        """Extract date from API Ninjas row."""
+        for k in ("date", "Date"):
             v = row.get(k)
             d = _parse_date(v)
             if d is not None:
                 return d
         return None
 
-    def _coerce_timing_fmp(row: dict) -> str:
-        for k in ("time", "session", "when", "timing", "timeOfDay"):
-            v = row.get(k)
-            if v is None:
-                continue
-            t = classify_timing(v)
-            if t in ("AMC", "BMO"):
-                return t
-            s = str(v).strip().lower()
-            # AMC indicators
-            if any(x in s for x in ("after", "close", "amc", "post", "pm", "evening")):
-                return "AMC"
-            # BMO indicators
-            if any(x in s for x in ("before", "open", "bmo", "pre", "morning")):
-                return "BMO"
-            # Time strings like "09:00" or "16:30"
-            if ":" in s:
-                try:
-                    hour = int(s.split(":")[0])
-                    if hour < 12:
-                        return "BMO"
-                    else:
-                        return "AMC"
-                except:
-                    pass
-        return "UNK"
-
     # Master map: (ticker, date) -> timing
-    # Will be populated from both sources, ORATS timing takes priority
     merged_earnings: Dict[Tuple[str, str], str] = {}
-    orats_count = 0
-    fmp_count = 0
+    ninja_count = 0
+    fallback_count = 0
     
-    # ORATS ticker->timing map (ignores date - for cross-referencing FMP dates)
-    # This helps when ORATS has estimated dates that don't match FMP's exact dates
-    orats_ticker_timing: Dict[str, str] = {}
+    # 1. PRIMARY: Try API Ninjas (Premium has reliable BMO/AMC timing)
+    use_api_ninjas = api_ninjas_client is not None
     
-    # 1. Load ORATS snapshot (has reliable BMO/AMC timing)
-    if redis_store is not None:
+    if use_api_ninjas:
         try:
-            orats_snap = load_earnings_snapshot(redis_store)
-            if orats_snap and isinstance(orats_snap, dict):
-                orats_by_date = orats_snap.get("byDate") or {}
-                debug_counts["snapshotUsed"] = True
-                debug_counts["snapshotDate"] = str((orats_snap.get("meta") or {}).get("etDate") or "")[:10]
-                
-                # Build ticker->timing map (most recent timing wins)
-                for date_str, timing_groups in orats_by_date.items():
-                    if isinstance(timing_groups, dict):
-                        for timing_key in ("BMO", "AMC"):  # Only BMO/AMC, skip UNK
-                            for ticker in (timing_groups.get(timing_key) or []):
-                                if isinstance(ticker, str) and ticker:
-                                    sym = ticker.upper()
-                                    orats_ticker_timing[sym] = timing_key
-                
-                # Also add exact-date matches to merged_earnings
-                for date_str, timing_groups in orats_by_date.items():
-                    if date_str not in day_keys:
-                        continue
-                    if isinstance(timing_groups, dict):
-                        for timing_key in ("BMO", "AMC", "UNK"):
-                            for ticker in (timing_groups.get(timing_key) or []):
-                                if isinstance(ticker, str) and ticker:
-                                    sym = _normalize_symbol_to_universe(ticker.upper())
-                                    if universe and sym not in universe:
-                                        continue
-                                    key = (sym, date_str)
-                                    if key not in merged_earnings:
-                                        merged_earnings[key] = timing_key
-                                        orats_count += 1
-                
-                debug_counts["oratsTimingMapSize"] = len(orats_ticker_timing)
-                LOG.info(f"Calendar: ORATS snapshot loaded, timing map has {len(orats_ticker_timing)} tickers")
-            else:
-                debug_counts["snapshotUsed"] = False
-                notes.append("ORATS snapshot empty or missing - timing data may be limited")
-        except Exception as e:
-            debug_counts["snapshotUsed"] = False
-            LOG.warning(f"Calendar: failed to load ORATS snapshot: {e}")
-            notes.append(f"ORATS snapshot error: {type(e).__name__}")
-    else:
-        debug_counts["snapshotUsed"] = False
-        notes.append("Redis not configured - ORATS timing cross-reference unavailable")
-
-    # 2. Add Benzinga earnings data (better forward-looking data than FMP)
-    benzinga_count = 0
-    benzinga_timing_from_orats = 0  # Count of Benzinga tickers that got timing from ORATS
-    if benzinga_client is not None:
-        try:
-            # Benzinga has good forward-looking earnings data
-            bz_resp = benzinga_client.calendar_earnings(
-                date_from=_fmt_date(start),
-                date_to=_fmt_date(end),
-                pagesize=1000,
+            # Fetch all upcoming earnings in the date range
+            ninja_rows = api_ninjas_client.fetch_all_upcoming_earnings(
+                start_date=_fmt_date(start),
+                end_date=_fmt_date(end),
+                max_results=int(max_tickers),
             )
-            bz_rows = bz_resp.rows or []
-            debug_counts["benzingaRowsFetched"] = len(bz_rows)
-            
-            for r in bz_rows:
-                if not isinstance(r, dict):
-                    continue
-                # Benzinga uses 'ticker' field
-                sym0 = str(r.get("ticker") or r.get("symbol") or "").strip().upper()
-                sym = _normalize_symbol_to_universe(sym0)
-                # Benzinga uses 'date' or 'date_confirmed'
-                d_str_raw = r.get("date") or r.get("date_confirmed") or ""
-                d = _parse_date(d_str_raw)
-                if not sym or d is None:
-                    continue
-                if universe and sym not in universe:
-                    continue
-                
-                d_str = _fmt_date(d)
-                if d_str not in day_keys:
-                    continue
-                
-                # Benzinga timing - check multiple fields
-                bz_timing = "UNK"
-                for time_field in ("time", "timing", "period", "call_time", "report_time"):
-                    raw = r.get(time_field)
-                    if not raw:
-                        continue
-                    bz_time = str(raw).strip().lower()
-                    if not bz_time:
-                        continue
-                    
-                    # Check for AMC indicators
-                    if any(x in bz_time for x in ("amc", "after", "post", "close", "pm", "evening")):
-                        bz_timing = "AMC"
-                        break
-                    # Check for BMO indicators  
-                    if any(x in bz_time for x in ("bmo", "before", "pre", "morning")):
-                        bz_timing = "BMO"
-                        break
-                    # Handle exact matches
-                    if bz_time in ("am",):
-                        bz_timing = "BMO"
-                        break
-                    # Try to parse time strings like "09:00" or "16:30"
-                    if ":" in bz_time:
-                        try:
-                            hour = int(bz_time.split(":")[0])
-                            if hour < 12:
-                                bz_timing = "BMO"
-                            else:
-                                bz_timing = "AMC"
-                            break
-                        except:
-                            pass
-                
-                # If timing is UNK, check ORATS cross-reference
-                if bz_timing == "UNK" and sym in orats_ticker_timing:
-                    bz_timing = orats_ticker_timing[sym]
-                    benzinga_timing_from_orats += 1
-                
-                key = (sym, d_str)
-                if key not in merged_earnings:
-                    merged_earnings[key] = bz_timing
-                    benzinga_count += 1
-                elif bz_timing != "UNK" and merged_earnings[key] == "UNK":
-                    # Upgrade UNK to BMO/AMC if Benzinga has better timing
-                    merged_earnings[key] = bz_timing
-            
-            debug_counts["tickersFromBenzinga"] = benzinga_count
-            debug_counts["benzingaTimingFromOrats"] = benzinga_timing_from_orats
-        except Exception as e:
-            LOG.warning(f"Calendar: Benzinga earnings fetch failed: {e}")
-            notes.append(f"Benzinga earnings failed: {type(e).__name__}")
-
-    # 3. Add FMP data (fills gaps, ORATS timing takes priority if conflict)
-    fmp_timing_from_orats = 0  # Count of FMP tickers that got timing from ORATS
-    if fmp_client is not None:
-        try:
-            resp = fmp_client.earnings_calendar(date_from=_fmt_date(start), date_to=_fmt_date(end), limit=int(max_tickers))
-            rows = resp.rows or []
-            debug_counts["fmpRowsFetched"] = int(len(rows))
+            debug_counts["apiNinjasRowsFetched"] = len(ninja_rows)
             
             dropped = 0
-            for r in rows:
+            for r in ninja_rows:
                 if not isinstance(r, dict):
                     continue
-                sym0 = _coerce_ticker_fmp(r)
+                sym0 = _coerce_ticker_ninja(r)
                 sym = _normalize_symbol_to_universe(sym0)
-                d = _coerce_date_fmp(r)
+                d = _coerce_date_ninja(r)
                 if not sym or d is None:
                     continue
                 if universe and sym not in universe:
@@ -541,45 +394,139 @@ def build_calendar_payload(
                 d_str = _fmt_date(d)
                 if d_str not in day_keys:
                     continue
-                    
+                
+                timing = _coerce_timing_ninja(r)
                 key = (sym, d_str)
                 if key not in merged_earnings:
-                    # New ticker from FMP - check ORATS timing map first
-                    fmp_timing = _coerce_timing_fmp(r)
-                    final_timing = fmp_timing
-                    
-                    # If FMP timing is UNK, try to get timing from ORATS (by ticker only)
-                    if fmp_timing == "UNK" and sym in orats_ticker_timing:
-                        final_timing = orats_ticker_timing[sym]
-                        fmp_timing_from_orats += 1
-                    
-                    merged_earnings[key] = final_timing
-                    fmp_count += 1
-                # If already in merged_earnings from ORATS/Benzinga, keep existing timing
+                    merged_earnings[key] = timing
+                    ninja_count += 1
             
-            debug_counts["fmpRowsDroppedUniverse"] = int(dropped)
-            debug_counts["fmpTimingFromOrats"] = fmp_timing_from_orats
-        except FmpError as e:
-            notes.append(f"FMP earnings fetch failed: {str(e)[:180]}")
+            debug_counts["apiNinjasRowsDroppedUniverse"] = dropped
+            debug_counts["tickersFromApiNinjas"] = ninja_count
+            debug_counts["earningsSource"] = "api_ninjas"
+            LOG.info(f"Calendar: API Ninjas returned {ninja_count} earnings in range")
+            
+        except ApiNinjasError as e:
+            LOG.warning(f"Calendar: API Ninjas fetch failed, falling back: {e}")
+            notes.append(f"API Ninjas failed: {type(e).__name__}; using fallback sources")
+            use_api_ninjas = False
         except Exception as e:
-            notes.append(f"FMP earnings fetch failed: {type(e).__name__}: {str(e)[:180]}")
+            LOG.warning(f"Calendar: API Ninjas unexpected error, falling back: {e}")
+            notes.append(f"API Ninjas error: {type(e).__name__}; using fallback sources")
+            use_api_ninjas = False
     else:
-        notes.append("FMP unavailable or disabled.")
+        notes.append("API Ninjas not configured - using legacy sources")
+    
+    # 2. FALLBACK: If API Ninjas failed or unavailable, use Benzinga/FMP
+    if not use_api_ninjas or ninja_count == 0:
+        debug_counts["usingFallbackSources"] = True
+        
+        def _coerce_ticker_fmp(row: dict) -> str:
+            for k in ("symbol", "ticker", "Symbol", "Ticker"):
+                v = row.get(k)
+                if v:
+                    return str(v).strip().upper()
+            return ""
 
+        def _coerce_date_fmp(row: dict) -> Optional[dt.date]:
+            for k in ("date", "earningDate", "earningsDate", "reportedDate", "Date"):
+                v = row.get(k)
+                d = _parse_date(v)
+                if d is not None:
+                    return d
+            return None
+
+        def _coerce_timing_fmp(row: dict) -> str:
+            for k in ("time", "session", "when", "timing", "timeOfDay"):
+                v = row.get(k)
+                if v is None:
+                    continue
+                t = classify_timing(v)
+                if t in ("AMC", "BMO"):
+                    return t
+                s = str(v).strip().lower()
+                if any(x in s for x in ("after", "close", "amc", "post", "pm", "evening")):
+                    return "AMC"
+                if any(x in s for x in ("before", "open", "bmo", "pre", "morning")):
+                    return "BMO"
+                if ":" in s:
+                    try:
+                        hour = int(s.split(":")[0])
+                        return "BMO" if hour < 12 else "AMC"
+                    except:
+                        pass
+            return "UNK"
+        
+        # Try Benzinga
+        if benzinga_client is not None:
+            try:
+                bz_resp = benzinga_client.calendar_earnings(
+                    date_from=_fmt_date(start),
+                    date_to=_fmt_date(end),
+                    pagesize=1000,
+                )
+                for r in (bz_resp.rows or []):
+                    if not isinstance(r, dict):
+                        continue
+                    sym = _normalize_symbol_to_universe(str(r.get("ticker") or "").upper())
+                    d = _parse_date(r.get("date") or r.get("date_confirmed") or "")
+                    if not sym or d is None or (universe and sym not in universe):
+                        continue
+                    d_str = _fmt_date(d)
+                    if d_str not in day_keys:
+                        continue
+                    bz_time = str(r.get("time") or "").lower()
+                    timing = "UNK"
+                    if any(x in bz_time for x in ("after", "amc", "post", "close")):
+                        timing = "AMC"
+                    elif any(x in bz_time for x in ("before", "bmo", "pre")):
+                        timing = "BMO"
+                    key = (sym, d_str)
+                    if key not in merged_earnings:
+                        merged_earnings[key] = timing
+                        fallback_count += 1
+                debug_counts["benzingaFallbackUsed"] = True
+            except Exception as e:
+                LOG.warning(f"Calendar: Benzinga fallback failed: {e}")
+        
+        # Try FMP
+        if fmp_client is not None:
+            try:
+                resp = fmp_client.earnings_calendar(
+                    date_from=_fmt_date(start),
+                    date_to=_fmt_date(end),
+                    limit=int(max_tickers),
+                )
+                for r in (resp.rows or []):
+                    if not isinstance(r, dict):
+                        continue
+                    sym = _normalize_symbol_to_universe(_coerce_ticker_fmp(r))
+                    d = _coerce_date_fmp(r)
+                    if not sym or d is None or (universe and sym not in universe):
+                        continue
+                    d_str = _fmt_date(d)
+                    if d_str not in day_keys:
+                        continue
+                    key = (sym, d_str)
+                    if key not in merged_earnings:
+                        merged_earnings[key] = _coerce_timing_fmp(r)
+                        fallback_count += 1
+                debug_counts["fmpFallbackUsed"] = True
+            except Exception as e:
+                LOG.warning(f"Calendar: FMP fallback failed: {e}")
+        
+        debug_counts["earningsSource"] = "fallback_benzinga_fmp"
+        debug_counts["tickersFromFallback"] = fallback_count
+    
     # 3. Apply market cap filter if specified
     filtered_earnings = merged_earnings
     mcap_filtered_count = 0
     
     if min_market_cap > 0 and fmp_client is not None:
-        # Get all unique tickers
         all_tickers = list(set(sym for sym, d0 in merged_earnings.keys()))
-        
-        # Fetch market caps from FMP
         try:
             market_caps = fmp_client.get_market_caps(all_tickers)
             debug_counts["marketCapsLoaded"] = len(market_caps)
-            
-            # Filter by market cap
             filtered_earnings = {}
             for (sym, d0), timing in merged_earnings.items():
                 mcap = market_caps.get(sym, 0)
@@ -587,7 +534,6 @@ def build_calendar_payload(
                     filtered_earnings[(sym, d0)] = timing
                 else:
                     mcap_filtered_count += 1
-            
             debug_counts["filteredByMarketCap"] = mcap_filtered_count
             debug_counts["minMarketCapB"] = min_market_cap_b
         except Exception as e:
@@ -605,14 +551,10 @@ def build_calendar_payload(
     for timing in filtered_earnings.values():
         timing_counts[timing] = timing_counts.get(timing, 0) + 1
     
-    debug_counts["earningsSource"] = "merged_orats_benzinga_fmp"
-    debug_counts["tickersFromOrats"] = orats_count
-    debug_counts["tickersFromBenzinga"] = benzinga_count
-    debug_counts["tickersFromFmp"] = fmp_count
     debug_counts["tickersInRange"] = tickers_in_range
     debug_counts["earningsRowsUsed"] = tickers_in_range
     debug_counts["timingBreakdown"] = timing_counts
-    LOG.info(f"Calendar: merged {tickers_in_range} earnings (ORATS: {orats_count}, Benzinga: {benzinga_count}, FMP: {fmp_count}, filtered: {mcap_filtered_count}, timing: {timing_counts})")
+    LOG.info(f"Calendar: {tickers_in_range} earnings (API Ninjas: {ninja_count}, Fallback: {fallback_count}, filtered: {mcap_filtered_count}, timing: {timing_counts})")
 
     # Stable sort per day by ticker.
     for d0 in earnings_by_date.keys():
