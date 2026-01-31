@@ -211,20 +211,27 @@ def build_calendar_payload(
     def _coerce_timing_ninja(row: dict) -> str:
         """Convert API Ninjas earnings_timing to BMO/AMC/UNK."""
         # Check multiple possible field names for timing
+        # upcomingearnings uses 'earnings_timing', earningscalendar also uses 'earnings_timing'
         timing_raw = None
-        for field in ("earnings_timing", "time", "timing", "session", "when"):
+        for field in ("earnings_timing", "earningsTiming", "time", "timing", "session", "when", "Time"):
             v = row.get(field)
             if v is not None and str(v).strip():
                 timing_raw = str(v).strip().lower()
+                LOG.debug(f"Found timing in field '{field}': {timing_raw}")
                 break
         
         if not timing_raw:
+            # Log the row keys for debugging
+            LOG.debug(f"No timing field found in row keys: {list(row.keys())}")
             return "UNK"
         
-        # Parse timing value
-        if timing_raw in ("before_market", "bmo", "pre", "premarket", "before"):
+        # Parse timing value - API Ninjas uses these exact values:
+        # - before_market: Earnings call occurs before the market opens
+        # - during_market: Earnings call occurs during regular market hours
+        # - after_market: Earnings call occurs after the market closes
+        if timing_raw in ("before_market", "before market", "bmo", "pre", "premarket", "before", "pre-market"):
             return "BMO"
-        elif timing_raw in ("after_market", "during_market", "amc", "post", "postmarket", "after"):
+        elif timing_raw in ("after_market", "after market", "during_market", "during market", "amc", "post", "postmarket", "after", "post-market"):
             return "AMC"
         
         # Check for partial matches
@@ -233,6 +240,7 @@ def build_calendar_payload(
         if "after" in timing_raw or "post" in timing_raw or "amc" in timing_raw or "during" in timing_raw:
             return "AMC"
         
+        LOG.debug(f"Unrecognized timing value: {timing_raw}")
         return "UNK"
 
     def _coerce_ticker_ninja(row: dict) -> str:

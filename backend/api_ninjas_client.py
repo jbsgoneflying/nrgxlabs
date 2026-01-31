@@ -264,79 +264,65 @@ class ApiNinjasClient:
         max_results: int = 1000,
     ) -> List[dict]:
         """
-        Fetch all upcoming earnings in date range using /earningscalendar endpoint.
+        Fetch all upcoming earnings in date range.
         
-        Uses the earningscalendar endpoint which has the earnings_timing field
-        (before_market, during_market, after_market).
+        Strategy: Use /upcomingearnings for bulk fetching (Premium endpoint with date range),
+        which provides earnings_timing field.
         
         Args:
             start_date: Start date YYYY-MM-DD
             end_date: End date YYYY-MM-DD
-            exchange: Optional exchange filter (not used by earningscalendar)
+            exchange: Optional exchange filter
             max_results: Maximum total results to fetch
             
         Returns:
             List of earnings dicts with earnings_timing field
         """
-        from datetime import datetime, timedelta
-        
         all_rows: List[dict] = []
-        seen_keys: set = set()  # (ticker, date) to avoid duplicates
-        
-        # Parse dates
-        try:
-            start_dt = datetime.strptime(start_date[:10], "%Y-%m-%d")
-            end_dt = datetime.strptime(end_date[:10], "%Y-%m-%d")
-        except Exception as e:
-            self._log.warning(f"Invalid date format: {e}")
-            return []
-        
-        # Iterate through each date in the range
-        current_dt = start_dt
-        first_sample_logged = False
-        
-        while current_dt <= end_dt and len(all_rows) < max_results:
-            date_str = current_dt.strftime("%Y-%m-%d")
-            
+        offset = 0
+        page_size = 100  # upcomingearnings supports up to 100 per page
+
+        while len(all_rows) < max_results:
             try:
-                # Use earningscalendar endpoint with date parameter
-                # This endpoint returns earnings for a specific date with earnings_timing
-                resp = self.get("/earningscalendar", {"date": date_str})
+                # Use upcomingearnings endpoint (Premium) with date range
+                resp = self.upcoming_earnings(
+                    start_date=start_date,
+                    end_date=end_date,
+                    exchange=exchange,
+                    limit=page_size,
+                    offset=offset,
+                )
                 batch = resp.rows or []
                 
-                # Log sample row to debug fields (first date only)
-                if not first_sample_logged and batch:
-                    sample = batch[0]
-                    self._log.info(f"API Ninjas earningscalendar sample fields: {list(sample.keys())}")
-                    self._log.info(f"API Ninjas earningscalendar sample earnings_timing: {sample.get('earnings_timing', 'NOT PRESENT')}")
-                    first_sample_logged = True
-                
-                for row in batch:
-                    if not isinstance(row, dict):
-                        continue
-                    ticker = str(row.get("ticker") or row.get("symbol") or "").upper()
-                    row_date = row.get("date") or date_str
-                    key = (ticker, row_date)
+                if not batch:
+                    self._log.info(f"No more results at offset {offset}")
+                    break
                     
-                    if key not in seen_keys:
-                        seen_keys.add(key)
-                        # Ensure date is in the row
-                        if "date" not in row:
-                            row["date"] = date_str
-                        all_rows.append(row)
-                        
-                        if len(all_rows) >= max_results:
-                            break
-                            
+                all_rows.extend(batch)
+                
+                # Log sample row to debug fields (first page only)
+                if offset == 0 and batch:
+                    sample = batch[0]
+                    self._log.info(f"API Ninjas upcomingearnings sample fields: {list(sample.keys())}")
+                    # Check multiple possible timing field names
+                    timing_val = sample.get("earnings_timing") or sample.get("time") or sample.get("timing") or "NOT_PRESENT"
+                    self._log.info(f"API Ninjas upcomingearnings timing field value: {timing_val}")
+                
+                # If we got fewer than page_size, no more pages
+                if len(batch) < page_size:
+                    break
+                    
+                offset += page_size
+                
             except ApiNinjasError as e:
-                self._log.warning(f"Error fetching earnings for {date_str}: {e}")
+                self._log.warning(f"Error fetching upcomingearnings page {offset}: {e}")
+                break
             except Exception as e:
-                self._log.debug(f"Unexpected error fetching earnings for {date_str}: {e}")
-            
-            current_dt += timedelta(days=1)
+                self._log.warning(f"Unexpected error fetching upcomingearnings: {e}")
+                break
 
         self._log.info(
-            f"Fetched {len(all_rows)} earnings from {start_date} to {end_date} using earningscalendar"
+            f"Fetched {len(all_rows)} earnings from {start_date} to {end_date} using upcomingearnings"
         )
         return all_rows[:max_results]
 
