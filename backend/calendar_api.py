@@ -357,10 +357,22 @@ def build_calendar_payload(
             if t in ("AMC", "BMO"):
                 return t
             s = str(v).strip().lower()
-            if "after" in s or "close" in s or s in ("amc", "afterclose", "post", "pm", "postmarket", "afterhours"):
+            # AMC indicators
+            if any(x in s for x in ("after", "close", "amc", "post", "pm", "evening")):
                 return "AMC"
-            if "before" in s or "open" in s or s in ("bmo", "beforeopen", "pre", "am", "premarket"):
+            # BMO indicators
+            if any(x in s for x in ("before", "open", "bmo", "pre", "morning")):
                 return "BMO"
+            # Time strings like "09:00" or "16:30"
+            if ":" in s:
+                try:
+                    hour = int(s.split(":")[0])
+                    if hour < 12:
+                        return "BMO"
+                    else:
+                        return "AMC"
+                except:
+                    pass
         return "UNK"
 
     # Master map: (ticker, date) -> timing
@@ -379,6 +391,7 @@ def build_calendar_payload(
             orats_snap = load_earnings_snapshot(redis_store)
             if orats_snap and isinstance(orats_snap, dict):
                 orats_by_date = orats_snap.get("byDate") or {}
+                debug_counts["snapshotUsed"] = True
                 debug_counts["snapshotDate"] = str((orats_snap.get("meta") or {}).get("etDate") or "")[:10]
                 
                 # Build ticker->timing map (most recent timing wins)
@@ -407,11 +420,21 @@ def build_calendar_payload(
                                         orats_count += 1
                 
                 debug_counts["oratsTimingMapSize"] = len(orats_ticker_timing)
+                LOG.info(f"Calendar: ORATS snapshot loaded, timing map has {len(orats_ticker_timing)} tickers")
+            else:
+                debug_counts["snapshotUsed"] = False
+                notes.append("ORATS snapshot empty or missing - timing data may be limited")
         except Exception as e:
+            debug_counts["snapshotUsed"] = False
             LOG.warning(f"Calendar: failed to load ORATS snapshot: {e}")
+            notes.append(f"ORATS snapshot error: {type(e).__name__}")
+    else:
+        debug_counts["snapshotUsed"] = False
+        notes.append("Redis not configured - ORATS timing cross-reference unavailable")
 
     # 2. Add Benzinga earnings data (better forward-looking data than FMP)
     benzinga_count = 0
+    benzinga_timing_from_orats = 0  # Count of Benzinga tickers that got timing from ORATS
     if benzinga_client is not None:
         try:
             # Benzinga has good forward-looking earnings data
@@ -441,18 +464,44 @@ def build_calendar_payload(
                 if d_str not in day_keys:
                     continue
                 
-                # Benzinga timing field
-                bz_time = str(r.get("time") or "").strip().lower()
-                if bz_time in ("amc", "after market close", "after close", "after"):
-                    bz_timing = "AMC"
-                elif bz_time in ("bmo", "before market open", "before open", "before"):
-                    bz_timing = "BMO"
-                else:
-                    bz_timing = "UNK"
+                # Benzinga timing - check multiple fields
+                bz_timing = "UNK"
+                for time_field in ("time", "timing", "period", "call_time", "report_time"):
+                    raw = r.get(time_field)
+                    if not raw:
+                        continue
+                    bz_time = str(raw).strip().lower()
+                    if not bz_time:
+                        continue
+                    
+                    # Check for AMC indicators
+                    if any(x in bz_time for x in ("amc", "after", "post", "close", "pm", "evening")):
+                        bz_timing = "AMC"
+                        break
+                    # Check for BMO indicators  
+                    if any(x in bz_time for x in ("bmo", "before", "pre", "morning")):
+                        bz_timing = "BMO"
+                        break
+                    # Handle exact matches
+                    if bz_time in ("am",):
+                        bz_timing = "BMO"
+                        break
+                    # Try to parse time strings like "09:00" or "16:30"
+                    if ":" in bz_time:
+                        try:
+                            hour = int(bz_time.split(":")[0])
+                            if hour < 12:
+                                bz_timing = "BMO"
+                            else:
+                                bz_timing = "AMC"
+                            break
+                        except:
+                            pass
                 
-                # If timing is UNK, check ORATS
+                # If timing is UNK, check ORATS cross-reference
                 if bz_timing == "UNK" and sym in orats_ticker_timing:
                     bz_timing = orats_ticker_timing[sym]
+                    benzinga_timing_from_orats += 1
                 
                 key = (sym, d_str)
                 if key not in merged_earnings:
@@ -463,11 +512,13 @@ def build_calendar_payload(
                     merged_earnings[key] = bz_timing
             
             debug_counts["tickersFromBenzinga"] = benzinga_count
+            debug_counts["benzingaTimingFromOrats"] = benzinga_timing_from_orats
         except Exception as e:
             LOG.warning(f"Calendar: Benzinga earnings fetch failed: {e}")
             notes.append(f"Benzinga earnings failed: {type(e).__name__}")
 
     # 3. Add FMP data (fills gaps, ORATS timing takes priority if conflict)
+    fmp_timing_from_orats = 0  # Count of FMP tickers that got timing from ORATS
     if fmp_client is not None:
         try:
             resp = fmp_client.earnings_calendar(date_from=_fmt_date(start), date_to=_fmt_date(end), limit=int(max_tickers))
@@ -500,12 +551,14 @@ def build_calendar_payload(
                     # If FMP timing is UNK, try to get timing from ORATS (by ticker only)
                     if fmp_timing == "UNK" and sym in orats_ticker_timing:
                         final_timing = orats_ticker_timing[sym]
+                        fmp_timing_from_orats += 1
                     
                     merged_earnings[key] = final_timing
                     fmp_count += 1
                 # If already in merged_earnings from ORATS/Benzinga, keep existing timing
             
             debug_counts["fmpRowsDroppedUniverse"] = int(dropped)
+            debug_counts["fmpTimingFromOrats"] = fmp_timing_from_orats
         except FmpError as e:
             notes.append(f"FMP earnings fetch failed: {str(e)[:180]}")
         except Exception as e:
@@ -547,13 +600,19 @@ def build_calendar_payload(
         earnings_by_date[d0][timing].append({"ticker": sym, "time": ""})
         tickers_in_range += 1
 
+    # Count timing breakdown
+    timing_counts = {"BMO": 0, "AMC": 0, "UNK": 0}
+    for timing in filtered_earnings.values():
+        timing_counts[timing] = timing_counts.get(timing, 0) + 1
+    
     debug_counts["earningsSource"] = "merged_orats_benzinga_fmp"
     debug_counts["tickersFromOrats"] = orats_count
     debug_counts["tickersFromBenzinga"] = benzinga_count
     debug_counts["tickersFromFmp"] = fmp_count
     debug_counts["tickersInRange"] = tickers_in_range
     debug_counts["earningsRowsUsed"] = tickers_in_range
-    LOG.info(f"Calendar: merged {tickers_in_range} earnings (ORATS: {orats_count}, Benzinga: {benzinga_count}, FMP: {fmp_count}, filtered: {mcap_filtered_count})")
+    debug_counts["timingBreakdown"] = timing_counts
+    LOG.info(f"Calendar: merged {tickers_in_range} earnings (ORATS: {orats_count}, Benzinga: {benzinga_count}, FMP: {fmp_count}, filtered: {mcap_filtered_count}, timing: {timing_counts})")
 
     # Stable sort per day by ticker.
     for d0 in earnings_by_date.keys():
