@@ -2613,6 +2613,73 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
 .popoverBody { padding: 14px 16px 10px; }
 .popoverFoot { padding: 12px 16px 14px; border-top: 1px solid rgba(15, 23, 42, 0.08); }
 
+/* Transcript section in ticker popover */
+.transcriptBtn {
+  font-size: 12px;
+  padding: 4px 8px;
+  margin-left: auto;
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+}
+.transcriptBtn:hover {
+  background: rgba(59, 130, 246, 0.2);
+}
+.transcriptsSection {
+  padding: 12px 16px;
+  background: rgba(15, 23, 42, 0.03);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+.transcriptsSection.hidden {
+  display: none;
+}
+.transcriptsList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.transcriptItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 6px;
+  font-size: 13px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+.transcriptItem:hover {
+  background: rgba(255, 255, 255, 1);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+.transcriptLabel {
+  font-weight: 600;
+  color: rgba(11, 11, 15, 0.8);
+}
+.transcriptDownload {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: #3b82f6;
+  color: white;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.transcriptDownload:hover {
+  background: #2563eb;
+}
+.transcriptsEmpty {
+  color: rgba(11, 11, 15, 0.5);
+  font-size: 13px;
+  font-style: italic;
+}
+
 /* Allow popovers to work on smaller viewports (so bottom rows are reachable). */
 .popoverBody {
   max-height: min(70vh, 640px);

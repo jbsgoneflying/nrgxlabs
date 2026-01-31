@@ -30,7 +30,7 @@ from backend.benzinga_client import BenzingaClient
 from backend.orats_client import OratsClient, OratsError
 from backend.spx_ic_engine import compute_engine2_spx_ic, compute_spx_live_levels, compute_live_levels, fetch_dailies_ohlc_range
 from backend.redis_store import get_store_optional
-from backend.calendar_api import Engine1UniversePolicy, build_calendar_payload
+from backend.calendar_api import build_calendar_payload
 from backend.condor_rank import compute_condor_rank
 from backend.calendar_snapshot import EARNINGS_SNAPSHOT_KEY, load_earnings_snapshot
 from backend.fmp_snapshot import FMP_EARNINGS_SNAPSHOT_KEY, load_fmp_earnings_snapshot
@@ -1061,7 +1061,6 @@ def calendar(
     engine1Only: int = Query(0, ge=0, le=1),
     includeEvents: int = Query(1, ge=0, le=1),
     maxTickers: int = Query(12000, ge=200, le=50000),
-    forceFmp: int = Query(0, ge=0, le=1, description="Force FMP live data (bypass snapshot)"),
     minMarketCap: float = Query(0, ge=0, description="Min market cap filter in billions (e.g., 100 = $100B+)"),
 ):
     """
@@ -1070,7 +1069,7 @@ def calendar(
     Design goals:
     - One response for the visible range (month/week/day)
     - Macro events fetched once per range (Benzinga economics)
-    - Engine-1 eligibility evaluated via ORATS /cores snapshot with long TTL cache
+    - Earnings data from API Ninjas Premium
     """
     try:
         a = str(anchor or dt.date.today().isoformat())[:10]
@@ -1079,24 +1078,16 @@ def calendar(
             raise HTTPException(status_code=400, detail="Unsupported view. Allowed: month|week|day")
         e1 = bool(int(engine1Only))
         inc = bool(int(includeEvents))
-        force_fmp = bool(int(forceFmp))
         min_mcap_b = float(minMarketCap) if minMarketCap else 0.0
 
         flags_fp = get_flags().cache_fingerprint()
         cache_ttl_s = int(float(os.getenv("CALENDAR_CACHE_TTL_S") or 0))
-        key = ("calendar", v, a, str(tz or ""), int(e1), int(inc), int(maxTickers), int(force_fmp), flags_fp)
+        key = ("calendar", v, a, str(tz or ""), int(e1), int(inc), int(maxTickers), flags_fp)
         if cache_ttl_s > 0:
             with _calendar_cache_lock:
                 cached = _calendar_cache.get(key)
             if cached is not None:
                 return cached
-
-        fmp = _get_fmp_client_optional()
-        if fmp is None:
-            raise HTTPException(status_code=503, detail="FMP unavailable (missing FMP_API_KEY).")
-
-        # If forceFmp=1, pass None for redis_store to skip snapshot lookup
-        store = None if force_fmp else get_store_optional()
 
         payload = build_calendar_payload(
             view=v,
@@ -1105,9 +1096,7 @@ def calendar(
             engine1_only=e1,
             include_events=inc,
             benzinga_client=_get_benzinga_client_optional(),
-            fmp_client=fmp,
             max_tickers=int(maxTickers),
-            redis_store=store,
             min_market_cap_b=min_mcap_b,
             api_ninjas_client=_get_api_ninjas_client_optional(),
         )
@@ -1117,11 +1106,129 @@ def calendar(
         return payload
     except HTTPException:
         raise
-    except OratsError as e:
-        LOG.exception("ORATS failure (calendar)")
+    except ApiNinjasError as e:
+        LOG.exception("API Ninjas failure (calendar)")
         raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:
         LOG.exception("Unhandled failure (calendar)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@app.get("/api/transcripts/{ticker}")
+def get_transcript_list(ticker: str):
+    """
+    Get list of available earnings call transcripts for a ticker.
+    Returns the 4 most recent transcripts.
+    """
+    try:
+        client = _get_api_ninjas_client_optional()
+        if client is None:
+            raise HTTPException(status_code=503, detail="API Ninjas unavailable")
+        
+        ticker = str(ticker).upper().strip()
+        if not ticker:
+            raise HTTPException(status_code=400, detail="Ticker required")
+        
+        transcripts = client.get_latest_transcripts(ticker, limit=4)
+        return {
+            "ticker": ticker,
+            "transcripts": transcripts,
+            "count": len(transcripts),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOG.exception(f"Failed to fetch transcript list for {ticker}")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@app.get("/api/transcripts/{ticker}/{year}/{quarter}")
+def get_transcript(ticker: str, year: int, quarter: int):
+    """
+    Get full earnings call transcript for a specific quarter.
+    Returns the transcript text.
+    """
+    try:
+        client = _get_api_ninjas_client_optional()
+        if client is None:
+            raise HTTPException(status_code=503, detail="API Ninjas unavailable")
+        
+        ticker = str(ticker).upper().strip()
+        if not ticker:
+            raise HTTPException(status_code=400, detail="Ticker required")
+        if year < 2000 or year > 2100:
+            raise HTTPException(status_code=400, detail="Invalid year")
+        if quarter < 1 or quarter > 4:
+            raise HTTPException(status_code=400, detail="Quarter must be 1-4")
+        
+        transcript = client.get_transcript(ticker, year, quarter)
+        if transcript is None:
+            raise HTTPException(status_code=404, detail=f"No transcript found for {ticker} {year}Q{quarter}")
+        
+        return transcript
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOG.exception(f"Failed to fetch transcript for {ticker} {year}Q{quarter}")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@app.get("/api/transcripts/{ticker}/{year}/{quarter}/download")
+def download_transcript(ticker: str, year: int, quarter: int):
+    """
+    Download earnings call transcript as a .txt file.
+    """
+    from fastapi.responses import Response
+    
+    try:
+        client = _get_api_ninjas_client_optional()
+        if client is None:
+            raise HTTPException(status_code=503, detail="API Ninjas unavailable")
+        
+        ticker = str(ticker).upper().strip()
+        if not ticker:
+            raise HTTPException(status_code=400, detail="Ticker required")
+        if year < 2000 or year > 2100:
+            raise HTTPException(status_code=400, detail="Invalid year")
+        if quarter < 1 or quarter > 4:
+            raise HTTPException(status_code=400, detail="Quarter must be 1-4")
+        
+        transcript = client.get_transcript(ticker, year, quarter)
+        if transcript is None:
+            raise HTTPException(status_code=404, detail=f"No transcript found for {ticker} {year}Q{quarter}")
+        
+        # Build the text file content
+        date_str = transcript.get("date", "Unknown date")
+        timing = transcript.get("earnings_timing", "unknown")
+        text = transcript.get("transcript", "No transcript available")
+        
+        content = f"""EARNINGS CALL TRANSCRIPT
+========================
+Ticker: {ticker}
+Date: {date_str}
+Quarter: Q{quarter} {year}
+Timing: {timing}
+
+========================
+TRANSCRIPT
+========================
+
+{text}
+"""
+        
+        filename = f"{ticker}_Q{quarter}_{year}_transcript.txt"
+        
+        return Response(
+            content=content,
+            media_type="text/plain",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOG.exception(f"Failed to download transcript for {ticker} {year}Q{quarter}")
         raise HTTPException(status_code=500, detail="Internal error") from e
 
 

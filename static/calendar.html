@@ -121,8 +121,12 @@
           <div class="popoverTitleRow">
             <img id="popLogo" class="popoverLogo hidden" src="" alt="" />
             <div class="popoverTitle" id="popTitle">—</div>
+            <button id="popTranscriptsBtn" class="linkButton transcriptBtn" type="button" title="View earnings call transcripts">📄 Transcripts</button>
           </div>
           <button id="popClose" class="iconBtn" type="button" aria-label="Close">×</button>
+        </div>
+        <div id="popTranscriptsSection" class="transcriptsSection hidden">
+          <div class="transcriptsList" id="popTranscriptsList">Loading...</div>
         </div>
         <div id="popBody" class="popoverBody">—</div>
         <div class="popoverFoot">
@@ -178,7 +182,7 @@
     </div>
 
     <script src="/static/ui_kit.js"></script>
-    <script src="/static/calendar.js?v=11"></script>
+    <script src="/static/calendar.js?v=14"></script>
   </body>
 </html>
 

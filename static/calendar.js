@@ -588,9 +588,9 @@ function render(payload) {
               const tk = String(r?.ticker || "").toUpperCase();
               const src = logoUrlForTicker(tk);
               const colorIdx = getColorIndex(tk);
-              // Logo-only tile with tooltip via data-ticker attribute
-              return `<button class="calTile" type="button" data-ticker="${escapeHtml(tk)}" data-date="${escapeHtml(date)}" data-color="${colorIdx}" aria-label="${escapeHtml(tk)}">
-                <img class="calTileLogo" src="${escapeHtml(src || '')}" alt="" loading="lazy" decoding="async" data-ticker="${escapeHtml(tk)}" />
+              // Logo-only tile with tooltip via title attribute for hover
+              return `<button class="calTile" type="button" data-ticker="${escapeHtml(tk)}" data-date="${escapeHtml(date)}" data-color="${colorIdx}" aria-label="${escapeHtml(tk)}" title="${escapeHtml(tk)}">
+                <img class="calTileLogo" src="${escapeHtml(src || '')}" alt="${escapeHtml(tk)}" loading="lazy" decoding="async" data-ticker="${escapeHtml(tk)}" />
               </button>`;
             }).join("")}
             ${rest > 0 ? `<button class="calTileMore" type="button" data-date="${escapeHtml(date)}" data-group="${escapeHtml(key)}" title="Show all tickers">+${rest}</button>` : ""}
@@ -696,6 +696,9 @@ async function openTickerPopover(ticker, date = "") {
   const popBody = $("popBody");
   const popLink = $("popBreachLink");
   const popLogo = $("popLogo");
+  const popTranscriptsBtn = $("popTranscriptsBtn");
+  const popTranscriptsSection = $("popTranscriptsSection");
+  const popTranscriptsList = $("popTranscriptsList");
 
   if (popTitle) popTitle.textContent = ticker;
   if (popLogo) {
@@ -708,6 +711,56 @@ async function openTickerPopover(ticker, date = "") {
       popLogo.classList.add("hidden");
     }
   }
+  
+  // Reset and hide transcripts section
+  if (popTranscriptsSection) {
+    popTranscriptsSection.classList.add("hidden");
+  }
+  if (popTranscriptsList) {
+    popTranscriptsList.innerHTML = "Loading...";
+  }
+  
+  // Transcripts button handler
+  if (popTranscriptsBtn) {
+    popTranscriptsBtn.onclick = async () => {
+      if (!popTranscriptsSection || !popTranscriptsList) return;
+      
+      // Toggle visibility
+      const isHidden = popTranscriptsSection.classList.contains("hidden");
+      if (!isHidden) {
+        popTranscriptsSection.classList.add("hidden");
+        return;
+      }
+      
+      popTranscriptsSection.classList.remove("hidden");
+      popTranscriptsList.innerHTML = `<div class="transcriptsEmpty">Loading transcripts...</div>`;
+      
+      try {
+        const data = await fetchJson(`/api/transcripts/${encodeURIComponent(ticker)}`);
+        const transcripts = data?.transcripts || [];
+        
+        if (transcripts.length === 0) {
+          popTranscriptsList.innerHTML = `<div class="transcriptsEmpty">No transcripts available for ${ticker}</div>`;
+          return;
+        }
+        
+        popTranscriptsList.innerHTML = transcripts.map((t) => {
+          const year = t.year || "?";
+          const quarter = t.quarter || "?";
+          const downloadUrl = `/api/transcripts/${encodeURIComponent(ticker)}/${year}/${quarter}/download`;
+          return `
+            <div class="transcriptItem">
+              <span class="transcriptLabel">Q${quarter} ${year}</span>
+              <a href="${escapeHtml(downloadUrl)}" class="transcriptDownload" download>Download .txt</a>
+            </div>
+          `;
+        }).join("");
+      } catch (e) {
+        popTranscriptsList.innerHTML = `<div class="transcriptsEmpty">Error loading transcripts: ${escapeHtml(String(e?.message || e))}</div>`;
+      }
+    };
+  }
+  
   if (popBody) {
     popBody.innerHTML = `
       <div class="finePrint muted" style="margin-bottom:10px;">

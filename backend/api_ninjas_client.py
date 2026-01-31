@@ -1,12 +1,16 @@
 """
-API Ninjas Client for Earnings Calendar
+API Ninjas Client for Earnings Calendar and Transcripts
 
 Premium features used:
 - /v1/upcomingearnings - Query by date range, exchange, ticker
 - earnings_timing field - before_market, during_market, after_market
 - earnings_call_timestamp - Unix timestamp for exact timing
+- /v1/earningstranscriptsearch - Search available transcripts
+- /v1/earningstranscript - Get full transcript text
 
-API Documentation: https://api-ninjas.com/api/earningscalendar
+API Documentation: 
+- https://api-ninjas.com/api/earningscalendar
+- https://api-ninjas.com/api/earningscalltranscript
 """
 from __future__ import annotations
 
@@ -381,3 +385,85 @@ class ApiNinjasClient:
             self._log.info(f"Sample market caps: {[(t, f'${m/1e9:.1f}B') for t, m in samples]}")
         
         return result
+
+    # =========================================================================
+    # EARNINGS CALL TRANSCRIPT METHODS
+    # =========================================================================
+    
+    def search_transcripts(self, ticker: str) -> List[dict]:
+        """
+        Search for available earnings call transcript year/quarter combinations.
+        
+        Args:
+            ticker: Stock symbol (e.g., AAPL)
+            
+        Returns:
+            List of dicts with 'year' and 'quarter' keys
+        """
+        try:
+            resp = self.get("/earningstranscriptsearch", {"ticker": str(ticker).upper()})
+            return resp.rows or []
+        except Exception as e:
+            self._log.warning(f"Failed to search transcripts for {ticker}: {e}")
+            return []
+    
+    def get_transcript(
+        self,
+        ticker: str,
+        year: int,
+        quarter: int,
+    ) -> Optional[dict]:
+        """
+        Get full earnings call transcript for a specific quarter.
+        
+        Args:
+            ticker: Stock symbol (e.g., AAPL)
+            year: Earnings year (e.g., 2025)
+            quarter: Earnings quarter (1-4)
+            
+        Returns:
+            Dict with transcript data including:
+            - date: Date of earnings call
+            - ticker: Stock symbol
+            - year: Year
+            - quarter: Quarter
+            - earnings_timing: before_market, during_market, after_market
+            - transcript: Full transcript text
+        """
+        try:
+            resp = self.get("/earningstranscript", {
+                "ticker": str(ticker).upper(),
+                "year": int(year),
+                "quarter": int(quarter),
+            })
+            if resp.rows and len(resp.rows) > 0:
+                return resp.rows[0]
+            return None
+        except Exception as e:
+            self._log.warning(f"Failed to get transcript for {ticker} {year}Q{quarter}: {e}")
+            return None
+    
+    def get_latest_transcripts(self, ticker: str, limit: int = 4) -> List[dict]:
+        """
+        Get the most recent earnings call transcripts for a ticker.
+        
+        Args:
+            ticker: Stock symbol
+            limit: Number of recent transcripts to fetch (default 4)
+            
+        Returns:
+            List of transcript metadata (year, quarter) sorted newest first
+        """
+        available = self.search_transcripts(ticker)
+        if not available:
+            return []
+        
+        # Sort by year desc, quarter desc to get most recent first
+        def sort_key(item):
+            try:
+                return (int(item.get("year", 0)), int(item.get("quarter", 0)))
+            except:
+                return (0, 0)
+        
+        sorted_transcripts = sorted(available, key=sort_key, reverse=True)
+        return sorted_transcripts[:limit]

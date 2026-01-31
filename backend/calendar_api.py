@@ -7,16 +7,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from backend.benzinga_client import BenzingaClient
-from backend.fmp_client import FmpClient, FmpError
-from backend.orats_client import OratsClient
 from backend.api_ninjas_client import ApiNinjasClient, ApiNinjasError
-from backend.earnings_calendar import infer_timing_from_time_str
 from backend.market_calendar import market_structure_events_by_date, opex_events_by_date
 from backend.macro_events import macro_events_by_date
 from backend.universe import load_universe_sp500_and_nasdaq100
-from backend.earnings_logic import classify_timing
-from backend.redis_store import RedisStore
-from backend.calendar_snapshot import load_earnings_snapshot
 
 LOG = logging.getLogger(__name__)
 
@@ -67,124 +61,6 @@ def _trading_weekdays(d0: dt.date, d1: dt.date) -> List[dt.date]:
     return out
 
 
-@dataclass(frozen=True)
-class Engine1UniversePolicy:
-    # Kept for backwards compatibility; no longer used by the calendar snapshot path.
-    min_price: float = 50.0
-    min_market_cap: float = 10_000_000_000.0
-    min_avg_dollar_vol_20d: float = 200_000_000.0
-
-
-def _to_float(v: Any) -> Optional[float]:
-    try:
-        if v is None:
-            return None
-        f = float(v)
-        if f != f:
-            return None
-        return f
-    except Exception:
-        return None
-
-
-def _pick_first_float(row: dict, keys: List[str]) -> Optional[float]:
-    for k in keys:
-        v = _to_float(row.get(k))
-        if v is not None:
-            return v
-    return None
-
-
-def engine1_is_eligible_from_orats_row(row: dict, *, policy: Engine1UniversePolicy) -> Tuple[bool, Dict[str, Any]]:
-    """
-    Determine Engine-1 eligibility using ORATS /cores snapshot fields.
-
-    We use a flexible set of key names to stay robust to field naming differences
-    across ORATS plans / versions.
-    """
-    px = _pick_first_float(row, ["stockPrice", "spotPrice", "underlyingPrice", "price", "close"])
-    mcap = _pick_first_float(row, ["marketCap", "mktCap", "marketcap", "market_cap"])
-
-    avg_vol = _pick_first_float(row, ["avgVol20", "avgVolume20", "avgVol", "avgVolume", "volumeAvg20"])
-    avg_dvol = _pick_first_float(row, ["avgDollarVol20", "avgDolVol20", "avgDVol20", "avgDollarVolume20", "dollarVol20"])
-    if avg_dvol is None and avg_vol is not None and px is not None and avg_vol > 0 and px > 0:
-        avg_dvol = avg_vol * px
-
-    ok_price = (px is not None) and (px >= float(policy.min_price))
-    ok_mcap = (mcap is not None) and (mcap >= float(policy.min_market_cap))
-    ok_dvol = (avg_dvol is not None) and (avg_dvol >= float(policy.min_avg_dollar_vol_20d))
-
-    # Conservative-but-practical behavior:
-    # - Always enforce price minimum.
-    # - If we have mcap or dvol, require at least one to clear.
-    # - If we have neither, allow based on price alone (keeps the calendar usable even if fields are missing).
-    if not ok_price:
-        return False, {"price": px, "marketCap": mcap, "avgDollarVol20d": avg_dvol, "reason": "price_below_min"}
-
-    if mcap is None and avg_dvol is None:
-        return True, {"price": px, "marketCap": None, "avgDollarVol20d": None, "reason": "price_only_missing_cap_liq"}
-
-    if ok_mcap or ok_dvol:
-        return True, {"price": px, "marketCap": mcap, "avgDollarVol20d": avg_dvol, "reason": "pass"}
-
-    return False, {"price": px, "marketCap": mcap, "avgDollarVol20d": avg_dvol, "reason": "cap_liq_below_min"}
-
-
-def fetch_engine1_eligibility(
-    client: OratsClient,
-    *,
-    ticker: str,
-    policy: Engine1UniversePolicy,
-) -> Tuple[bool, Dict[str, Any]]:
-    fields = ",".join(
-        [
-            "ticker",
-            "stockPrice",
-            "spotPrice",
-            "marketCap",
-            "avgDollarVol20",
-            "avgVol20",
-        ]
-    )
-    try:
-        rows = client.cores(ticker=str(ticker).upper(), fields=fields).rows or []
-        row = rows[0] if rows else {}
-    except Exception as e:
-        # Be permissive: the calendar should still show names even if ORATS snapshot is unavailable.
-        # We'll label this in diagnostics and keep the name in the calendar.
-        return True, {"reason": f"orats_error_allow:{type(e).__name__}"}
-    ok, diag = engine1_is_eligible_from_orats_row(row if isinstance(row, dict) else {}, policy=policy)
-    return ok, diag
-
-
-def _fetch_benzinga_earnings_range(
-    bz: BenzingaClient,
-    *,
-    start: dt.date,
-    end: dt.date,
-    max_pages: int = 250,
-    pagesize: int = 1000,
-) -> Tuple[List[dict], Dict[str, Any]]:
-    rows_all: List[dict] = []
-    pages = 0
-    truncated = False
-    for page in range(int(max_pages)):
-        resp = bz.calendar_earnings(
-            date_from=_fmt_date(start),
-            date_to=_fmt_date(end),
-            pagesize=int(pagesize),
-            page=int(page),
-        )
-        batch = resp.rows or []
-        pages += 1
-        rows_all.extend([r for r in batch if isinstance(r, dict)])
-        if len(batch) < int(pagesize):
-            break
-        if page == int(max_pages) - 1 and len(batch) >= int(pagesize):
-            truncated = True
-    return rows_all, {"pagesFetched": int(pages), "maxPages": int(max_pages), "pageSize": int(pagesize), "truncated": bool(truncated)}
-
-
 def _build_day_skeleton(view: str, *, start: dt.date, end: dt.date) -> List[dt.date]:
     v = str(view or "").lower().strip()
     if v == "day":
@@ -228,9 +104,7 @@ def build_calendar_payload(
     engine1_only: bool,
     include_events: bool,
     benzinga_client: Optional[BenzingaClient],
-    fmp_client: Optional[FmpClient],
     max_tickers: int,
-    redis_store: Optional[RedisStore] = None,
     min_market_cap_b: float = 0.0,
     api_ninjas_client: Optional[ApiNinjasClient] = None,
 ) -> Dict[str, Any]:
@@ -381,7 +255,6 @@ def build_calendar_payload(
     # Master map: (ticker, date) -> timing
     merged_earnings: Dict[Tuple[str, str], str] = {}
     ninja_count = 0
-    fallback_count = 0
     
     # 1. PRIMARY: Try API Ninjas (Premium has reliable BMO/AMC timing)
     use_api_ninjas = api_ninjas_client is not None
@@ -444,117 +317,15 @@ def build_calendar_payload(
             notes.append(f"API Ninjas error: {type(e).__name__}; using fallback sources")
             use_api_ninjas = False
     else:
-        notes.append("API Ninjas not configured - using legacy sources")
+        notes.append("API Ninjas not configured - no earnings data available")
     
-    # 2. FALLBACK: If API Ninjas failed or unavailable, use Benzinga/FMP
-    if not use_api_ninjas or ninja_count == 0:
-        debug_counts["usingFallbackSources"] = True
-        
-        def _coerce_ticker_fmp(row: dict) -> str:
-            for k in ("symbol", "ticker", "Symbol", "Ticker"):
-                v = row.get(k)
-                if v:
-                    return str(v).strip().upper()
-            return ""
-
-        def _coerce_date_fmp(row: dict) -> Optional[dt.date]:
-            for k in ("date", "earningDate", "earningsDate", "reportedDate", "Date"):
-                v = row.get(k)
-                d = _parse_date(v)
-                if d is not None:
-                    return d
-            return None
-
-        def _coerce_timing_fmp(row: dict) -> str:
-            for k in ("time", "session", "when", "timing", "timeOfDay"):
-                v = row.get(k)
-                if v is None:
-                    continue
-                t = classify_timing(v)
-                if t in ("AMC", "BMO"):
-                    return t
-                s = str(v).strip().lower()
-                if any(x in s for x in ("after", "close", "amc", "post", "pm", "evening")):
-                    return "AMC"
-                if any(x in s for x in ("before", "open", "bmo", "pre", "morning")):
-                    return "BMO"
-                if ":" in s:
-                    try:
-                        hour = int(s.split(":")[0])
-                        return "BMO" if hour < 12 else "AMC"
-                    except:
-                        pass
-            return "UNK"
-        
-        # Try Benzinga
-        if benzinga_client is not None:
-            try:
-                bz_resp = benzinga_client.calendar_earnings(
-                    date_from=_fmt_date(start),
-                    date_to=_fmt_date(end),
-                    pagesize=1000,
-                )
-                for r in (bz_resp.rows or []):
-                    if not isinstance(r, dict):
-                        continue
-                    sym = _normalize_symbol_to_universe(str(r.get("ticker") or "").upper())
-                    d = _parse_date(r.get("date") or r.get("date_confirmed") or "")
-                    if not sym or d is None or (universe and sym not in universe):
-                        continue
-                    d_str = _fmt_date(d)
-                    if d_str not in day_keys:
-                        continue
-                    bz_time = str(r.get("time") or "").lower()
-                    timing = "UNK"
-                    if any(x in bz_time for x in ("after", "amc", "post", "close")):
-                        timing = "AMC"
-                    elif any(x in bz_time for x in ("before", "bmo", "pre")):
-                        timing = "BMO"
-                    key = (sym, d_str)
-                    if key not in merged_earnings:
-                        merged_earnings[key] = timing
-                        fallback_count += 1
-                debug_counts["benzingaFallbackUsed"] = True
-            except Exception as e:
-                LOG.warning(f"Calendar: Benzinga fallback failed: {e}")
-        
-        # Try FMP
-        if fmp_client is not None:
-            try:
-                resp = fmp_client.earnings_calendar(
-                    date_from=_fmt_date(start),
-                    date_to=_fmt_date(end),
-                    limit=int(max_tickers),
-                )
-                for r in (resp.rows or []):
-                    if not isinstance(r, dict):
-                        continue
-                    sym = _normalize_symbol_to_universe(_coerce_ticker_fmp(r))
-                    d = _coerce_date_fmp(r)
-                    if not sym or d is None or (universe and sym not in universe):
-                        continue
-                    d_str = _fmt_date(d)
-                    if d_str not in day_keys:
-                        continue
-                    key = (sym, d_str)
-                    if key not in merged_earnings:
-                        merged_earnings[key] = _coerce_timing_fmp(r)
-                        fallback_count += 1
-                debug_counts["fmpFallbackUsed"] = True
-            except Exception as e:
-                LOG.warning(f"Calendar: FMP fallback failed: {e}")
-        
-        debug_counts["earningsSource"] = "fallback_benzinga_fmp"
-        debug_counts["tickersFromFallback"] = fallback_count
-    
-    # 3. Apply market cap filter if specified
+    # 2. Apply market cap filter if specified
     filtered_earnings = merged_earnings
     mcap_filtered_count = 0
     
     debug_counts["minMarketCapB"] = min_market_cap_b
     debug_counts["minMarketCapRaw"] = min_market_cap
     debug_counts["apiNinjasClientAvailable"] = api_ninjas_client is not None
-    debug_counts["fmpClientAvailable"] = fmp_client is not None
     debug_counts["tickersBeforeFilter"] = len(merged_earnings)
     
     if min_market_cap > 0:
@@ -562,27 +333,15 @@ def build_calendar_payload(
         LOG.info(f"Calendar: Applying market cap filter (min=${min_market_cap/1e9:.1f}B) to {len(all_tickers)} tickers")
         
         market_caps: Dict[str, float] = {}
-        market_cap_source = "none"
         
-        # Try API Ninjas first for market caps (parallel fetching)
+        # Use API Ninjas for market caps (parallel fetching)
         if api_ninjas_client is not None:
             try:
                 LOG.info(f"Calendar: Using API Ninjas for market cap filtering")
                 market_caps = api_ninjas_client.get_market_caps_batch(all_tickers)
-                market_cap_source = "api_ninjas"
                 debug_counts["marketCapSource"] = "api_ninjas"
             except Exception as e:
                 LOG.warning(f"Calendar: API Ninjas market cap failed: {e}")
-        
-        # Fall back to FMP if API Ninjas didn't work
-        if len(market_caps) == 0 and fmp_client is not None:
-            try:
-                LOG.info(f"Calendar: Falling back to FMP for market cap filtering")
-                market_caps = fmp_client.get_market_caps(all_tickers)
-                market_cap_source = "fmp"
-                debug_counts["marketCapSource"] = "fmp"
-            except Exception as e:
-                LOG.warning(f"Calendar: FMP market cap also failed: {e}")
         
         debug_counts["marketCapsLoaded"] = len(market_caps)
         
@@ -629,7 +388,7 @@ def build_calendar_payload(
     debug_counts["tickersInRange"] = tickers_in_range
     debug_counts["earningsRowsUsed"] = tickers_in_range
     debug_counts["timingBreakdown"] = timing_counts
-    LOG.info(f"Calendar: {tickers_in_range} earnings (API Ninjas: {ninja_count}, Fallback: {fallback_count}, filtered: {mcap_filtered_count}, timing: {timing_counts})")
+    LOG.info(f"Calendar: {tickers_in_range} earnings from API Ninjas (filtered: {mcap_filtered_count}, timing: {timing_counts})")
 
     # Stable sort per day by ticker.
     for d0 in earnings_by_date.keys():
