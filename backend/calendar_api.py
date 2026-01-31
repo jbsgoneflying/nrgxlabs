@@ -553,48 +553,67 @@ def build_calendar_payload(
     
     debug_counts["minMarketCapB"] = min_market_cap_b
     debug_counts["minMarketCapRaw"] = min_market_cap
+    debug_counts["apiNinjasClientAvailable"] = api_ninjas_client is not None
     debug_counts["fmpClientAvailable"] = fmp_client is not None
     debug_counts["tickersBeforeFilter"] = len(merged_earnings)
     
-    if min_market_cap > 0 and fmp_client is not None:
+    if min_market_cap > 0:
         all_tickers = list(set(sym for sym, d0 in merged_earnings.keys()))
         LOG.info(f"Calendar: Applying market cap filter (min=${min_market_cap/1e9:.1f}B) to {len(all_tickers)} tickers")
-        try:
-            market_caps = fmp_client.get_market_caps(all_tickers)
-            debug_counts["marketCapsLoaded"] = len(market_caps)
-            
-            # Log some sample market caps for debugging
+        
+        market_caps: Dict[str, float] = {}
+        market_cap_source = "none"
+        
+        # Try API Ninjas first for market caps (parallel fetching)
+        if api_ninjas_client is not None:
+            try:
+                LOG.info(f"Calendar: Using API Ninjas for market cap filtering")
+                market_caps = api_ninjas_client.get_market_caps_batch(all_tickers)
+                market_cap_source = "api_ninjas"
+                debug_counts["marketCapSource"] = "api_ninjas"
+            except Exception as e:
+                LOG.warning(f"Calendar: API Ninjas market cap failed: {e}")
+        
+        # Fall back to FMP if API Ninjas didn't work
+        if len(market_caps) == 0 and fmp_client is not None:
+            try:
+                LOG.info(f"Calendar: Falling back to FMP for market cap filtering")
+                market_caps = fmp_client.get_market_caps(all_tickers)
+                market_cap_source = "fmp"
+                debug_counts["marketCapSource"] = "fmp"
+            except Exception as e:
+                LOG.warning(f"Calendar: FMP market cap also failed: {e}")
+        
+        debug_counts["marketCapsLoaded"] = len(market_caps)
+        
+        # Log some sample market caps for debugging
+        if market_caps:
             sample_caps = {k: f"${v/1e9:.1f}B" for k, v in list(market_caps.items())[:5]}
             debug_counts["sampleMarketCaps"] = sample_caps
+        
+        # If we couldn't load any market caps, skip the filter
+        if len(market_caps) == 0:
+            LOG.warning(f"Calendar: No market caps loaded from any source, skipping filter")
+            notes.append("Market cap filter skipped - no market cap data available")
+            debug_counts["marketCapFilterSkipped"] = True
+        else:
+            filtered_earnings = {}
+            for (sym, d0), timing in merged_earnings.items():
+                mcap = market_caps.get(sym, 0)
+                if mcap >= min_market_cap:
+                    filtered_earnings[(sym, d0)] = timing
+                else:
+                    mcap_filtered_count += 1
+            debug_counts["filteredByMarketCap"] = mcap_filtered_count
+            debug_counts["tickersAfterFilter"] = len(filtered_earnings)
+            LOG.info(f"Calendar: Market cap filter kept {len(filtered_earnings)}/{len(merged_earnings)} tickers (filtered out {mcap_filtered_count})")
             
-            # If we couldn't load any market caps, skip the filter
-            if len(market_caps) == 0:
-                LOG.warning(f"Calendar: No market caps loaded, skipping filter")
-                notes.append("Market cap filter skipped - no market cap data available")
-                debug_counts["marketCapFilterSkipped"] = True
-            else:
-                filtered_earnings = {}
-                for (sym, d0), timing in merged_earnings.items():
-                    mcap = market_caps.get(sym, 0)
-                    if mcap >= min_market_cap:
-                        filtered_earnings[(sym, d0)] = timing
-                    else:
-                        mcap_filtered_count += 1
-                debug_counts["filteredByMarketCap"] = mcap_filtered_count
-                debug_counts["tickersAfterFilter"] = len(filtered_earnings)
-                LOG.info(f"Calendar: Market cap filter kept {len(filtered_earnings)}/{len(merged_earnings)} tickers (filtered out {mcap_filtered_count})")
-                
-                # If filter resulted in 0 tickers but we had data, something is wrong - show all
-                if len(filtered_earnings) == 0 and len(merged_earnings) > 0:
-                    LOG.warning(f"Calendar: Market cap filter removed ALL tickers - showing unfiltered results")
-                    notes.append("Market cap filter returned 0 results - showing all earnings")
-                    filtered_earnings = merged_earnings
-                    debug_counts["marketCapFilterOverridden"] = True
-        except Exception as e:
-            LOG.warning(f"Calendar: market cap filter failed, showing all: {e}")
-            notes.append(f"Market cap filter failed: {type(e).__name__}")
-    elif min_market_cap > 0 and fmp_client is None:
-        notes.append("Market cap filter requested but FMP client unavailable")
+            # If filter resulted in 0 tickers but we had data, something is wrong - show all
+            if len(filtered_earnings) == 0 and len(merged_earnings) > 0:
+                LOG.warning(f"Calendar: Market cap filter removed ALL tickers - showing unfiltered results")
+                notes.append("Market cap filter returned 0 results - showing all earnings")
+                filtered_earnings = merged_earnings
+                debug_counts["marketCapFilterOverridden"] = True
 
     # 4. Populate earnings_by_date from filtered data
     tickers_in_range = 0

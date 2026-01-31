@@ -328,27 +328,56 @@ class ApiNinjasClient:
             self._log.debug(f"Failed to get market cap for {ticker}: {e}")
         return None
 
-    def get_market_caps_batch(self, tickers: List[str]) -> Dict[str, float]:
+    def get_market_caps_batch(self, tickers: List[str], max_workers: int = 10) -> Dict[str, float]:
         """
-        Get market caps for multiple tickers.
+        Get market caps for multiple tickers using parallel requests.
+        
         Note: API Ninjas marketcap endpoint only supports single ticker,
-        so we make parallel requests.
+        so we make parallel requests with ThreadPoolExecutor.
         
         Args:
             tickers: List of stock symbols
+            max_workers: Number of parallel requests (default 10)
             
         Returns:
             Dict of ticker -> market cap
         """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
         result: Dict[str, float] = {}
         
-        # Limit to prevent too many API calls
-        tickers_to_fetch = list(set(tickers))[:200]
+        # Dedupe and limit to prevent too many API calls
+        tickers_to_fetch = list(set(str(t).upper() for t in tickers))[:500]
         
-        for ticker in tickers_to_fetch:
-            mcap = self.get_market_cap(ticker)
-            if mcap is not None:
-                result[ticker.upper()] = mcap
+        self._log.info(f"Fetching market caps for {len(tickers_to_fetch)} tickers (parallel, {max_workers} workers)")
         
-        self._log.info(f"Fetched market caps for {len(result)}/{len(tickers_to_fetch)} tickers")
+        def fetch_single(ticker: str) -> tuple:
+            try:
+                resp = self.get("/marketcap", {"ticker": ticker})
+                if resp.rows and len(resp.rows) > 0:
+                    row = resp.rows[0]
+                    mcap = row.get("market_cap")
+                    if mcap is not None:
+                        return (ticker, float(mcap))
+            except Exception as e:
+                self._log.debug(f"Failed to get market cap for {ticker}: {e}")
+            return (ticker, None)
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(fetch_single, t): t for t in tickers_to_fetch}
+            for future in as_completed(futures):
+                try:
+                    ticker, mcap = future.result()
+                    if mcap is not None:
+                        result[ticker] = mcap
+                except Exception as e:
+                    self._log.debug(f"Market cap fetch error: {e}")
+        
+        self._log.info(f"Fetched market caps: {len(result)}/{len(tickers_to_fetch)} tickers successful")
+        
+        # Log some samples for debugging
+        if result:
+            samples = list(result.items())[:5]
+            self._log.info(f"Sample market caps: {[(t, f'${m/1e9:.1f}B') for t, m in samples]}")
+        
         return result
