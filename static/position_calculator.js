@@ -37,7 +37,11 @@
     const direction = signal?.direction || "bullish";
     const entry = signal?.levels?.entryTrigger || signal?.entry || 0;
     const stop = signal?.levels?.stopLoss || signal?.stop || 0;
-    const target1 = signal?.levels?.target1 || signal?.target1 || 0;
+    // For Engine 3 (Red Dog mean reversion), prefer targetSma20 over target1 (which is just 1R)
+    // This gives a more realistic risk:reward for mean reversion trades
+    const target1Raw = signal?.levels?.target1 || signal?.target1 || 0;
+    const targetSma20 = signal?.levels?.targetSma20 || 0;
+    const target1 = (targetSma20 > 0 && targetSma20 !== target1Raw) ? targetSma20 : target1Raw;
     const dirClass = direction === "bullish" ? "bullish" : "bearish";
     const dirLabel = direction === "bullish" ? "LONG" : "SHORT";
 
@@ -321,7 +325,10 @@
     // Get trade levels from signal
     const entry = currentSignal?.levels?.entryTrigger || currentSignal?.entry || 0;
     const stop = currentSignal?.levels?.stopLoss || currentSignal?.stop || 0;
-    const target1 = currentSignal?.levels?.target1 || currentSignal?.target1 || 0;
+    // For Engine 3 (Red Dog mean reversion), prefer targetSma20 over target1 (which is just 1R)
+    const target1Raw = currentSignal?.levels?.target1 || currentSignal?.target1 || 0;
+    const targetSma20 = currentSignal?.levels?.targetSma20 || 0;
+    const target1 = (targetSma20 > 0 && targetSma20 !== target1Raw) ? targetSma20 : target1Raw;
     const direction = currentSignal?.direction || "bullish";
 
     // Calculate risk per share
