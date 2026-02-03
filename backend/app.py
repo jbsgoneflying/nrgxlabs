@@ -1500,6 +1500,74 @@ def news_risk(
 
 
 # ---------------------------------------------------------------------------
+# Backtest Engine
+# ---------------------------------------------------------------------------
+
+_backtest_cache: TTLCache = TTLCache(maxsize=20, ttl=60 * 60)  # 1 hour TTL
+_backtest_cache_lock = threading.Lock()
+
+
+@app.get("/api/backtest")
+def backtest(
+    engine: str = Query("engine3", description="engine3 (Red Dog) or engine4 (Ichimoku)"),
+    trades: int = Query(50, ge=10, le=200, description="Number of trades: 25, 50, 100, 200"),
+):
+    """
+    Backtest Engine 3 (Red Dog) or Engine 4 (Ichimoku) using historical A+ signals.
+    
+    Entry: Next day after signal if trigger price is hit
+    Exit: At stop loss or target price
+    Tracks performance segmented by market context alignment (gamma + trend).
+    """
+    from backend.backtest_engine import run_backtest
+    
+    try:
+        # Validate engine
+        eng = engine.lower().strip()
+        if eng not in ("engine3", "engine4"):
+            raise HTTPException(status_code=400, detail="Engine must be 'engine3' or 'engine4'")
+        
+        # Check cache
+        cache_key = (eng, int(trades))
+        with _backtest_cache_lock:
+            cached = _backtest_cache.get(cache_key)
+        if cached is not None:
+            LOG.info(f"Backtest cache hit for {eng} x {trades}")
+            return cached
+
+        client = _get_client_optional()
+        if client is None:
+            raise HTTPException(status_code=503, detail="ORATS unavailable (missing ORATS_TOKEN).")
+
+        result = run_backtest(
+            client=client,
+            engine=eng,
+            trade_count=int(trades),
+            max_workers=10,
+        )
+        
+        payload = result.to_dict()
+        
+        with _backtest_cache_lock:
+            _backtest_cache[cache_key] = payload
+        return payload
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOG.exception("Unhandled failure (backtest)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@app.get("/backtest")
+def backtest_page():
+    """Backtest Engine page for Engine 3/4 historical analysis."""
+    backtest_path = STATIC_DIR / "backtest.html"
+    if not backtest_path.exists():
+        raise HTTPException(status_code=500, detail="Missing static/backtest.html")
+    return FileResponse(str(backtest_path))
+
+
+# ---------------------------------------------------------------------------
 # Engine 3: Red Dog Reversal Scanner
 # ---------------------------------------------------------------------------
 

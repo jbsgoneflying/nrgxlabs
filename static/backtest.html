@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raven-Tech.co · Backtest · Engine 3/4 Historical Analysis</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="Raven-Tech.co — Backtest Engine 3 (Red Dog) and Engine 4 (Ichimoku) with historical A+ signals and performance tracking." />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=9" />
+    <style>
+      /* Backtest specific styles */
+      .controlBar {
+        margin-bottom: 16px;
+      }
+
+      .statsGrid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      @media (max-width: 980px) {
+        .statsGrid { grid-template-columns: repeat(2, 1fr); }
+      }
+
+      @media (max-width: 640px) {
+        .statsGrid { grid-template-columns: 1fr; }
+      }
+
+      .metricCard {
+        padding: 14px;
+        border-radius: var(--radius-card);
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.78);
+      }
+
+      .metricLabel {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--muted);
+      }
+
+      .metricValue {
+        font-size: 24px;
+        font-weight: 800;
+        margin-top: 4px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      .metricValue.positive { color: #34C759; }
+      .metricValue.negative { color: #FF3B30; }
+      .metricValue.neutral { color: var(--text); }
+
+      .metricCaption {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+
+      /* Comparison Table */
+      .comparisonTable {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+        font-size: 13px;
+      }
+
+      .comparisonTable th,
+      .comparisonTable td {
+        padding: 12px 16px;
+        text-align: left;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .comparisonTable th {
+        font-weight: 700;
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .comparisonTable td {
+        font-weight: 600;
+      }
+
+      .comparisonTable tr:last-child td {
+        border-bottom: none;
+      }
+
+      .comparisonTable .positive { color: #34C759; }
+      .comparisonTable .negative { color: #FF3B30; }
+
+      /* Trade Log */
+      .tradeLog {
+        margin-top: 12px;
+        max-height: 400px;
+        overflow-y: auto;
+      }
+
+      .tradeRow {
+        display: grid;
+        grid-template-columns: 80px 80px 60px 80px 80px 80px 80px 100px;
+        gap: 8px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+        font-size: 12px;
+        align-items: center;
+      }
+
+      .tradeRow:hover {
+        background: rgba(0, 0, 0, 0.02);
+      }
+
+      .tradeLogHeader {
+        font-weight: 700;
+        color: var(--muted);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        background: rgba(0, 0, 0, 0.02);
+        position: sticky;
+        top: 0;
+      }
+
+      .tradeTicker {
+        font-weight: 800;
+      }
+
+      .tradeDirection {
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .tradeDirection.bullish {
+        background: rgba(52, 199, 89, 0.12);
+        color: #1d6f3a;
+      }
+
+      .tradeDirection.bearish {
+        background: rgba(255, 59, 48, 0.12);
+        color: #8b2920;
+      }
+
+      .tradeResult {
+        font-weight: 700;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      .tradeResult.win { color: #34C759; }
+      .tradeResult.loss { color: #FF3B30; }
+
+      .tradeContext {
+        display: flex;
+        gap: 4px;
+      }
+
+      .contextBadge {
+        width: 18px;
+        height: 18px;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+      }
+
+      .contextBadge.active {
+        background: rgba(52, 199, 89, 0.15);
+        color: #34C759;
+      }
+
+      .contextBadge.inactive {
+        background: rgba(142, 142, 147, 0.12);
+        color: var(--muted);
+      }
+
+      .emptyState {
+        padding: 40px 20px;
+        text-align: center;
+        color: var(--muted);
+      }
+
+      .emptyStateTitle {
+        font-size: 16px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
+          <div class="appHeaderText">
+            <div class="appTitle">Raven-Tech.co</div>
+            <div class="appSubtitle">Backtest · Engine 3/4 historical A+ signal performance</div>
+          </div>
+        </div>
+        <div class="tbInputs topNav">
+          <a class="primaryButton navBtn" href="/breach" style="text-decoration:none;" data-tooltip="Single-ticker earnings hold risk analysis with Monte Carlo simulation">Engine 1</a>
+          <a class="primaryButton navBtn" id="engine2Link" href="/spx" style="text-decoration:none;" data-tooltip="SPX/SPY 0DTE iron condor scanner with dealer gamma overlay">Engine 2</a>
+          <a class="primaryButton navBtn" href="/red-dog" style="text-decoration:none;" data-tooltip="Red Dog Reversal mean reversion scanner (failed breakout/breakdown)">Engine 3</a>
+          <a class="primaryButton navBtn" href="/ichimoku" style="text-decoration:none;" data-tooltip="Ichimoku Cloud continuation scanner (Kijun pullback + Tenkan reclaim)">Engine 4</a>
+          <a class="primaryButton navBtn" href="/compare" style="text-decoration:none;" data-tooltip="Compare multiple tickers side-by-side for earnings hold risk">Compare</a>
+          <a class="primaryButton navBtn" href="/news-risk" style="text-decoration:none;" data-tooltip="Weekly macro events, analyst ratings, and headlines with historical SPX impact">News Risk</a>
+          <a class="primaryButton navBtn" href="/backtest" style="text-decoration:none; background: rgba(52, 199, 89, 0.12); border-color: rgba(52, 199, 89, 0.25);" data-tooltip="Backtest Engine 3/4 with historical A+ signals">Backtest</a>
+        </div>
+      </header>
+
+      <!-- Controls -->
+      <section class="controlBar surface">
+        <form id="backtestForm" class="controlBarForm controlBarForm--engine2">
+          <div class="controlGroup">
+            <label class="controlLabel" for="engineSelect">Engine</label>
+            <select id="engineSelect" class="controlSelect">
+              <option value="engine3">Engine 3 · Red Dog Reversal</option>
+              <option value="engine4">Engine 4 · Ichimoku Continuation</option>
+            </select>
+          </div>
+          <div class="controlGroup">
+            <label class="controlLabel" for="tradeCount">Trade Count</label>
+            <select id="tradeCount" class="controlSelect">
+              <option value="25">25 trades</option>
+              <option value="50" selected>50 trades</option>
+              <option value="100">100 trades</option>
+              <option value="200">200 trades</option>
+            </select>
+          </div>
+          <div class="controlSpacer"></div>
+          <button type="submit" class="primaryButton" id="runBtn">
+            <span class="btnText">Run Backtest</span>
+            <span class="btnSpinner hidden"></span>
+          </button>
+        </form>
+      </section>
+
+      <!-- Status -->
+      <section class="surface" id="statusSection">
+        <div id="status" class="status">Select engine and trade count, then click "Run Backtest".</div>
+      </section>
+
+      <!-- Results -->
+      <section class="results hidden" id="results">
+        <!-- Overall Performance -->
+        <section class="surface" id="overallSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Overall Performance
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Performance help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Backtest Methodology</div>
+                  <div class="tipBody">
+                    <p><b>Entry:</b> Day after signal if trigger price is hit</p>
+                    <p><b>Exit:</b> At stop loss or target price (whichever hits first)</p>
+                    <p><b>Signals:</b> A+ only (score >= 75)</p>
+                    <p><b>Engine 3:</b> Uses SMA20 as mean reversion target</p>
+                    <p><b>Engine 4:</b> Uses Target 1 (swing level)</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="overallMeta">—</div>
+          </div>
+          <div class="statsGrid" id="overallStats">
+            <div class="metricCard">
+              <div class="metricLabel">Total Trades</div>
+              <div id="statTotalTrades" class="metricValue neutral">—</div>
+              <div class="metricCaption">Executed signals</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Win Rate</div>
+              <div id="statWinRate" class="metricValue neutral">—</div>
+              <div class="metricCaption" id="statWinLoss">— W / — L</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Total P/L</div>
+              <div id="statTotalPL" class="metricValue neutral">—</div>
+              <div class="metricCaption">Cumulative return</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Avg R-Multiple</div>
+              <div id="statAvgR" class="metricValue neutral">—</div>
+              <div class="metricCaption" id="statAvgWinLoss">Win — / Loss —</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Aligned vs Unaligned Comparison -->
+        <section class="surface" id="comparisonSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Context Alignment Comparison
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Alignment help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">What is "Aligned"?</div>
+                  <div class="tipBody">
+                    <p>A trade is considered <b>aligned</b> when BOTH:</p>
+                    <ul>
+                      <li><b>Gamma Supportive:</b> Dealer gamma is positive (supports mean reversion)</li>
+                      <li><b>Trend Aligned:</b> Signal direction matches SPX 21 EMA trend</li>
+                    </ul>
+                    <p>This comparison shows if trading only when aligned produces better results.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+          </div>
+          <table class="comparisonTable">
+            <thead>
+              <tr>
+                <th>Segment</th>
+                <th>Trades</th>
+                <th>Win Rate</th>
+                <th>Total P/L</th>
+                <th>Avg R</th>
+              </tr>
+            </thead>
+            <tbody id="comparisonBody">
+              <tr>
+                <td><b>Aligned</b> (Gamma + Trend)</td>
+                <td id="alignedTrades">—</td>
+                <td id="alignedWinRate">—</td>
+                <td id="alignedPL">—</td>
+                <td id="alignedAvgR">—</td>
+              </tr>
+              <tr>
+                <td>Unaligned</td>
+                <td id="unalignedTrades">—</td>
+                <td id="unalignedWinRate">—</td>
+                <td id="unalignedPL">—</td>
+                <td id="unalignedAvgR">—</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <!-- Trade Log -->
+        <section class="surface" id="tradeLogSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">Trade Log</h2>
+            <div class="sectionMeta muted" id="tradeLogMeta">—</div>
+          </div>
+          <div class="tradeLog" id="tradeLog">
+            <div class="tradeRow tradeLogHeader">
+              <div>Ticker</div>
+              <div>Date</div>
+              <div>Dir</div>
+              <div>Entry</div>
+              <div>Exit</div>
+              <div>P/L %</div>
+              <div>R</div>
+              <div>Context</div>
+            </div>
+            <!-- Trade rows will be inserted here -->
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/static/ui_kit.js?v=3"></script>
+    <script src="/static/backtest.js?v=1"></script>
+  </body>
+</html>
