@@ -647,23 +647,35 @@ def compute_engine3_scan(
     # Sort by score descending
     signals.sort(key=lambda s: s.score, reverse=True)
     
+    # Check if gamma is supportive (positive gamma = supportive for mean reversion)
+    gamma_supportive = market_gamma.get("environment") == "supportive"
+    
     # Convert signals to dicts and add trend alignment
     def enrich_signal(s: RedDogSignal) -> Dict[str, Any]:
         d = signal_to_dict(s)
         d["trendAlignment"] = get_signal_trend_alignment(s.direction, market_trend)
         return d
     
-    # Categorize
-    a_plus = [enrich_signal(s) for s in signals if s.score >= APLUS_THRESHOLD]
-    standard = [enrich_signal(s) for s in signals if 50 <= s.score < APLUS_THRESHOLD]
-    below_threshold = [enrich_signal(s) for s in signals if s.score < 50]
+    def is_aligned(s: RedDogSignal) -> bool:
+        """Check if signal is fully aligned (gamma + trend)."""
+        if not gamma_supportive:
+            return False
+        trend_info = get_signal_trend_alignment(s.direction, market_trend)
+        return trend_info.get("alignment") == "aligned"
+    
+    # Categorize - ONLY include aligned signals
+    a_plus = [enrich_signal(s) for s in signals if s.score >= APLUS_THRESHOLD and is_aligned(s)]
+    standard = [enrich_signal(s) for s in signals if 50 <= s.score < APLUS_THRESHOLD and is_aligned(s)]
+    below_threshold = [enrich_signal(s) for s in signals if s.score < 50 and is_aligned(s)]
     
     duration_ms = int((time.time() - start_time) * 1000)
+    
+    total_aligned = len(a_plus) + len(standard) + len(below_threshold)
     
     result = ScanResult(
         as_of_date=as_of_str,
         scanned_count=len(universe),
-        setups_found=len(signals),
+        setups_found=total_aligned,  # Only count aligned setups
         a_plus=a_plus,
         standard=standard,
         below_threshold=below_threshold,
@@ -682,7 +694,7 @@ def compute_engine3_scan(
             _scan_cache[cache_key] = result_dict
     
     LOG.info(
-        f"Engine 3 scan complete: {len(signals)} setups found "
+        f"Engine 3 scan complete: {len(signals)} raw setups, {total_aligned} aligned "
         f"({len(a_plus)} A+, {len(standard)} standard) in {duration_ms}ms"
     )
     
