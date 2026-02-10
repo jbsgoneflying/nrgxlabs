@@ -1,0 +1,196 @@
+{
+  "_comment": "Engine 5 Global Lead-Lag asset universe. Primary tickers tried first; fallback used if primary fails validation.",
+  "equity_indices": [
+    {
+      "symbol": "STOXX50E.INDX",
+      "name": "Euro Stoxx 50",
+      "region": "europe",
+      "currency": "EUR",
+      "us_targets": ["XLI", "XLF"],
+      "theme": "european_industrials"
+    },
+    {
+      "symbol": "GDAXI.INDX",
+      "name": "DAX",
+      "region": "europe",
+      "currency": "EUR",
+      "us_targets": ["XLI", "XLF"],
+      "theme": "european_industrials"
+    },
+    {
+      "symbol": "FCHI.INDX",
+      "name": "CAC 40",
+      "region": "europe",
+      "currency": "EUR",
+      "us_targets": ["XLI", "XLF"],
+      "theme": "european_industrials"
+    },
+    {
+      "symbol": "FTSE.INDX",
+      "name": "FTSE 100",
+      "region": "europe",
+      "currency": "GBP",
+      "us_targets": ["XLF", "XLE"],
+      "theme": "european_broad"
+    },
+    {
+      "symbol": "N225.INDX",
+      "name": "Nikkei 225",
+      "region": "asia",
+      "currency": "JPY",
+      "us_targets": ["SMH", "QQQ"],
+      "theme": "japan_tech"
+    },
+    {
+      "symbol": "HSI.INDX",
+      "name": "Hang Seng",
+      "region": "asia",
+      "currency": "HKD",
+      "us_targets": ["FXI", "KWEB"],
+      "theme": "china_broad"
+    },
+    {
+      "symbol": "000001.SHE",
+      "name": "Shanghai Composite",
+      "region": "asia",
+      "currency": "CNY",
+      "us_targets": ["FXI", "KWEB"],
+      "theme": "china_broad"
+    },
+    {
+      "symbol": "AXJO.INDX",
+      "name": "ASX 200",
+      "region": "australia",
+      "currency": "AUD",
+      "us_targets": ["XLB", "XLE"],
+      "theme": "australia_materials"
+    },
+    {
+      "symbol": "GSPC.INDX",
+      "name": "S&P 500",
+      "region": "us",
+      "currency": "USD",
+      "us_targets": ["SPY"],
+      "theme": "us_reference"
+    }
+  ],
+  "fx": [
+    {
+      "symbol": "EURUSD.FOREX",
+      "name": "EUR/USD",
+      "region": "global",
+      "base": "EUR",
+      "quote": "USD",
+      "risk_type": "risk_currency"
+    },
+    {
+      "symbol": "USDJPY.FOREX",
+      "name": "USD/JPY",
+      "region": "global",
+      "base": "USD",
+      "quote": "JPY",
+      "risk_type": "funding_currency"
+    },
+    {
+      "symbol": "AUDUSD.FOREX",
+      "name": "AUD/USD",
+      "region": "global",
+      "base": "AUD",
+      "quote": "USD",
+      "risk_type": "risk_currency"
+    }
+  ],
+  "commodities": [
+    {
+      "symbol": "GLD.US",
+      "name": "Gold (GLD ETF)",
+      "region": "global",
+      "commodity": "gold",
+      "stress_role": "safe_haven"
+    },
+    {
+      "symbol": "USO.US",
+      "name": "Oil (USO ETF)",
+      "region": "global",
+      "commodity": "oil",
+      "stress_role": "cyclical"
+    },
+    {
+      "symbol": "CPER.US",
+      "name": "Copper (CPER ETF)",
+      "region": "global",
+      "commodity": "copper",
+      "stress_role": "cyclical"
+    }
+  ],
+  "sovereign_yields": [
+    {
+      "symbol": "DE10Y.GBOND",
+      "fallback": "EUN5.XETRA",
+      "name": "German Bund 10Y",
+      "region": "europe",
+      "tenor": "10Y"
+    },
+    {
+      "symbol": "JP10Y.GBOND",
+      "fallback": "1321.TSE",
+      "name": "Japan JGB 10Y",
+      "region": "asia",
+      "tenor": "10Y"
+    }
+  ],
+  "macro_indicators": {
+    "countries": ["USA", "DEU", "JPN", "AUS", "GBR", "FRA", "CHN"],
+    "indicators": [
+      "real_interest_rate",
+      "inflation_consumer_prices_annual",
+      "gdp_growth_annual",
+      "unemployment_total_percent"
+    ]
+  },
+  "translation_map": {
+    "_comment": "Maps global themes to US sector ETFs with directional logic.",
+    "european_industrials": {
+      "us_sectors": ["XLI", "XLF"],
+      "logic": "Leader strength in European industrials suggests US industrial and financial follow-through"
+    },
+    "european_broad": {
+      "us_sectors": ["XLF", "XLE"],
+      "logic": "FTSE broad strength maps to UK-weighted financials and energy"
+    },
+    "japan_tech": {
+      "us_sectors": ["SMH", "QQQ"],
+      "logic": "Nikkei tech/semis leadership maps to US semiconductor and tech follow-through"
+    },
+    "china_broad": {
+      "us_sectors": ["FXI", "KWEB"],
+      "logic": "China broad strength maps to US-listed China ETFs"
+    },
+    "australia_materials": {
+      "us_sectors": ["XLB", "XLE"],
+      "logic": "ASX materials leadership maps to US materials and energy"
+    },
+    "commodity_rally": {
+      "us_sectors": ["XLE", "XLB"],
+      "logic": "Broad commodity alignment (oil + copper up) supports energy and materials"
+    },
+    "yen_strength": {
+      "us_sectors": ["XLU", "XLP"],
+      "logic": "Yen strength signals risk-off; defensive US sectors favored",
+      "bearish_targets": ["QQQ"]
+    },
+    "usd_weakness": {
+      "us_sectors": ["EFA", "EEM"],
+      "logic": "USD weakness supports international equities and metals"
+    },
+    "yield_steepening": {
+      "us_sectors": ["XLF"],
+      "logic": "Yield curve steepening supports financials (NIM expansion)"
+    },
+    "yield_flattening": {
+      "us_sectors": ["XLU"],
+      "logic": "Yield curve flattening supports bond proxies and utilities"
+    }
+  },
+  "sentinel_ticker": "STOXX50E.INDX"
+}

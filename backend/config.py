@@ -194,6 +194,21 @@ class FeatureFlags:
     GO_FORCED_FLOW_IMPORTANCE_MED_MIN: int = 3
     GO_FORCED_FLOW_MANUAL_RANGES: Tuple[str, ...] = ()
 
+    # --- Engine 5: Global Lead-Lag Engine (default OFF) ---
+    ENABLE_ENGINE5_LEAD_LAG: bool = False
+    ENGINE5_CACHE_TTL_LATEST: int = 48 * 3600        # 48h Redis TTL for latest snapshots
+    ENGINE5_CACHE_TTL_HISTORY: int = 180 * 86400      # 180d Redis TTL for durable bar history
+    ENGINE5_CORR_WINDOW: int = 20                     # Rolling correlation window (trading days)
+    ENGINE5_CORR_THRESHOLD: float = 0.40              # Min |correlation| for signal
+    ENGINE5_Z_SIGNIFICANT: float = 1.50               # Magnitude z-score threshold
+    ENGINE5_REGIME_STRESSED_THRESHOLD: float = 75.0   # Higher score = more stress
+    ENGINE5_REGIME_RISK_OFF_THRESHOLD: float = 55.0
+    ENGINE5_REGIME_TRANSITIONAL_THRESHOLD: float = 30.0
+    ENGINE5_MAX_LAG_DAYS: int = 5
+    ENGINE5_LOOKBACK_DAYS: int = 60                   # History window for correlations
+    ENGINE5_FRESHNESS_RETRY_COUNT: int = 3            # Data freshness guard retries
+    ENGINE5_FRESHNESS_RETRY_INTERVAL_S: int = 900     # 15 min between retries
+
     # Legal/reg binary (hybrid): deny/allow lists + keywords (comma-separated)
     LEGAL_REG_TICKER_DENYLIST: Tuple[str, ...] = ()
     LEGAL_REG_TICKER_ALLOWLIST: Tuple[str, ...] = ()
@@ -314,6 +329,20 @@ class FeatureFlags:
             GO_FORCED_FLOW_IMPORTANCE_HIGH_MIN=_get_int("GO_FORCED_FLOW_IMPORTANCE_HIGH_MIN", 4),
             GO_FORCED_FLOW_IMPORTANCE_MED_MIN=_get_int("GO_FORCED_FLOW_IMPORTANCE_MED_MIN", 3),
             GO_FORCED_FLOW_MANUAL_RANGES=tuple(_get_csv_list("GO_FORCED_FLOW_MANUAL_RANGES", [])),
+
+            ENABLE_ENGINE5_LEAD_LAG=_get_bool("ENABLE_ENGINE5_LEAD_LAG", False),
+            ENGINE5_CACHE_TTL_LATEST=_get_int("ENGINE5_CACHE_TTL_LATEST", 48 * 3600),
+            ENGINE5_CACHE_TTL_HISTORY=_get_int("ENGINE5_CACHE_TTL_HISTORY", 180 * 86400),
+            ENGINE5_CORR_WINDOW=_get_int("ENGINE5_CORR_WINDOW", 20),
+            ENGINE5_CORR_THRESHOLD=_get_float("ENGINE5_CORR_THRESHOLD", 0.40),
+            ENGINE5_Z_SIGNIFICANT=_get_float("ENGINE5_Z_SIGNIFICANT", 1.50),
+            ENGINE5_REGIME_STRESSED_THRESHOLD=_get_float("ENGINE5_REGIME_STRESSED_THRESHOLD", 75.0),
+            ENGINE5_REGIME_RISK_OFF_THRESHOLD=_get_float("ENGINE5_REGIME_RISK_OFF_THRESHOLD", 55.0),
+            ENGINE5_REGIME_TRANSITIONAL_THRESHOLD=_get_float("ENGINE5_REGIME_TRANSITIONAL_THRESHOLD", 30.0),
+            ENGINE5_MAX_LAG_DAYS=_get_int("ENGINE5_MAX_LAG_DAYS", 5),
+            ENGINE5_LOOKBACK_DAYS=_get_int("ENGINE5_LOOKBACK_DAYS", 60),
+            ENGINE5_FRESHNESS_RETRY_COUNT=_get_int("ENGINE5_FRESHNESS_RETRY_COUNT", 3),
+            ENGINE5_FRESHNESS_RETRY_INTERVAL_S=_get_int("ENGINE5_FRESHNESS_RETRY_INTERVAL_S", 900),
 
             LEGAL_REG_TICKER_DENYLIST=tuple(_get_csv_list("LEGAL_REG_TICKER_DENYLIST", [])),
             LEGAL_REG_TICKER_ALLOWLIST=tuple(_get_csv_list("LEGAL_REG_TICKER_ALLOWLIST", [])),
@@ -455,6 +484,22 @@ class FeatureFlags:
             ("ENGINE4_MAX_WORKERS", int(self.ENGINE4_MAX_WORKERS)),
             ("ENGINE4_MIN_SCORE_DEFAULT", int(self.ENGINE4_MIN_SCORE_DEFAULT)),
             ("ENGINE4_APLUS_THRESHOLD", int(self.ENGINE4_APLUS_THRESHOLD)),
+        )
+
+    def cache_key_engine5(self) -> tuple:
+        """Engine 5 cache fingerprint (Global Lead-Lag Engine)."""
+        return (
+            ("ENABLE_ENGINE5_LEAD_LAG", bool(self.ENABLE_ENGINE5_LEAD_LAG)),
+            ("ENGINE5_CACHE_TTL_LATEST", int(self.ENGINE5_CACHE_TTL_LATEST)),
+            ("ENGINE5_CACHE_TTL_HISTORY", int(self.ENGINE5_CACHE_TTL_HISTORY)),
+            ("ENGINE5_CORR_WINDOW", int(self.ENGINE5_CORR_WINDOW)),
+            ("ENGINE5_CORR_THRESHOLD", float(self.ENGINE5_CORR_THRESHOLD)),
+            ("ENGINE5_Z_SIGNIFICANT", float(self.ENGINE5_Z_SIGNIFICANT)),
+            ("ENGINE5_REGIME_STRESSED_THRESHOLD", float(self.ENGINE5_REGIME_STRESSED_THRESHOLD)),
+            ("ENGINE5_REGIME_RISK_OFF_THRESHOLD", float(self.ENGINE5_REGIME_RISK_OFF_THRESHOLD)),
+            ("ENGINE5_REGIME_TRANSITIONAL_THRESHOLD", float(self.ENGINE5_REGIME_TRANSITIONAL_THRESHOLD)),
+            ("ENGINE5_MAX_LAG_DAYS", int(self.ENGINE5_MAX_LAG_DAYS)),
+            ("ENGINE5_LOOKBACK_DAYS", int(self.ENGINE5_LOOKBACK_DAYS)),
         )
 
 

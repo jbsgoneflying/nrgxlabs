@@ -1885,3 +1885,138 @@ def engine4_ichimoku_ticker(
         raise HTTPException(status_code=500, detail="Internal error") from e
 
 
+# ---------------------------------------------------------------------------
+# Engine 5 – Global Lead-Lag Engine
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/engine5/weekly-ideas")
+async def engine5_weekly_ideas(week: str = ""):
+    """Return the weekly idea output for Engine 5.
+
+    Query param `week` is optional (format: YYYY-Wnn). Defaults to latest.
+    """
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE5_LEAD_LAG:
+        raise HTTPException(status_code=404, detail="Engine 5 is not enabled")
+
+    store = get_store_optional()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    # Load pre-computed components
+    regime_data = store.get_json("engine5:latest:regime")
+    signals_data = store.get_json("engine5:latest:signals")
+    us_bias_data = store.get_json("engine5:latest:us_bias")
+    bars_data = store.get_json("engine5:latest:bars")
+    status_data = store.get_json("engine5:latest:status")
+
+    if not regime_data:
+        raise HTTPException(status_code=404, detail="No Engine 5 data available. Run the nightly pipeline first.")
+
+    # Import here to avoid circular imports at module level
+    from backend.engine5_regime import GlobalRegime
+    from backend.engine5_translation import SectorBias, IndexBias
+    from backend.engine5_idea_generator import generate_weekly_ideas
+
+    regime = GlobalRegime.from_dict(regime_data)
+    signals = signals_data or []
+    bars = bars_data or []
+
+    sector_biases = []
+    index_biases = []
+    if us_bias_data:
+        for sb in us_bias_data.get("sectorBiases", []):
+            sector_biases.append(SectorBias(
+                sector=sb.get("sector", ""),
+                name=sb.get("name", ""),
+                direction=sb.get("direction", "neutral"),
+                confidence=sb.get("confidence", 0),
+                sources=sb.get("sources", []),
+                vol_bias=sb.get("volBias", "neutral"),
+            ))
+        for ib in us_bias_data.get("indexBiases", []):
+            index_biases.append(IndexBias(
+                index=ib.get("index", ""),
+                direction=ib.get("direction", "neutral"),
+                confidence=ib.get("confidence", 0),
+                vol_bias=ib.get("volBias", "neutral"),
+                note=ib.get("note", ""),
+            ))
+
+    date_str = regime_data.get("date", "")
+    ideas = generate_weekly_ideas(
+        date=date_str,
+        signals=signals,
+        regime=regime,
+        sector_biases=sector_biases,
+        index_biases=index_biases,
+        bars=bars,
+    )
+    result = ideas.to_dict()
+    result["pipelineStatus"] = status_data
+    return result
+
+
+@app.get("/api/engine5/regime")
+async def engine5_regime():
+    """Return the current global regime state."""
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE5_LEAD_LAG:
+        raise HTTPException(status_code=404, detail="Engine 5 is not enabled")
+
+    store = get_store_optional()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    regime_data = store.get_json("engine5:latest:regime")
+    if not regime_data:
+        raise HTTPException(status_code=404, detail="No regime data available")
+
+    return regime_data
+
+
+@app.get("/api/engine5/signals")
+async def engine5_signals():
+    """Return the current lead-lag signals (raw, for debugging/transparency)."""
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE5_LEAD_LAG:
+        raise HTTPException(status_code=404, detail="Engine 5 is not enabled")
+
+    store = get_store_optional()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    signals_data = store.get_json("engine5:latest:signals")
+    if not signals_data:
+        raise HTTPException(status_code=404, detail="No signal data available")
+
+    return {"signals": signals_data, "count": len(signals_data)}
+
+
+@app.get("/api/engine5/global-summary")
+async def engine5_global_summary():
+    """Return the latest global bar summary (returns, z-scores per asset)."""
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE5_LEAD_LAG:
+        raise HTTPException(status_code=404, detail="Engine 5 is not enabled")
+
+    store = get_store_optional()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    bars_data = store.get_json("engine5:latest:bars")
+    yields_data = store.get_json("engine5:latest:yields")
+    status_data = store.get_json("engine5:latest:status")
+
+    if not bars_data:
+        raise HTTPException(status_code=404, detail="No global bar data available")
+
+    return {
+        "bars": bars_data,
+        "yields": yields_data,
+        "status": status_data,
+        "assetCount": len(bars_data),
+    }
+
+
