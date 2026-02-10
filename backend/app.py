@@ -542,6 +542,15 @@ def news_risk_page():
     return FileResponse(str(news_risk_path))
 
 
+@app.get("/lead-lag")
+def lead_lag_page():
+    """Engine 5: Global Lead-Lag Engine page."""
+    lead_lag_path = STATIC_DIR / "engine5.html"
+    if not lead_lag_path.exists():
+        raise HTTPException(status_code=500, detail="Missing static/engine5.html")
+    return FileResponse(str(lead_lag_path))
+
+
 @app.get("/api/spx-ic")
 def spx_ic(
     underlying: str = Query("SPX", description="Underlying: SPX|SPY|QQQ"),

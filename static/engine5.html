@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raven-Tech.co · Engine 5 · Global Lead-Lag</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="Raven-Tech.co — Engine 5 Global Lead-Lag regime intelligence, cross-market correlation, and weekly idea generation for US options income harvesting." />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=9" />
+    <style>
+      /* Engine 5 specific styles */
+
+      /* Regime banner */
+      .regimeBanner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 20px;
+        border-radius: var(--radius-card);
+        border: 1px solid var(--border);
+        margin-bottom: 16px;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      .regimeBanner.regime-risk-on {
+        background: rgba(52, 199, 89, 0.08);
+        border-color: rgba(52, 199, 89, 0.25);
+      }
+      .regimeBanner.regime-transitional {
+        background: rgba(255, 204, 0, 0.08);
+        border-color: rgba(255, 204, 0, 0.25);
+      }
+      .regimeBanner.regime-risk-off {
+        background: rgba(255, 149, 0, 0.08);
+        border-color: rgba(255, 149, 0, 0.25);
+      }
+      .regimeBanner.regime-stressed {
+        background: rgba(255, 59, 48, 0.08);
+        border-color: rgba(255, 59, 48, 0.25);
+      }
+      .regimeLabel {
+        font-size: 20px;
+        font-weight: 900;
+        letter-spacing: -0.3px;
+      }
+      .regimeScore {
+        font-size: 14px;
+        font-weight: 700;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: var(--muted);
+      }
+      .regimeMeta {
+        display: flex;
+        gap: 20px;
+        flex-wrap: wrap;
+      }
+      .regimeMetaItem {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .regimeMetaItem b {
+        font-weight: 700;
+        color: var(--heading);
+      }
+
+      /* Stress bar */
+      .stressBarWrap {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 10px;
+      }
+      .stressBarTrack {
+        flex: 1;
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(11, 11, 15, 0.06);
+        overflow: hidden;
+      }
+      .stressBarFill {
+        height: 100%;
+        border-radius: 999px;
+        transition: width 600ms ease;
+      }
+      .stressBarLabel {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--muted);
+        min-width: 42px;
+        text-align: right;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      /* Component pills */
+      .componentGrid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 14px;
+      }
+      @media (max-width: 720px) {
+        .componentGrid { grid-template-columns: repeat(2, 1fr); }
+      }
+      .componentPill {
+        padding: 10px 14px;
+        border-radius: var(--radius-card);
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.60);
+        text-align: center;
+      }
+      .componentPillLabel {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+      }
+      .componentPillValue {
+        font-size: 18px;
+        font-weight: 900;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      /* Sector bias cards */
+      .biasGrid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .biasCard {
+        padding: 14px;
+        border-radius: var(--radius-card);
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.78);
+        transition: background 120ms ease, border-color 120ms ease;
+      }
+      .biasCard:hover {
+        border-color: rgba(15, 23, 42, 0.16);
+        background: rgba(255,255,255,0.88);
+      }
+      .biasCardHeader {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+      .biasCardSymbol {
+        font-size: 16px;
+        font-weight: 900;
+        letter-spacing: -0.2px;
+      }
+      .biasCardName {
+        font-size: 12px;
+        color: var(--muted);
+        font-weight: 600;
+      }
+      .biasCardDir {
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+      }
+      .biasCardDir.bullish {
+        background: rgba(52, 199, 89, 0.14);
+        border: 1px solid rgba(52, 199, 89, 0.30);
+        color: rgba(12, 70, 38, 0.96);
+      }
+      .biasCardDir.bearish {
+        background: rgba(255, 59, 48, 0.14);
+        border: 1px solid rgba(255, 59, 48, 0.30);
+        color: rgba(86, 17, 12, 0.96);
+      }
+      .biasCardDir.neutral {
+        background: rgba(11, 11, 15, 0.06);
+        border: 1px solid rgba(11, 11, 15, 0.12);
+        color: rgba(11, 11, 15, 0.70);
+      }
+      .biasCardRow {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        font-size: 12px;
+        padding: 2px 0;
+      }
+      .biasCardRow .k { color: var(--muted); font-weight: 600; }
+      .biasCardRow .v { font-weight: 700; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .biasCardSources {
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid var(--line);
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+
+      /* Trade idea cards */
+      .ideaGrid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .ideaCard {
+        padding: 16px;
+        border-radius: var(--radius-card);
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.78);
+        transition: background 120ms ease;
+      }
+      .ideaCard.suppressed {
+        opacity: 0.55;
+        border-style: dashed;
+      }
+      .ideaCardHeader {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .ideaCardSymbol {
+        font-size: 18px;
+        font-weight: 900;
+        letter-spacing: -0.2px;
+      }
+      .ideaCardStructure {
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+        background: rgba(0, 122, 255, 0.10);
+        border: 1px solid rgba(0, 122, 255, 0.20);
+        color: rgba(0, 90, 200, 0.95);
+      }
+      .ideaCardBody {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px 16px;
+      }
+      .ideaCardRow {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        font-size: 12px;
+      }
+      .ideaCardRow .k { color: var(--muted); font-weight: 600; }
+      .ideaCardRow .v { font-weight: 700; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .ideaCardNotes {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+      .suppressedBadge {
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 800;
+        text-transform: uppercase;
+        background: rgba(255, 59, 48, 0.10);
+        border: 1px solid rgba(255, 59, 48, 0.25);
+        color: rgba(86, 17, 12, 0.85);
+      }
+
+      /* Global summary bar */
+      .globalSummary {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--body);
+        padding: 14px;
+        background: rgba(255,255,255,0.50);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-card);
+        margin-bottom: 14px;
+        line-height: 1.6;
+      }
+      .globalSummary b {
+        font-weight: 700;
+      }
+
+      /* Suppression list */
+      .suppressionList {
+        margin-top: 12px;
+      }
+      .suppressionItem {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        font-size: 12px;
+        border-radius: 8px;
+        background: rgba(255, 59, 48, 0.06);
+        border: 1px solid rgba(255, 59, 48, 0.15);
+        margin-bottom: 6px;
+      }
+      .suppressionItem .sym {
+        font-weight: 800;
+        min-width: 40px;
+      }
+      .suppressionItem .reason {
+        color: var(--muted);
+        font-weight: 500;
+      }
+
+      /* Index bias row */
+      .indexBiasRow {
+        display: flex;
+        gap: 12px;
+        margin-top: 12px;
+        flex-wrap: wrap;
+      }
+      .indexBiasChip {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 16px;
+        border-radius: var(--radius-card);
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.70);
+        font-size: 13px;
+      }
+      .indexBiasChip .idx {
+        font-weight: 900;
+        font-size: 15px;
+      }
+      .indexBiasChip .dir {
+        font-weight: 700;
+        text-transform: uppercase;
+        font-size: 11px;
+        letter-spacing: 0.5px;
+      }
+      .indexBiasChip .conf {
+        font-size: 11px;
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      /* Stats row */
+      .statsRow {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+      @media (max-width: 720px) {
+        .statsRow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+
+      .emptyState {
+        padding: 48px 20px;
+        text-align: center;
+        color: var(--muted);
+      }
+      .emptyStateTitle {
+        font-size: 16px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+      .emptyStateBody {
+        font-size: 13px;
+        font-weight: 500;
+        max-width: 500px;
+        margin: 0 auto;
+        line-height: 1.6;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
+          <div class="appHeaderText">
+            <div class="appTitle">Raven-Tech.co</div>
+            <div class="appSubtitle">Engine 5 · Global Lead-Lag · Cross-market regime intelligence and weekly income idea generation (EODHD + ORATS)</div>
+          </div>
+        </div>
+        <div class="tbInputs topNav">
+          <a class="primaryButton navBtn" href="/breach" style="text-decoration:none;" data-tooltip="Single-ticker earnings hold risk analysis with Monte Carlo simulation">Engine 1</a>
+          <a class="primaryButton navBtn" id="engine2Link" href="/spx" style="text-decoration:none;" data-tooltip="SPX/SPY 0DTE iron condor scanner with dealer gamma overlay">Engine 2</a>
+          <a class="primaryButton navBtn" href="/compare" style="text-decoration:none;" data-tooltip="Compare multiple tickers side-by-side for earnings hold risk">Compare</a>
+          <a class="primaryButton navBtn" href="/news-risk" style="text-decoration:none;" data-tooltip="Weekly macro events, analyst ratings, and headlines with historical SPX impact">News Risk</a>
+          <a class="primaryButton navBtn" href="/lead-lag" style="text-decoration:none; background: rgba(52, 199, 89, 0.12); border-color: rgba(52, 199, 89, 0.25);" data-tooltip="Global lead-lag regime intelligence and weekly options income ideas">Lead-Lag</a>
+        </div>
+      </header>
+
+      <section class="controlBar" aria-label="Engine 5 Controls">
+        <div class="controlBarForm controlBarForm--engine2" style="justify-content:space-between;">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <button id="refreshBtn" class="primaryButton" type="button">
+              <span class="btnSpinner" aria-hidden="true"></span>
+              Load Latest
+            </button>
+          </div>
+          <div id="pipelineStatus" class="status" style="text-align:right; font-size:12px;">Click "Load Latest" to view the most recent global lead-lag analysis.</div>
+        </div>
+      </section>
+
+      <!-- Results container (hidden until data loads) -->
+      <section class="results hidden" id="results">
+
+        <!-- Regime Banner -->
+        <section id="regimeSection">
+          <div id="regimeBanner" class="regimeBanner regime-transitional">
+            <div>
+              <div id="regimeLabel" class="regimeLabel">—</div>
+              <div id="regimeScore" class="regimeScore">Score: —</div>
+            </div>
+            <div class="regimeMeta" id="regimeMeta"></div>
+          </div>
+          <!-- Stress bar -->
+          <div class="stressBarWrap">
+            <span style="font-size:11px; font-weight:700; color:var(--muted);">Stress</span>
+            <div class="stressBarTrack">
+              <div id="stressBarFill" class="stressBarFill" style="width:0%; background: var(--green);"></div>
+            </div>
+            <span id="stressBarLabel" class="stressBarLabel">0</span>
+          </div>
+          <!-- Components -->
+          <div class="componentGrid" id="componentGrid"></div>
+        </section>
+
+        <!-- Global Summary -->
+        <section class="surface" id="narrativeSection" style="margin-top:16px;">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">Global Signal Summary</h2>
+            <div class="sectionMeta muted" id="narrativeMeta">—</div>
+          </div>
+          <div class="globalSummary" id="narrativeText">—</div>
+        </section>
+
+        <!-- Index Biases -->
+        <section class="surface" id="indexBiasSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Index Bias
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Index bias help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Index Bias</div>
+                  <div class="tipBody">
+                    <p>Broad US index directional bias derived from global cross-market signals and regime state. Confidence reflects the fraction of sector signals in agreement.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+          </div>
+          <div id="indexBiasRow" class="indexBiasRow"></div>
+        </section>
+
+        <!-- Sector Biases -->
+        <section class="surface" id="sectorBiasSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Sector Biases
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Sector bias help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Sector Biases</div>
+                  <div class="tipBody">
+                    <p>US sector ETF biases translated from global leader signals. Each bias shows: direction, confidence, vol bias, and the global sources that contributed.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="sectorMeta">—</div>
+          </div>
+          <div id="sectorBiasGrid" class="biasGrid"></div>
+        </section>
+
+        <!-- Trade Ideas -->
+        <section class="surface" id="ideasSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Weekly Trade Ideas
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Trade ideas help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Weekly Trade Ideas</div>
+                  <div class="tipBody">
+                    <p>Structured ideas for weekly income harvesting. These are <b>model-generated suggestions</b>, not trade orders.</p>
+                    <ul>
+                      <li><b>Structure</b>: Suggested options spread type (credit spread, iron condor, etc.)</li>
+                      <li><b>Confidence</b>: Signal strength weighted by regime</li>
+                      <li><b>ROC Estimate</b>: Model estimate with explicit assumptions (DTE, credit, width)</li>
+                      <li><b>Suppressed</b>: Flagged ideas due to earnings, macro events, or extreme regime stress</li>
+                    </ul>
+                    <p>All ideas require human review before execution.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="ideasMeta">—</div>
+          </div>
+          <div id="ideasGrid" class="ideaGrid"></div>
+        </section>
+
+        <!-- Suppressions -->
+        <section class="surface hidden" id="suppressionsSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">Active Suppressions</h2>
+          </div>
+          <div id="suppressionList" class="suppressionList"></div>
+        </section>
+      </section>
+
+      <!-- Empty State -->
+      <section class="surface hidden" id="emptySection">
+        <div class="emptyState">
+          <div class="emptyStateTitle">No Data Available</div>
+          <div class="emptyStateBody">The nightly Engine 5 pipeline has not run yet, or the feature is disabled. Ensure <code>ENABLE_ENGINE5_LEAD_LAG=1</code> is set and the nightly script has executed successfully.</div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/ui_kit.js?v=3"></script>
+    <script src="/static/engine5.js?v=1"></script>
+  </body>
+</html>
