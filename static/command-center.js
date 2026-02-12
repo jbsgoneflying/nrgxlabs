@@ -109,16 +109,16 @@
       if (regime.iv_stress != null) drivers.push("iv stress: " + regime.iv_stress);
       $("#regimeDrivers").textContent = drivers.join(" · ");
 
-      // Vol state
+      // Vol state (Engine 5 volLeadLag uses: global_vol_direction, us_iv_state, vol_lag_state, structure_bias)
       const vol = data.volState || {};
-      const volDir = vol.direction || vol.vol_direction || "—";
+      const volDir = vol.global_vol_direction || vol.direction || vol.vol_direction || "—";
       $("#volDirection").textContent = volDir;
       const volParts = [];
-      if (vol.us_iv) volParts.push("US IV: " + vol.us_iv);
-      if (vol.lag) volParts.push("Lag: " + vol.lag);
-      if (vol.bias) volParts.push("Bias: " + vol.bias);
+      if (vol.us_iv_state) volParts.push("US IV: " + vol.us_iv_state);
+      if (vol.vol_lag_state) volParts.push("Lag: " + vol.vol_lag_state);
+      if (vol.structure_bias) volParts.push("Bias: " + vol.structure_bias);
       const volNote = volParts.length ? volParts.join(" · ") : "";
-      const volInterp = vol.interpretation || "";
+      const volInterp = vol.interpretation || vol.narrative || "";
       $("#volDetails").textContent = [volNote, volInterp].filter(Boolean).join(" — ");
     } catch (e) {
       console.error("Flow pressure load failed:", e);

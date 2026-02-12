@@ -2249,6 +2249,52 @@ _cc_init_lock = threading.Lock()
 _cc_init_running = False
 
 
+def _emit_sequencer_events_from_snapshot(store, snapshot_id: str) -> None:
+    """Compare new snapshot state to prior state and emit SequencerEvents.
+
+    Mirrors the logic in scripts/refresh_engine5_snapshot.py so the Command
+    Center bootstrap also feeds the Weekly Signal Sequencer.
+    """
+    try:
+        from backend.sequencer import detect_state_changes, current_week_id
+
+        snap = store.get_json(f"engine5:snapshot:{snapshot_id}")
+        if not snap:
+            return
+
+        data = snap.get("data", {})
+        regime = data.get("regime", {})
+        vol = data.get("volLeadLag", {})
+
+        current_state = {
+            "regime": regime.get("label") or regime.get("current_label") or "",
+            "vol_leadlag": vol.get("vol_lag_state") or vol.get("volLagState") or "",
+        }
+
+        prior_raw = store.get_json("sequencer:prior_state")
+        prior_state = prior_raw if isinstance(prior_raw, dict) else {}
+
+        if prior_state:
+            events = detect_state_changes(previous=prior_state, current=current_state)
+            if events:
+                wid = current_week_id()
+                existing_raw = store.get_json(f"sequencer:week:{wid}")
+                existing = existing_raw if isinstance(existing_raw, list) else []
+                for ev in events:
+                    existing.append(ev.to_dict())
+                    LOG.info("Sequencer event: %s (%s -> %s)", ev.event_type, ev.from_state, ev.to_state)
+                store.set_json(f"sequencer:week:{wid}", existing, ttl_s=30 * 86400)
+            else:
+                LOG.info("No sequencer state changes detected.")
+        else:
+            LOG.info("No prior sequencer state; initializing baseline.")
+
+        # Save current state as prior for next run
+        store.set_json("sequencer:prior_state", current_state, ttl_s=7 * 86400)
+    except Exception as e:
+        LOG.warning("Sequencer event emission failed: %s", e)
+
+
 def _ensure_engine5_snapshot(flags) -> dict | None:
     """Return the best Engine 5 snapshot, auto-bootstrapping if needed."""
     store = get_store_optional()
@@ -2257,6 +2303,11 @@ def _ensure_engine5_snapshot(flags) -> dict | None:
 
     snap = _engine5_get_best_snapshot(store, flags)
     if snap is not None:
+        # Even for existing snapshots, ensure sequencer baseline is set
+        meta = snap.get("meta", {})
+        sid = meta.get("snapshot_id") or meta.get("id")
+        if sid:
+            _emit_sequencer_events_from_snapshot(store, sid)
         return snap
 
     # No snapshot → auto-bootstrap pipeline (same logic as the /api/engine5/weekly-ideas endpoint)
@@ -2265,6 +2316,8 @@ def _ensure_engine5_snapshot(flags) -> dict | None:
         from backend.engine5_pipeline import run_pipeline
         exit_code, snapshot_id = run_pipeline(force=True, source="command_center")
         if exit_code == 0 and snapshot_id:
+            # Emit sequencer events from the newly created snapshot
+            _emit_sequencer_events_from_snapshot(store, snapshot_id)
             snap = store.get_json(f"engine5:snapshot:{snapshot_id}")
             return snap
     except Exception as e:
@@ -2433,15 +2486,87 @@ def api_flow_pressure():
     symbols = ["SPX", "QQQ", "XLF", "XLK", "XLE", "XLU", "XLV", "XLI"]
     readings = []
 
+    # Fetch shared vol metrics from ORATS cores (SPY as proxy)
+    shared_iv7 = None
+    shared_iv30 = None
+    shared_rv10 = None
+    shared_adv = None
+    try:
+        client = _get_client_optional()
+        if client:
+            core_rows = client.cores(ticker="SPY", fields="ticker,tradeDate,iv7,iv7d,iv30,iv30d,iv").rows or []
+            if core_rows:
+                row = core_rows[-1] if isinstance(core_rows, list) else core_rows
+                if isinstance(row, dict):
+                    for k in ("iv7", "iv7d"):
+                        v = row.get(k)
+                        if v is not None:
+                            shared_iv7 = float(v) * 100.0  # ORATS returns decimal
+                            break
+                    for k in ("iv30", "iv30d", "iv"):
+                        v = row.get(k)
+                        if v is not None:
+                            shared_iv30 = float(v) * 100.0
+                            break
+                else:
+                    # Row might be an object with attributes
+                    for k in ("iv7", "iv7d"):
+                        v = getattr(row, k, None)
+                        if v is not None:
+                            shared_iv7 = float(v) * 100.0
+                            break
+                    for k in ("iv30", "iv30d", "iv"):
+                        v = getattr(row, k, None)
+                        if v is not None:
+                            shared_iv30 = float(v) * 100.0
+                            break
+
+            # Derive rv10 from Engine 5 vol data if available
+            if vol_data:
+                # Engine 5 vol data may contain realized vol
+                rv_raw = vol_data.get("us_rv10") or vol_data.get("rv10")
+                if rv_raw is not None:
+                    shared_rv10 = float(rv_raw)
+
+            # ADV from SPY volume (liquid enough to always be high)
+            shared_adv = 5_000_000_000.0  # SPY trades ~$30B/day
+    except Exception as e:
+        LOG.debug("Flow Pressure: ORATS cores fetch failed: %s", e)
+
+    # Fetch macro event density from Benzinga
+    event_count_5d = 0
+    high_severity_count = 0
+    try:
+        bz = _get_benzinga_client_optional()
+        if bz:
+            import datetime as _dtm
+            from backend.macro_events import macro_events_by_date
+            today = _dtm.date.today()
+            end_date = today + _dtm.timedelta(days=5)
+            macro_by_date, _, _ = macro_events_by_date(
+                bz=bz, start=today, end=end_date, importance_min=3,
+            )
+            for day_events in macro_by_date.values():
+                for ev in day_events:
+                    event_count_5d += 1
+                    imp = ev.get("importance") or ev.get("severity") or 0
+                    try:
+                        if int(imp) >= 4:
+                            high_severity_count += 1
+                    except (ValueError, TypeError):
+                        pass
+    except Exception as e:
+        LOG.debug("Flow Pressure: Benzinga macro fetch failed: %s", e)
+
     for sym in symbols:
         # Use gamma context from SPX for index symbols, simplified for sectors
         gamma_ctx = None
         try:
-            client = _get_client_optional()
-            if client and sym in ("SPX", "QQQ"):
+            cl = _get_client_optional()
+            if cl and sym in ("SPX", "QQQ"):
                 from backend.dealer_gamma_context import compute_dealer_gamma_context
                 sym_for_strikes = "SPXW" if sym == "SPX" else sym
-                rows = client.live_strikes(ticker=sym_for_strikes, fields="strike,gamma,callOpenInterest,putOpenInterest,spotPrice").rows or []
+                rows = cl.live_strikes(ticker=sym_for_strikes, fields="strike,gamma,callOpenInterest,putOpenInterest,spotPrice").rows or []
                 if rows:
                     gamma_ctx = compute_dealer_gamma_context(rows)
         except Exception:
@@ -2451,8 +2576,12 @@ def api_flow_pressure():
             symbol=sym,
             timestamp=now,
             gamma_ctx=gamma_ctx,
-            event_count_5d=0,
-            high_severity_count=0,
+            iv7=shared_iv7,
+            iv30=shared_iv30,
+            rv10=shared_rv10,
+            adv_20d=shared_adv if sym in ("SPX", "QQQ", "SPY") else None,
+            event_count_5d=event_count_5d,
+            high_severity_count=high_severity_count,
         )
         readings.append(fp)
 
@@ -2591,7 +2720,8 @@ def api_tradable_ideas():
                     cached = v
                     break
             if cached and isinstance(cached, dict):
-                setups = cached.get("watchlist") or cached.get("aPlus", {}).get("setups", [])
+                # Engine 4 returns "actionable" and "structure" lists (not "watchlist"/"aPlus")
+                setups = (cached.get("actionable") or []) + (cached.get("structure") or [])
                 if isinstance(setups, list):
                     for s in setups[:10]:
                         if isinstance(s, dict):

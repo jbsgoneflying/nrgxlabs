@@ -39,7 +39,7 @@
     btn.className = "navHamburger";
     btn.setAttribute("aria-label", "Open navigation");
     btn.innerHTML = '<span></span><span></span><span></span>';
-    header.insertBefore(btn, header.firstChild);
+    header.appendChild(btn);
 
     /* ── Overlay ── */
     var overlay = document.createElement("div");
