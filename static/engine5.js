@@ -563,13 +563,83 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Get Snapshot: smart single-call to the API
+  // Init
   // ---------------------------------------------------------------------------
+
+  // Track last-rendered snapshot metadata for comparison after "Run Update"
+  var lastRenderedMeta = null;
+
+  // ---------------------------------------------------------------------------
+  // Comparison banner: when a new "Run Update" snapshot is weaker, offer
+  // a one-click path back to the best historical snapshot.
+  // ---------------------------------------------------------------------------
+
+  var comparisonBanner = null;
+
+  function ensureComparisonBanner() {
+    if (comparisonBanner) return comparisonBanner;
+    comparisonBanner = document.createElement("div");
+    comparisonBanner.className = "snapshotMeta";
+    comparisonBanner.style.cssText =
+      "background:rgba(255,149,0,0.08);border-color:rgba(255,149,0,0.25);margin-top:8px;display:none;align-items:center;gap:10px;flex-wrap:wrap;";
+    // Insert after snapshotMeta
+    if (snapshotMetaEl && snapshotMetaEl.parentNode) {
+      snapshotMetaEl.parentNode.insertBefore(comparisonBanner, snapshotMetaEl.nextSibling);
+    }
+    return comparisonBanner;
+  }
+
+  function showComparisonBanner(bestMeta) {
+    var banner = ensureComparisonBanner();
+    var bestIdeas = bestMeta.tradeIdeasCount || 0;
+    var bestGrade = bestMeta.grade || "?";
+    var bestId = bestMeta.snapshotId || "unknown";
+    var bestCreated = bestMeta.createdAt
+      ? new Date(bestMeta.createdAt).toLocaleString()
+      : "unknown";
+
+    banner.innerHTML =
+      '<span style="font-size:11px;font-weight:700;color:#995c00;">This run has fewer results than the best snapshot on file.</span>' +
+      '<span class="snapshotMetaSep">|</span>' +
+      '<span style="font-size:11px;color:var(--muted);">Best: <b>Grade ' + esc(bestGrade) + '</b> · ' +
+      bestIdeas + ' ideas · ' + esc(bestCreated) + '</span>' +
+      '<button id="loadBestBtn" class="primaryButton" type="button" ' +
+      'style="font-size:11px;padding:4px 12px;margin-left:auto;">Load Best Snapshot</button>';
+
+    banner.style.display = "flex";
+
+    var loadBestBtn = document.getElementById("loadBestBtn");
+    if (loadBestBtn) {
+      loadBestBtn.addEventListener("click", function (e) {
+        e.preventDefault();
+        banner.style.display = "none";
+        getSnapshot("best");
+      });
+    }
+  }
+
+  function hideComparisonBanner() {
+    if (comparisonBanner) comparisonBanner.style.display = "none";
+  }
+
+  // ---------------------------------------------------------------------------
+  // Enhanced getSnapshot with comparison logic
+  // ---------------------------------------------------------------------------
+
+  var _originalRenderAll = renderAll;
+  renderAll = function (data) {
+    lastRenderedMeta = data.meta || null;
+    _originalRenderAll(data);
+  };
 
   async function getSnapshot(view) {
     var btn = (view === "run") ? runUpdateBtn : snapshotBtn;
     var isRun = (view === "run");
 
+    // Remember the best snapshot's meta before running update
+    var priorBestMeta = (isRun && lastRenderedMeta) ? Object.assign({}, lastRenderedMeta) : null;
+
+    hideComparisonBanner();
     setLoading(true, btn);
     hide(resultsEl);
     hide(emptyEl);
@@ -629,7 +699,29 @@
         window.RavenLoading.setProgress(95, "Rendering results...");
       }
 
-      renderAll(await resp.json());
+      var data = await resp.json();
+      renderAll(data);
+
+      // After "Run Update", compare with best snapshot and show banner if worse
+      if (isRun && data.meta) {
+        var newIdeas = (data.tradeIdeas || []).length;
+        var newGrade = data.meta.grade || "C";
+
+        // Check the embedded bestSnapshotMeta from the API (if present)
+        var bestMeta = data.meta.bestSnapshotMeta || priorBestMeta;
+        if (bestMeta) {
+          var bestIdeas = bestMeta.tradeIdeasCount || 0;
+          var bestGrade = bestMeta.grade || "C";
+
+          // Show banner if new snapshot has fewer ideas or worse grade
+          var newGradeVal = newGrade === "A" ? 3 : (newGrade === "B" ? 2 : 1);
+          var bestGradeVal = bestGrade === "A" ? 3 : (bestGrade === "B" ? 2 : 1);
+
+          if ((bestIdeas > newIdeas && bestIdeas > 0) || (bestGradeVal > newGradeVal && bestIdeas > newIdeas)) {
+            showComparisonBanner(bestMeta);
+          }
+        }
+      }
 
     } catch (err) {
       if (slowTimer) clearTimeout(slowTimer);
@@ -643,7 +735,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Init
+  // Init — auto-load best snapshot on page open
   // ---------------------------------------------------------------------------
 
   if (snapshotBtn) {
@@ -659,4 +751,8 @@
       getSnapshot("run");
     });
   }
+
+  // Auto-load best snapshot on page open so the user immediately sees the
+  // best available analysis without having to click anything.
+  getSnapshot("best");
 })();

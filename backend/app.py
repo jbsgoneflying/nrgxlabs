@@ -2074,6 +2074,10 @@ async def engine5_weekly_ideas(view: str = "best", date: str = ""):
     if view == "run":
         from backend.engine5_pipeline import run_pipeline
 
+        # Capture the current best snapshot BEFORE running, so we can compare
+        best_before = _engine5_get_best_snapshot(store, flags)
+        best_before_meta = best_before.get("meta", {}) if best_before else None
+
         try:
             loop = asyncio.get_event_loop()
             exit_code, snapshot_id = await loop.run_in_executor(
@@ -2090,7 +2094,20 @@ async def engine5_weekly_ideas(view: str = "best", date: str = ""):
         if snap is None:
             raise HTTPException(status_code=500, detail="Pipeline succeeded but snapshot not found.")
 
-        return _engine5_snapshot_response(snap)
+        resp = _engine5_snapshot_response(snap)
+
+        # Embed the prior best snapshot metadata so the frontend can compare
+        # and offer a "load best" option if the new run is sparser.
+        if best_before_meta:
+            new_meta = resp.get("meta", {})
+            best_sid = best_before_meta.get("snapshotId", "")
+            new_sid = new_meta.get("snapshotId", "")
+            # Only attach if the best is different from what we just created
+            if best_sid and best_sid != new_sid:
+                new_meta["bestSnapshotMeta"] = best_before_meta
+                resp["meta"] = new_meta
+
+        return resp
 
     # ---- view=latest  -----------------------------------------------------
     if view == "latest":

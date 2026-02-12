@@ -236,6 +236,19 @@ def run_pipeline(
     sentinel_hist = history.get(sentinel, [])
     is_cold_start = len(sentinel_hist) < flags.ENGINE5_CORR_WINDOW
 
+    # ---------- Enhanced diagnostics: history depth ----------
+    _hist_with_data = sum(1 for v in history.values() if v)
+    _hist_empty = sum(1 for v in history.values() if not v)
+    _hist_min = min((len(v) for v in history.values() if v), default=0)
+    _hist_max = max((len(v) for v in history.values() if v), default=0)
+    LOG.info(
+        "History loaded: %d symbols with data, %d empty.  "
+        "Sentinel (%s) has %d bars.  Range: %d–%d bars.  Cold start: %s",
+        _hist_with_data, _hist_empty, sentinel, len(sentinel_hist),
+        _hist_min, _hist_max, is_cold_start,
+    )
+    # ---------------------------------------------------------
+
     if is_cold_start:
         # Backfill 90 calendar days (~60 trading days) to fill correlation windows
         backfill_days = 90
@@ -273,7 +286,27 @@ def run_pipeline(
             if bars:
                 raw_bars[sym] = bars
 
-    LOG.info("Fetched %d/%d symbols (%d days window)", len(raw_bars), len(eod_symbols), backfill_days)
+    # ---------- Enhanced diagnostics: per-region bar coverage ----------
+    _region_counts: Dict[str, int] = {}
+    _region_missing: Dict[str, List[str]] = {}
+    for entry in eod_symbols:
+        sym = entry["symbol"]
+        region = entry.get("region", "unknown")
+        _region_counts.setdefault(region, 0)
+        _region_missing.setdefault(region, [])
+        if sym in raw_bars:
+            _region_counts[region] += 1
+        else:
+            _region_missing[region].append(sym)
+    LOG.info(
+        "Fetched %d/%d symbols (%d days window).  Per-region: %s",
+        len(raw_bars), len(eod_symbols), backfill_days,
+        {r: f"{c}/{c + len(_region_missing.get(r, []))}" for r, c in _region_counts.items()},
+    )
+    for region, missing in _region_missing.items():
+        if missing:
+            LOG.info("  Missing bars [%s]: %s", region, ", ".join(missing[:10]))
+    # -------------------------------------------------------------------
 
     # Step 3: Data freshness guard
     # For on-demand runs, only retry once with 0 interval to keep it fast
@@ -429,6 +462,27 @@ def run_pipeline(
         date=expected_date.isoformat(),
     )
     LOG.info("Computed %d lead-lag signals", len(signals))
+    # ---------- Enhanced diagnostics: signal breakdown ----------
+    if signals:
+        _sig_dirs: Dict[str, int] = {}
+        _sig_targets: Dict[str, int] = {}
+        for s in signals:
+            d = s.direction
+            _sig_dirs[d] = _sig_dirs.get(d, 0) + 1
+            t = s.follower_symbol
+            _sig_targets[t] = _sig_targets.get(t, 0) + 1
+        LOG.info(
+            "  Signal directions: %s  |  Targets: %s",
+            _sig_dirs, dict(sorted(_sig_targets.items())),
+        )
+    else:
+        LOG.warning(
+            "  No signals produced. Leaders with data: %d, SPY returns: %d, "
+            "corr_window=%d, corr_threshold=%.2f",
+            len(leader_returns), len(follower_returns.get("SPY", [])),
+            flags.ENGINE5_CORR_WINDOW, flags.ENGINE5_CORR_THRESHOLD,
+        )
+    # -----------------------------------------------------------
     signals_json = [s.to_dict() for s in signals]
 
     # Step 8b: Fetch ORATS IV data for regime and idea generation
@@ -520,6 +574,16 @@ def run_pipeline(
         fx_bars=fx_bar_history,
     )
     LOG.info("Generated %d sector biases, %d index biases", len(sector_biases), len(index_biases))
+    # ---------- Enhanced diagnostics: bias breakdown ----------
+    if sector_biases:
+        for sb in sector_biases:
+            LOG.info(
+                "  Sector bias: %s → %s (conf=%d, sources=%d)",
+                sb.sector, sb.direction, sb.confidence, len(sb.sources),
+            )
+    else:
+        LOG.warning("  No sector biases generated from %d signals + overlays.", len(signals))
+    # ----------------------------------------------------------
 
     # Step 10b: Compute Vol Lead-Lag
     vol_result: VolLeadLagResult | None = None
@@ -602,8 +666,25 @@ def run_pipeline(
         vol_leadlag=vol_result,
     )
     ideas_output = ideas.to_dict()
-    LOG.info("Generated weekly ideas: %d trade ideas, %d sector biases",
-             len(ideas_output.get("tradeIdeas", [])), len(ideas_output.get("sectorBiases", [])))
+    _idea_count = len(ideas_output.get("tradeIdeas", []))
+    _bias_count = len(ideas_output.get("sectorBiases", []))
+    LOG.info("Generated weekly ideas: %d trade ideas, %d sector biases", _idea_count, _bias_count)
+    # ---------- Enhanced diagnostics: idea detail ----------
+    for _idea in ideas_output.get("tradeIdeas", []):
+        LOG.info(
+            "  Idea: %s %s conf=%s structure=%s suppressed=%s invalidation=%s",
+            _idea.get("symbol"), _idea.get("directionalLean"),
+            _idea.get("confidence"), _idea.get("structure"),
+            _idea.get("suppressed", False), _idea.get("invalidationStatus", "—"),
+        )
+    if _idea_count == 0:
+        LOG.warning(
+            "  Zero trade ideas.  Input biases=%d (min conf for idea=30). "
+            "Regime=%s (modifier=%.2f).",
+            len(sector_biases), regime.label,
+            regime.to_dict().get("position_size_modifier", 1.0),
+        )
+    # ------------------------------------------------------
 
     # ------------------------------------------------------------------
     # Step 12: Build and persist immutable snapshot
@@ -650,7 +731,12 @@ def run_pipeline(
         LOG.error("Failed to persist snapshot %s", snapshot_id)
         return 1, None
 
-    LOG.info("Engine 5 pipeline complete. snapshot=%s grade=%s date=%s regime=%s signals=%d ideas=%d (%.1fs)",
-             snapshot_id, grade, expected_date, regime.label, len(signals),
-             len(ideas_output.get("tradeIdeas", [])), pipeline_duration)
+    LOG.info(
+        "Engine 5 pipeline complete. snapshot=%s grade=%s completeness=%.2f "
+        "date=%s regime=%s signals=%d biases=%d ideas=%d asof=%s (%.1fs)",
+        snapshot_id, grade, completeness,
+        expected_date, regime.label, len(signals),
+        len(sector_biases), len(ideas_output.get("tradeIdeas", [])),
+        asof_dates, pipeline_duration,
+    )
     return 0, snapshot_id
