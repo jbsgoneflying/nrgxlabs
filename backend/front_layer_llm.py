@@ -219,7 +219,7 @@ def generate_morning_brief(
                 {"role": "user", "content": payload_str},
             ],
             temperature=0.3,
-            max_tokens=1500,
+            max_completion_tokens=1500,
             timeout=45,
             response_format={"type": "json_object"},
         )
@@ -331,7 +331,7 @@ def generate_weekly_roadmap(
                 {"role": "user", "content": payload_str},
             ],
             temperature=0.3,
-            max_tokens=2000,
+            max_completion_tokens=2000,
             timeout=45,
             response_format={"type": "json_object"},
         )
@@ -456,7 +456,7 @@ def generate_asset_insight(
                 {"role": "user", "content": payload_str},
             ],
             temperature=0.4,
-            max_tokens=800,
+            max_completion_tokens=800,
             timeout=30,
             response_format={"type": "json_object"},
         )
@@ -1300,7 +1300,7 @@ def generate_card_insight(
                 {"role": "user", "content": payload_str},
             ],
             temperature=0.4,
-            max_tokens=800,
+            max_completion_tokens=800,
             timeout=30,
             response_format={"type": "json_object"},
         )
