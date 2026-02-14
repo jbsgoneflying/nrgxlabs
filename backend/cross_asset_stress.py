@@ -73,8 +73,8 @@ class CrossAssetStressSnapshot:
 CROSS_ASSET_UNIVERSE = {
     # FX
     "DXY": {
-        "symbol": "DX-Y.NYB",
-        "name": "US Dollar Index",
+        "symbol": "UUP.US",
+        "name": "US Dollar Index (UUP)",
         "asset_class": "fx",
         "stress_direction": "positive",  # DXY up = stress for risk assets
     },

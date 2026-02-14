@@ -3801,13 +3801,11 @@ def api_front_layer_backfill_status():
         has_cross_asset = bool(d.get("cross_asset_stress", {}).get("readings"))
         has_themes = bool(d.get("news_themes"))
         has_regime = d.get("regime", {}).get("state", "Transitional") != "Transitional" or bool(d.get("regime", {}).get("drivers"))
-        is_backfill = bool(d.get("_backfill"))
         days.append({
             "date": date_str,
             "has_cross_asset": has_cross_asset,
             "has_themes": has_themes,
             "has_regime": has_regime,
-            "is_backfill": is_backfill,
         })
 
     sorted_dates = sorted(index)

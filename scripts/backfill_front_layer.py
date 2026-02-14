@@ -439,7 +439,6 @@ def main() -> int:
         # Override generated_at to reflect the actual historical date
         dms_dict = dms.to_dict()
         dms_dict["generated_at"] = f"{day_str}T08:55:00Z"
-        dms_dict["_backfill"] = True
 
         # Detect asymmetries using history built so far
         # (limited for first few days, improves as we go)

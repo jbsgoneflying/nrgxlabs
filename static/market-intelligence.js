@@ -178,11 +178,6 @@
       html += '<div class="miBriefItem"><div class="miBriefLabel">' + f.label + '</div><div class="miBriefText">' + val + '</div></div>';
     });
     briefContent.innerHTML = html;
-
-    // Source badge
-    if (brief._source === "fallback") {
-      briefTs.textContent += " (fallback)";
-    }
   }
 
   /* ── Render: Weekly Roadmap ────────────────────── */
@@ -502,7 +497,6 @@
           var range = data.date_range || {};
           var crossAssetDays = (data.days || []).filter(function (d) { return d.has_cross_asset; }).length;
           var themeDays = (data.days || []).filter(function (d) { return d.has_themes; }).length;
-          var backfillDays = (data.days || []).filter(function (d) { return d.is_backfill; }).length;
           backfillStatus.className = "miBackfillStatus miBackfillStatus--seeded";
           backfillStatus.innerHTML =
             '<span class="miBackfillDot miBackfillDot--green"></span>' +
@@ -511,7 +505,6 @@
             (range.earliest || "?") + ' to ' + (range.latest || "?") + ')' +
             ' &middot; Cross-asset: ' + crossAssetDays + 'd' +
             ' &middot; Themes: ' + themeDays + 'd' +
-            (backfillDays > 0 ? ' &middot; ' + backfillDays + ' backfilled' : '') +
             '</span>';
         } else {
           backfillStatus.className = "miBackfillStatus miBackfillStatus--empty";

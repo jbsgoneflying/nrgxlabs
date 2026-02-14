@@ -109,8 +109,8 @@
       "_comment": "Front Layer: CHF safe-haven proxy"
     },
     {
-      "symbol": "DX-Y.NYB",
-      "name": "US Dollar Index (DXY)",
+      "symbol": "UUP.US",
+      "name": "US Dollar Index (UUP)",
       "region": "global",
       "base": "USD",
       "quote": "basket",
