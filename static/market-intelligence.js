@@ -163,19 +163,36 @@
     }
 
     var fields = [
-      { key: "market_posture",      label: "Market Posture" },
-      { key: "changes_vs_yesterday", label: "What Changed" },
-      { key: "active_themes",       label: "Active Themes" },
-      { key: "cross_asset_signals", label: "Cross-Asset Signals" },
-      { key: "engine_alignment",    label: "Engine Alignment" },
-      { key: "watch_list",          label: "Watch List" },
+      { key: "market_posture",       label: "Market Posture",      cls: "posture", icon: "P" },
+      { key: "changes_vs_yesterday", label: "What Changed",        cls: "changes", icon: "D" },
+      { key: "active_themes",        label: "Active Themes",       cls: "themes",  icon: "T" },
+      { key: "cross_asset_signals",  label: "Cross-Asset Signals", cls: "cross",   icon: "X" },
+      { key: "engine_alignment",     label: "Engine Alignment",    cls: "engines", icon: "E" },
+      { key: "watch_list",           label: "Watch List",          cls: "watch",   icon: "W" },
     ];
 
     var html = "";
     fields.forEach(function (f) {
       var val = brief[f.key] || "";
       if (typeof val === "object") val = JSON.stringify(val);
-      html += '<div class="miBriefItem"><div class="miBriefLabel">' + f.label + '</div><div class="miBriefText">' + val + '</div></div>';
+
+      // Strip any leftover bracket citations like [field.name]
+      val = String(val).replace(/\[[\w.]+\]/g, "").replace(/\s{2,}/g, " ").trim();
+
+      var labelHtml = '<span class="miBriefIcon miBriefIcon--' + f.cls + '">' + f.icon + '</span>' +
+                      '<span class="miBriefLabel--' + f.cls + '">' + f.label + '</span>';
+
+      var bodyHtml;
+      if (f.key === "watch_list" && val && val.toLowerCase() !== "none" && val.toLowerCase() !== "nothing flagged.") {
+        var pills = val.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+        bodyHtml = '<div class="miBriefWatchPills">' +
+          pills.map(function (p) { return '<span class="miBriefWatchPill">' + p + '</span>'; }).join("") +
+          '</div>';
+      } else {
+        bodyHtml = '<div class="miBriefText">' + val + '</div>';
+      }
+
+      html += '<div class="miBriefItem"><div class="miBriefLabel">' + labelHtml + '</div>' + bodyHtml + '</div>';
     });
     briefContent.innerHTML = html;
   }
@@ -266,10 +283,16 @@
       { key: "break_the_plan",      label: "What Would Break the Plan" },
     ];
 
+    // Helper: strip bracket citations like [field.name] left over from prior prompt style
+    var strip = function (s) {
+      return String(s).replace(/\[[\w.]+\]/g, "").replace(/\s{2,}/g, " ").trim();
+    };
+
     var html = "";
     sections.forEach(function (s) {
       var val = roadmap[s.key] || "";
       if (typeof val === "object") val = JSON.stringify(val);
+      val = strip(val);
       html += '<div class="miRoadmapSection">' +
         '<div class="miRoadmapHead">' + s.label + '</div>' +
         '<div class="miRoadmapBody">' + val + '</div></div>';
@@ -278,7 +301,7 @@
     var hrd = roadmap.high_risk_days || [];
     if (hrd.length > 0) {
       html += '<div class="miRoadmapSection"><div class="miRoadmapHead">High-Risk Days</div><div class="miRoadmapBody"><ul class="miRoadmapList">';
-      hrd.forEach(function (d) { html += "<li>" + d + "</li>"; });
+      hrd.forEach(function (d) { html += "<li>" + strip(d) + "</li>"; });
       html += "</ul></div></div>";
     }
 
@@ -286,7 +309,7 @@
     if (ef.length > 0) {
       html += '<div class="miRoadmapSection"><div class="miRoadmapHead">Earnings Focus (max 2)</div><div class="miRoadmapBody">';
       ef.forEach(function (t) {
-        html += '<span class="pill pill--blue" style="margin-right:6px;">' + t + '</span>';
+        html += '<span class="pill pill--blue" style="margin-right:6px;">' + strip(t) + '</span>';
       });
       html += "</div></div>";
     }

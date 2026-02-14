@@ -100,18 +100,53 @@
       }
 
       /* ── Brief items ────────────────────────────────────────────── */
-      .miBriefItem { margin-bottom: 10px; font-size: 12px; line-height: 1.6; }
-      .miBriefLabel {
-        font-size: 10px; font-weight: 800; text-transform: uppercase;
-        color: var(--muted); letter-spacing: 0.06em; margin-bottom: 2px;
+      .miBriefItem {
+        padding: 10px 12px; border-radius: 10px;
+        background: var(--hover, rgba(11,11,15,0.03));
+        font-size: 12px; line-height: 1.65;
+        margin-bottom: 6px;
+        transition: background 0.15s ease;
       }
+      .miBriefItem:hover { background: rgba(11,11,15,0.06); }
+      .miBriefLabel {
+        font-size: 9px; font-weight: 800; text-transform: uppercase;
+        letter-spacing: 0.08em; margin-bottom: 4px;
+        display: flex; align-items: center; gap: 6px;
+      }
+      .miBriefLabel--posture { color: #007aff; }
+      .miBriefLabel--changes { color: #ff9f0a; }
+      .miBriefLabel--themes  { color: #af52de; }
+      .miBriefLabel--cross   { color: #30b0c7; }
+      .miBriefLabel--engines { color: #636366; }
+      .miBriefLabel--watch   { color: #ff3b30; }
       .miBriefText { color: var(--text); }
+      .miBriefIcon {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 16px; height: 16px; border-radius: 4px;
+        font-size: 9px; font-weight: 700; color: #fff;
+        flex-shrink: 0;
+      }
+      .miBriefIcon--posture { background: #007aff; }
+      .miBriefIcon--changes { background: #ff9f0a; }
+      .miBriefIcon--themes  { background: #af52de; }
+      .miBriefIcon--cross   { background: #30b0c7; }
+      .miBriefIcon--engines { background: #636366; }
+      .miBriefIcon--watch   { background: #ff3b30; }
+
+      /* Watch list pills */
+      .miBriefWatchPills { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+      .miBriefWatchPill {
+        display: inline-block; padding: 2px 8px; border-radius: 6px;
+        font-size: 10px; font-weight: 700; font-family: 'SF Mono', ui-monospace, monospace;
+        background: rgba(255,59,48,0.08); color: #cc2f26;
+        border: 1px solid rgba(255,59,48,0.12);
+      }
 
       /* Stand-down banner */
       .miStandDown {
         padding: 10px 14px; border-radius: 10px; font-size: 12px;
         background: rgba(255,59,48,0.06); color: #cc2f26;
-        font-weight: 700; margin-bottom: 10px;
+        font-weight: 700; margin-bottom: 8px;
         border: 1px solid rgba(255,59,48,0.10);
       }
       .miStandDown--clear {
