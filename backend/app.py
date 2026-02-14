@@ -68,7 +68,7 @@ from backend.news_theme_intelligence import (
 )
 from backend.front_layer_llm import (
     generate_morning_brief, generate_weekly_roadmap, detect_asymmetries,
-    generate_asset_insight,
+    generate_asset_insight, generate_card_insight,
 )
 
 
@@ -3847,4 +3847,43 @@ def api_front_layer_asset_insight(body: dict):
     dms_dict = dms_dict or {}
 
     insight = generate_asset_insight(asset, dms_dict)
+    return insight
+
+
+@app.post("/api/front-layer/card-insight")
+def api_front_layer_card_insight(body: dict):
+    """Generate a desk-level LLM insight for any MI card type.
+
+    Request body: { "card_type": "composite|theme|regime|flow|asymmetry|diff", "card_data": { ... } }
+    """
+    flags = get_flags()
+    if not flags.ENABLE_FRONT_LAYER or not flags.ENABLE_FRONT_LAYER_LLM:
+        raise HTTPException(status_code=503, detail="Front Layer LLM is disabled.")
+
+    card_type = body.get("card_type", "").strip()
+    card_data = body.get("card_data")
+    valid_types = {
+        "composite", "theme", "regime", "flow", "asymmetry", "diff",
+        "e5_regime", "e5_vol", "e5_narrative", "e5_index_bias",
+        "e5_sector_bias", "e5_trade_idea", "e5_triggers", "e5_component",
+    }
+
+    if card_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"Invalid card_type. Must be one of: {', '.join(sorted(valid_types))}")
+    if not card_data or not isinstance(card_data, dict):
+        raise HTTPException(status_code=400, detail="Missing 'card_data' in request body.")
+
+    # Load today's DMS for context; fall back to client-provided summary
+    today_str = dt.date.today().isoformat()
+    store = get_store_optional()
+    dms_dict = _dms_cache.get(f"dms:{today_str}")
+    if not dms_dict and store:
+        dms_obj = load_dms(today_str, store)
+        if dms_obj:
+            dms_dict = dms_obj.to_dict()
+    if not dms_dict:
+        # Use client-provided context (e.g. Engine 5 data) as fallback
+        dms_dict = body.get("dms_summary") or {}
+
+    insight = generate_card_insight(card_type, card_data, dms_dict)
     return insight

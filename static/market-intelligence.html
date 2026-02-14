@@ -7,78 +7,156 @@
     <meta name="theme-color" content="#f5f5f7" />
     <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
     <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=9" />
+    <link rel="stylesheet" href="/static/styles.css?v=10" />
     <style>
-      /* ── Market Intelligence (using existing app tokens) ────────── */
+      /* ═══════════════════════════════════════════════════════════════
+         Market Intelligence — Raven Tech Design System
+         ═══════════════════════════════════════════════════════════════ */
 
-      .miGrid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
-        margin-top: 12px;
+      /* ── Layout grid ────────────────────────────────────────────── */
+      .mi { padding-bottom: 40px; }
+
+      .miRow {
+        display: grid; gap: 14px; margin-top: 14px;
       }
-      .miGrid--full { grid-column: 1 / -1; }
+      .miRow--2   { grid-template-columns: 1fr 1fr; }
+      .miRow--3   { grid-template-columns: 1fr 1fr 1fr; }
+      .miRow--1   { grid-template-columns: 1fr; }
+      .miRow--brief { grid-template-columns: 3fr 2fr; }
 
-      /* Accent stripes */
-      .miStripe--blue   { border-left: 4px solid var(--blue); }
-      .miStripe--green  { border-left: 4px solid var(--green); }
-      .miStripe--amber  { border-left: 4px solid var(--amber); }
-      .miStripe--red    { border-left: 4px solid var(--red); }
-      .miStripe--purple { border-left: 4px solid #8b5cf6; }
+      @media (max-width: 1100px) {
+        .miRow--3 { grid-template-columns: 1fr 1fr; }
+      }
+      @media (max-width: 900px) {
+        .miRow--2, .miRow--3, .miRow--brief { grid-template-columns: 1fr; }
+      }
 
-      /* Section header */
-      .miSectionHead {
+      /* ── Card (elevated glass) ──────────────────────────────────── */
+      .miCard {
+        background: var(--surface);
+        backdrop-filter: blur(14px) saturate(160%);
+        -webkit-backdrop-filter: blur(14px) saturate(160%);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-card, 18px);
+        padding: 18px 20px 16px;
+        box-shadow: var(--shadow-glass, 0 1px 0 rgba(255,255,255,0.85) inset, 0 10px 30px rgba(15, 20, 30, 0.08));
+        position: relative;
+        transition: box-shadow 0.18s ease;
+      }
+      .miCard:hover {
+        box-shadow: 0 1px 0 rgba(255,255,255,0.85) inset, 0 14px 36px rgba(15, 20, 30, 0.12);
+      }
+
+      /* Accent stripe variants */
+      .miCard--blue   { border-left: 4px solid var(--blue); }
+      .miCard--green  { border-left: 4px solid var(--green); }
+      .miCard--amber  { border-left: 4px solid var(--amber); }
+      .miCard--red    { border-left: 4px solid var(--red); }
+      .miCard--purple { border-left: 4px solid #8b5cf6; }
+      .miCard--dark   { border-left: 4px solid rgba(11,11,15,0.55); }
+
+      /* Clickable affordance */
+      .miCard--click { cursor: pointer; }
+      .miCard--click:hover { box-shadow: 0 1px 0 rgba(255,255,255,0.85) inset, 0 16px 40px rgba(15, 20, 30, 0.14); }
+
+      /* ── Section header ─────────────────────────────────────────── */
+      .miHead {
         display: flex; align-items: center; justify-content: space-between;
-        margin-bottom: 8px;
+        margin-bottom: 10px; gap: 8px;
       }
-      .miSectionTitle {
-        font-size: 13px; font-weight: 800; text-transform: uppercase;
-        letter-spacing: 0.06em; color: var(--muted);
+      .miTitle {
+        font-size: 11px; font-weight: 800; text-transform: uppercase;
+        letter-spacing: 0.08em; color: var(--muted);
       }
-      .miTimestamp {
-        font-size: 10px; color: var(--muted); font-style: italic;
+      .miTs {
+        font-size: 10px; color: var(--muted2, rgba(11,11,15,0.48)); font-style: italic;
       }
 
-      /* Brief items */
+      /* ── Metric display (score + label) ─────────────────────────── */
+      .miMetric {
+        display: flex; align-items: baseline; gap: 10px;
+        margin-bottom: 2px;
+      }
+      .miScore {
+        font-size: 36px; font-weight: 800; letter-spacing: -0.03em;
+        line-height: 1;
+      }
+      .miLabel {
+        font-size: 20px; font-weight: 800; letter-spacing: -0.01em;
+      }
+
+      /* ── Sub-section (engine gates, vol state) ──────────────────── */
+      .miSub {
+        margin-top: 10px; padding-top: 8px;
+        border-top: 1px solid var(--line);
+      }
+      .miSubTitle {
+        font-size: 10px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.06em; color: var(--muted2, rgba(11,11,15,0.48));
+        margin-bottom: 4px;
+      }
+      .miSubBody {
+        font-size: 12px; line-height: 1.5;
+      }
+
+      /* ── Brief items ────────────────────────────────────────────── */
       .miBriefItem { margin-bottom: 10px; font-size: 12px; line-height: 1.6; }
       .miBriefLabel {
         font-size: 10px; font-weight: 800; text-transform: uppercase;
         color: var(--muted); letter-spacing: 0.06em; margin-bottom: 2px;
       }
-      .miBriefText { color: var(--fg); }
-      .miBriefCite { color: var(--blue); font-weight: 600; font-size: 11px; }
+      .miBriefText { color: var(--text); }
 
       /* Stand-down banner */
       .miStandDown {
         padding: 10px 14px; border-radius: 10px; font-size: 12px;
-        background: rgba(255,59,48,0.08); color: #cc2f26;
+        background: rgba(255,59,48,0.06); color: #cc2f26;
         font-weight: 700; margin-bottom: 10px;
+        border: 1px solid rgba(255,59,48,0.10);
       }
       .miStandDown--clear {
-        background: rgba(52,199,89,0.08); color: #1b8a3e;
+        background: rgba(52,199,89,0.06); color: #1b8a3e;
+        border-color: rgba(52,199,89,0.10);
       }
 
-      /* Regime badge (big) */
-      .miRegimeBig {
-        font-size: 22px; font-weight: 800; letter-spacing: -0.01em;
-        margin-right: 8px;
+      /* ── Pattern Library ────────────────────────────────────────── */
+      .miPatternList { display: flex; flex-direction: column; gap: 6px; }
+      .miPatternItem {
+        padding: 10px 12px; border-radius: 10px;
+        background: var(--hover); font-size: 12px;
+        transition: background 0.15s ease, box-shadow 0.15s ease;
+        cursor: pointer;
       }
-      .miRegimeScore {
-        font-size: 32px; font-weight: 800; letter-spacing: -0.02em;
-        margin-right: 10px;
+      .miPatternItem:hover { box-shadow: 0 2px 10px rgba(0,0,0,0.06); }
+      .miPatternItem--match {
+        background: rgba(52,199,89,0.06);
+        border: 1px solid rgba(52,199,89,0.14);
+      }
+      .miPatternName { font-weight: 800; font-size: 13px; }
+      .miPatternDesc { color: var(--muted); font-size: 11px; margin-top: 3px; line-height: 1.45; }
+      .miPatternGuidance {
+        margin-top: 6px; font-size: 11px; color: var(--text);
+        line-height: 1.5; font-weight: 600;
+      }
+      .miPatternConfidence {
+        font-size: 10px; font-weight: 700; color: var(--muted);
+        margin-top: 4px;
       }
 
-      /* Theme cards */
+      /* ── Theme cards ────────────────────────────────────────────── */
       .miThemeCard {
         padding: 10px 12px; border-radius: 10px;
         background: var(--hover); margin-bottom: 8px;
+        transition: box-shadow 0.15s ease;
+        cursor: pointer;
       }
+      .miThemeCard:hover { box-shadow: 0 2px 10px rgba(0,0,0,0.06); }
       .miThemeHeader { display: flex; align-items: center; justify-content: space-between; }
       .miThemeName { font-size: 13px; font-weight: 800; }
       .miThemeIntensity { font-size: 12px; font-weight: 700; }
       .miThemeMeta { font-size: 11px; color: var(--muted); margin-top: 4px; }
       .miThemeBar {
-        height: 6px; border-radius: 3px; background: var(--border);
+        height: 5px; border-radius: 3px; background: var(--border);
         overflow: hidden; margin-top: 6px;
       }
       .miThemeBarFill { height: 100%; border-radius: 3px; transition: width 0.3s; }
@@ -88,88 +166,95 @@
       .accel--falling { color: var(--green); }
       .accel--stable  { color: var(--muted); }
 
-      /* Cross-asset stress grid */
+      /* ── Cross-asset stress grid ────────────────────────────────── */
       .miStressGrid {
-        display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
         gap: 8px;
       }
       .miStressItem {
-        padding: 8px 10px; border-radius: 8px; background: var(--hover);
-        font-size: 12px;
+        padding: 10px 12px; border-radius: 10px; background: var(--hover);
+        font-size: 12px; transition: box-shadow 0.15s ease;
       }
-      .miStressName { font-weight: 800; font-size: 11px; margin-bottom: 4px; }
-      .miStressScore { font-size: 18px; font-weight: 800; }
+      .miStressName { font-weight: 800; font-size: 11px; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+      .miStressScore { font-size: 20px; font-weight: 800; }
       .miStressDir { font-size: 11px; font-weight: 700; }
-      .miStressChange { font-size: 10px; color: var(--muted); }
+      .miStressChange { font-size: 10px; color: var(--muted); margin-top: 2px; }
       .miStressRel { font-size: 10px; margin-top: 2px; }
       .miStressRel--confirming { color: var(--red); font-weight: 700; }
       .miStressRel--diverging  { color: var(--amber); font-weight: 700; }
+      .miStressCard { cursor: pointer; }
+      .miStressCard:hover { box-shadow: 0 2px 10px rgba(0,0,0,0.06); }
 
-      /* Asymmetry radar */
+      /* Composite row */
+      .miStressItem[style*="grid-column"] { cursor: pointer; transition: background 0.15s ease; border-radius: 10px; }
+      .miStressItem[style*="grid-column"]:hover { background: rgba(0,0,0,0.03); }
+
+      /* ── Asymmetry radar ────────────────────────────────────────── */
       .miAsymCard {
         padding: 10px 12px; border-radius: 10px;
         background: var(--hover); margin-bottom: 8px;
         border-left: 3px solid var(--amber);
+        transition: box-shadow 0.15s ease;
+        cursor: pointer;
       }
-      .miAsymType { font-size: 12px; font-weight: 800; }
-      .miAsymDesc { font-size: 11px; color: var(--fg); margin-top: 4px; line-height: 1.5; }
+      .miAsymCard:hover { box-shadow: 0 2px 10px rgba(0,0,0,0.06); }
+      .miAsymType { font-size: 12px; font-weight: 800; text-transform: capitalize; }
+      .miAsymDesc { font-size: 11px; color: var(--text); margin-top: 4px; line-height: 1.5; }
       .miAsymAction {
         font-size: 10px; font-weight: 700; color: var(--amber);
-        margin-top: 6px; text-transform: uppercase;
+        margin-top: 6px; text-transform: uppercase; letter-spacing: 0.04em;
       }
 
-      /* Pill variants */
+      /* ── Pill variants ──────────────────────────────────────────── */
       .pill--green  { background: rgba(52,199,89,0.14); color: #1b8a3e; }
       .pill--amber  { background: rgba(255,149,0,0.14); color: #995c00; }
       .pill--red    { background: rgba(255,59,48,0.14); color: #cc2f26; }
       .pill--blue   { background: rgba(0,122,255,0.12); color: #0060cc; }
       .pill--purple { background: rgba(139,92,246,0.12); color: #6d28d9; }
 
-      /* Refresh button */
+      /* ── Buttons ────────────────────────────────────────────────── */
       .btn--refresh {
         font-size: 12px; font-weight: 700; padding: 7px 16px;
-        border-radius: 8px; border: 1px solid var(--amber);
-        background: rgba(255,149,0,0.08); color: #995c00;
+        border-radius: 10px; border: 1px solid var(--amber);
+        background: rgba(255,149,0,0.06); color: #995c00;
         cursor: pointer; transition: all 0.15s;
       }
-      .btn--refresh:hover { background: rgba(255,149,0,0.18); }
-      .btn--refresh:disabled {
-        opacity: 0.5; cursor: not-allowed;
-      }
-      .btn--refresh.isRefreshing {
-        animation: miPulse 1.2s ease-in-out infinite;
-      }
-      @keyframes miPulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.5; }
-      }
+      .btn--refresh:hover { background: rgba(255,149,0,0.14); }
+      .btn--refresh:disabled { opacity: 0.5; cursor: not-allowed; }
+      .btn--refresh.isRefreshing { animation: miPulseOp 1.2s ease-in-out infinite; }
 
-      /* Refresh banner */
+      .miDiffBtn {
+        font-size: 11px; font-weight: 700; padding: 5px 14px;
+        border-radius: 8px; background: var(--hover); border: 1px solid var(--border);
+        cursor: pointer; color: var(--text); transition: background 0.15s;
+      }
+      .miDiffBtn:hover { background: var(--border); }
+
+      /* ── Banners ────────────────────────────────────────────────── */
       .miRefreshBanner {
-        padding: 8px 14px; border-radius: 8px; font-size: 11px;
-        background: rgba(255,149,0,0.08); color: #995c00;
-        font-weight: 600; margin-top: 8px; display: none;
-        border: 1px solid rgba(255,149,0,0.2);
+        padding: 8px 14px; border-radius: 10px; font-size: 11px;
+        background: rgba(255,149,0,0.06); color: #995c00;
+        font-weight: 600; margin-top: 10px; display: none;
+        border: 1px solid rgba(255,149,0,0.14);
       }
       .miRefreshBanner--ok {
-        background: rgba(52,199,89,0.08); color: #1b8a3e;
-        border-color: rgba(52,199,89,0.2);
+        background: rgba(52,199,89,0.06); color: #1b8a3e;
+        border-color: rgba(52,199,89,0.14);
       }
 
-      /* Backfill status indicator */
       .miBackfillStatus {
-        padding: 8px 14px; border-radius: 8px; font-size: 11px;
-        font-weight: 600; margin-top: 8px;
-        border: 1px solid rgba(0,122,255,0.2);
+        padding: 8px 14px; border-radius: 10px; font-size: 11px;
+        font-weight: 600; margin-top: 10px;
+        border: 1px solid rgba(0,122,255,0.14);
         display: flex; align-items: center; gap: 8px;
       }
       .miBackfillStatus--seeded {
-        background: rgba(52,199,89,0.08); color: #1b8a3e;
-        border-color: rgba(52,199,89,0.2);
+        background: rgba(52,199,89,0.06); color: #1b8a3e;
+        border-color: rgba(52,199,89,0.14);
       }
       .miBackfillStatus--empty {
-        background: rgba(255,149,0,0.08); color: #995c00;
-        border-color: rgba(255,149,0,0.2);
+        background: rgba(255,149,0,0.06); color: #995c00;
+        border-color: rgba(255,149,0,0.14);
       }
       .miBackfillDot {
         width: 8px; height: 8px; border-radius: 50%;
@@ -178,110 +263,7 @@
       .miBackfillDot--green { background: var(--green); }
       .miBackfillDot--amber { background: var(--amber); }
 
-      /* Asset insight popup (dark draggable, matches news-risk pattern) */
-      .miInsightPopup {
-        position: fixed;
-        z-index: 10000;
-        width: 400px;
-        max-height: 80vh;
-        overflow-y: auto;
-        border-radius: 16px;
-        background: rgba(28, 28, 30, 0.98);
-        backdrop-filter: blur(40px) saturate(180%);
-        -webkit-backdrop-filter: blur(40px) saturate(180%);
-        box-shadow:
-          0 20px 60px rgba(0, 0, 0, 0.45),
-          0 0 0 1px rgba(255, 255, 255, 0.08) inset;
-        user-select: none;
-        transition: opacity 0.15s ease;
-        color: #fff;
-        display: none;
-      }
-      .miInsightPopup.isDragging { cursor: grabbing; transition: none; }
-      .miInsightHeader {
-        display: flex; align-items: center; justify-content: space-between;
-        gap: 12px; padding: 14px 16px;
-        background: rgba(255, 255, 255, 0.06);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        cursor: grab;
-      }
-      .miInsightHeader:active { cursor: grabbing; }
-      .miInsightTitle {
-        font-size: 14px; font-weight: 700; line-height: 1.3;
-        color: #fff; flex: 1;
-      }
-      .miInsightClose {
-        width: 24px; height: 24px; border-radius: 6px; border: none;
-        background: rgba(255, 255, 255, 0.12);
-        color: rgba(255, 255, 255, 0.7);
-        font-size: 16px; cursor: pointer;
-        display: flex; align-items: center; justify-content: center;
-        transition: background 0.15s ease;
-      }
-      .miInsightClose:hover {
-        background: rgba(255, 255, 255, 0.20); color: #fff;
-      }
-      .miInsightBody { padding: 16px; }
-      .miInsightSection { margin-bottom: 16px; }
-      .miInsightSection:last-child { margin-bottom: 0; }
-      .miInsightSectionTitle {
-        font-size: 10px; font-weight: 700;
-        color: rgba(255, 255, 255, 0.5);
-        text-transform: uppercase; letter-spacing: 0.5px;
-        margin-bottom: 6px;
-      }
-      .miInsightText {
-        font-size: 12px; font-weight: 500; line-height: 1.5;
-        color: rgba(255, 255, 255, 0.88);
-      }
-      .miInsightMeta {
-        display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
-        margin-bottom: 14px;
-      }
-      .miInsightMetaItem {
-        font-size: 11px; color: rgba(255, 255, 255, 0.6);
-      }
-      .miInsightMetaValue {
-        font-size: 14px; font-weight: 700; color: #fff;
-      }
-      .miInsightLoading {
-        text-align: center; padding: 32px 16px;
-        color: rgba(255, 255, 255, 0.6); font-size: 12px;
-      }
-      .miInsightDot {
-        display: inline-block; width: 6px; height: 6px; border-radius: 50%;
-        background: rgba(255, 255, 255, 0.5); margin: 0 2px;
-        animation: miPulse 1.2s ease-in-out infinite;
-      }
-      .miInsightDot:nth-child(2) { animation-delay: 0.2s; }
-      .miInsightDot:nth-child(3) { animation-delay: 0.4s; }
-      @keyframes miPulse {
-        0%, 100% { opacity: 0.3; } 50% { opacity: 1; }
-      }
-      .miInsightSource {
-        font-size: 10px; color: rgba(255, 255, 255, 0.35);
-        text-align: right; margin-top: 12px; font-style: italic;
-      }
-      /* Make stress cards clickable */
-      .miStressCard { cursor: pointer; transition: box-shadow 0.15s ease; }
-      .miStressCard:hover {
-        box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-      }
-
-      /* Diff toggle */
-      .miDiffBtn {
-        font-size: 11px; font-weight: 700; padding: 4px 12px;
-        border-radius: 6px; background: var(--hover); border: 1px solid var(--border);
-        cursor: pointer; color: var(--fg);
-      }
-      .miDiffBtn:hover { background: var(--border); }
-      .miDiffBadge {
-        display: inline-block; font-size: 9px; font-weight: 700;
-        padding: 1px 5px; border-radius: 4px; margin-left: 4px;
-      }
-      .miDiffBadge--changed { background: rgba(255,149,0,0.14); color: #995c00; }
-
-      /* Roadmap expandable */
+      /* ── Roadmap ────────────────────────────────────────────────── */
       .miRoadmapSection { margin-bottom: 8px; }
       .miRoadmapHead {
         font-size: 11px; font-weight: 800; text-transform: uppercase;
@@ -292,16 +274,81 @@
       .miRoadmapList { padding-left: 16px; margin: 4px 0; }
       .miRoadmapList li { margin-bottom: 4px; }
 
-      /* Empty state */
+      /* ── Diff ────────────────────────────────────────────────────── */
+      .miDiffBadge {
+        display: inline-block; font-size: 9px; font-weight: 700;
+        padding: 1px 5px; border-radius: 4px; margin-left: 4px;
+      }
+      .miDiffBadge--changed { background: rgba(255,149,0,0.14); color: #995c00; }
+      #miDiffContent { cursor: pointer; border-radius: 10px; transition: background 0.15s; }
+      #miDiffContent:hover { background: var(--hover); }
+
+      /* ── Empty state ────────────────────────────────────────────── */
       .miEmpty {
-        text-align: center; padding: 40px 20px; color: var(--muted);
+        text-align: center; padding: 36px 20px; color: var(--muted);
         font-size: 13px;
       }
 
-      /* Responsive */
-      @media (max-width: 900px) {
-        .miGrid { grid-template-columns: 1fr; }
+      /* ── Insight popup (dark draggable) ─────────────────────────── */
+      .miInsightPopup {
+        position: fixed; z-index: 10000;
+        width: 400px; max-height: 80vh; overflow-y: auto;
+        border-radius: 16px;
+        background: rgba(28, 28, 30, 0.98);
+        backdrop-filter: blur(40px) saturate(180%);
+        -webkit-backdrop-filter: blur(40px) saturate(180%);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+        user-select: none; transition: opacity 0.15s ease;
+        color: #fff; display: none;
       }
+      .miInsightPopup.isDragging { cursor: grabbing; transition: none; }
+      .miInsightHeader {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 12px; padding: 14px 16px;
+        background: rgba(255, 255, 255, 0.06);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        cursor: grab;
+      }
+      .miInsightHeader:active { cursor: grabbing; }
+      .miInsightTitle { font-size: 14px; font-weight: 700; line-height: 1.3; color: #fff; flex: 1; }
+      .miInsightClose {
+        width: 24px; height: 24px; border-radius: 6px; border: none;
+        background: rgba(255, 255, 255, 0.12);
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 16px; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        transition: background 0.15s ease;
+      }
+      .miInsightClose:hover { background: rgba(255, 255, 255, 0.20); color: #fff; }
+      .miInsightBody { padding: 16px; }
+      .miInsightSection { margin-bottom: 16px; }
+      .miInsightSection:last-child { margin-bottom: 0; }
+      .miInsightSectionTitle {
+        font-size: 10px; font-weight: 700;
+        color: rgba(255, 255, 255, 0.5);
+        text-transform: uppercase; letter-spacing: 0.5px;
+        margin-bottom: 6px;
+      }
+      .miInsightText { font-size: 12px; font-weight: 500; line-height: 1.5; color: rgba(255, 255, 255, 0.88); }
+      .miInsightMeta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+      .miInsightMetaItem { font-size: 11px; color: rgba(255, 255, 255, 0.6); }
+      .miInsightMetaValue { font-size: 14px; font-weight: 700; color: #fff; }
+      .miInsightLoading { text-align: center; padding: 32px 16px; color: rgba(255, 255, 255, 0.6); font-size: 12px; }
+      .miInsightDot {
+        display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+        background: rgba(255, 255, 255, 0.5); margin: 0 2px;
+        animation: miDotPulse 1.2s ease-in-out infinite;
+      }
+      .miInsightDot:nth-child(2) { animation-delay: 0.2s; }
+      .miInsightDot:nth-child(3) { animation-delay: 0.4s; }
+      .miInsightSource {
+        font-size: 10px; color: rgba(255, 255, 255, 0.35);
+        text-align: right; margin-top: 12px; font-style: italic;
+      }
+
+      /* ── Animations ─────────────────────────────────────────────── */
+      @keyframes miPulseOp { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+      @keyframes miDotPulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
     </style>
   </head>
   <body>
@@ -314,18 +361,18 @@
 
     <div id="ravenTopLoader"></div>
 
-    <main class="container" role="main">
+    <main class="container mi" role="main">
       <header class="appHeader">
         <div class="appBrand">
           <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
           <div class="appHeaderText">
             <div class="appTitle">Raven-Tech.co</div>
-            <div class="appSubtitle">Market Intelligence · Pre-Open Roadmap</div>
+            <div class="appSubtitle">Market Intelligence &middot; Pre-Open Roadmap</div>
           </div>
         </div>
       </header>
 
-      <!-- ── Control Bar ───────── -->
+      <!-- ── Control Bar ─────────────────────────────────────────── -->
       <section class="controlBar" aria-label="Market Intelligence Controls">
         <form id="miForm" class="controlBarForm">
           <div class="controlGroup">
@@ -343,6 +390,7 @@
                       <li><b>Active Themes</b>: Narrative clusters from news.</li>
                       <li><b>Cross-Asset Stress</b>: FX, commodities, crypto, vol.</li>
                       <li><b>Asymmetry Radar</b>: Rare dislocation alerts.</li>
+                      <li><b>Pattern Library</b>: Weekly signal sequence matching.</li>
                     </ul>
                     <p><em>Read-only. No trade recommendations.</em></p>
                   </div>
@@ -352,107 +400,125 @@
           </div>
           <div class="controlActions">
             <button class="miDiffBtn" type="button" id="miDiffToggle">Show Changes</button>
-            <button class="btn btn--refresh" type="button" id="miRefreshBtn" title="Force-pull live data from all engines and data sources. Use during the trading day after major events.">Refresh Live Data</button>
+            <button class="btn btn--refresh" type="button" id="miRefreshBtn" title="Force-pull live data from all engines and data sources.">Refresh Live Data</button>
             <button class="btn btn--primary" type="button" id="miRunBtn">Load Intelligence</button>
           </div>
         </form>
       </section>
 
-      <!-- ── Refresh status banner ───────── -->
+      <!-- ── Status banners ──────────────────────────────────────── -->
       <div class="miRefreshBanner" id="miRefreshBanner"></div>
-
-      <!-- ── Backfill status indicator ───── -->
       <div class="miBackfillStatus" id="miBackfillStatus" style="display:none;"></div>
 
-      <!-- ── Regime + Flow Top Row ───────── -->
-      <div class="miGrid" id="miTopRow" style="display:none;">
-        <div class="card miStripe--blue" id="miRegimeCard">
-          <div class="miSectionHead">
-            <span class="miSectionTitle">Regime State</span>
-            <span class="miTimestamp" id="miRegimeTs"></span>
+      <!-- ── Row 1: Regime + Flow ────────────────────────────────── -->
+      <div class="miRow miRow--2" id="miTopRow" style="display:none;">
+        <div class="miCard miCard--blue miCard--click" id="miRegimeCard" title="Click for desk insight">
+          <div class="miHead">
+            <span class="miTitle">Regime State</span>
+            <span class="miTs" id="miRegimeTs"></span>
           </div>
-          <div>
-            <span class="miRegimeScore" id="miRegimeScore">--</span>
-            <span class="miRegimeBig" id="miRegimeLabel">--</span>
+          <div class="miMetric">
+            <span class="miScore" id="miRegimeScore">--</span>
+            <span class="miLabel" id="miRegimeLabel">--</span>
           </div>
-          <div style="margin-top:6px;">
-            <span class="miSectionTitle">Engine Gates</span>
-            <div id="miEngineGates" style="margin-top:4px;"></div>
+          <div class="miSub">
+            <div class="miSubTitle">Engine Gates</div>
+            <div class="miSubBody" id="miEngineGates"></div>
           </div>
         </div>
-        <div class="card miStripe--green" id="miFlowCard">
-          <div class="miSectionHead">
-            <span class="miSectionTitle">Flow Pressure</span>
+
+        <div class="miCard miCard--green miCard--click" id="miFlowCard" title="Click for desk insight">
+          <div class="miHead">
+            <span class="miTitle">Flow Pressure</span>
           </div>
-          <div>
-            <span class="miRegimeScore" id="miFpScore">--</span>
-            <span class="miRegimeBig" id="miFpLabel">--</span>
+          <div class="miMetric">
+            <span class="miScore" id="miFpScore">--</span>
+            <span class="miLabel" id="miFpLabel">--</span>
           </div>
-          <div style="margin-top:6px;">
-            <span class="miSectionTitle">Vol State</span>
-            <div id="miVolState" style="margin-top:4px; font-size:12px;"></div>
+          <div class="miSub">
+            <div class="miSubTitle">Vol State</div>
+            <div class="miSubBody" id="miVolState"></div>
           </div>
         </div>
       </div>
 
-      <!-- ── Morning Brief ───────── -->
-      <div class="card miGrid--full" id="miBriefCard" style="display:none; margin-top:12px;">
-        <div class="miSectionHead">
-          <span class="miSectionTitle">Morning Brief</span>
-          <span class="miTimestamp" id="miBriefTs"></span>
+      <!-- ── Row 2: Morning Brief + Pattern Library ──────────────── -->
+      <div class="miRow miRow--brief" id="miBriefRow" style="display:none;">
+        <div class="miCard" id="miBriefCard">
+          <div class="miHead">
+            <span class="miTitle">Morning Brief</span>
+            <span class="miTs" id="miBriefTs"></span>
+          </div>
+          <div id="miBriefStandDown"></div>
+          <div id="miBriefContent"></div>
         </div>
-        <div id="miBriefStandDown"></div>
-        <div id="miBriefContent"></div>
+
+        <div class="miCard miCard--dark" id="miPatternCard">
+          <div class="miHead">
+            <span class="miTitle">Pattern Library</span>
+            <span class="miTs" id="miPatternTs">Weekly Sequence</span>
+          </div>
+          <div id="miPatternMatch" style="margin-bottom:10px;"></div>
+          <div class="miPatternList" id="miPatternList">
+            <div class="miEmpty" style="padding:20px;">Loading patterns...</div>
+          </div>
+        </div>
       </div>
 
-      <!-- ── Weekly Roadmap ───────── -->
-      <div class="card miGrid--full" id="miRoadmapCard" style="display:none; margin-top:12px;">
-        <div class="miSectionHead">
-          <span class="miSectionTitle">Weekly Roadmap</span>
-          <span class="miTimestamp" id="miRoadmapTs"></span>
+      <!-- ── Row 3: Weekly Roadmap ───────────────────────────────── -->
+      <div class="miRow miRow--1" id="miRoadmapRow" style="display:none;">
+        <div class="miCard" id="miRoadmapCard">
+          <div class="miHead">
+            <span class="miTitle">Weekly Roadmap</span>
+            <span class="miTs" id="miRoadmapTs"></span>
+          </div>
+          <div id="miRoadmapContent"></div>
         </div>
-        <div id="miRoadmapContent"></div>
       </div>
 
-      <!-- ── Bottom Grid: Themes + Cross-Asset + Asymmetry ───────── -->
-      <div class="miGrid" id="miBottomGrid" style="display:none; margin-top:12px;">
-        <div class="card miStripe--purple">
-          <div class="miSectionHead">
-            <span class="miSectionTitle">Active Themes</span>
+      <!-- ── Row 4: Themes + Cross-Asset Stress ──────────────────── -->
+      <div class="miRow miRow--2" id="miBottomGrid" style="display:none;">
+        <div class="miCard miCard--purple">
+          <div class="miHead">
+            <span class="miTitle">Active Themes</span>
           </div>
           <div id="miThemes"></div>
         </div>
-        <div class="card miStripe--amber">
-          <div class="miSectionHead">
-            <span class="miSectionTitle">Cross-Asset Stress</span>
+        <div class="miCard miCard--amber">
+          <div class="miHead">
+            <span class="miTitle">Cross-Asset Stress</span>
           </div>
           <div id="miStressGrid" class="miStressGrid"></div>
         </div>
       </div>
 
-      <!-- ── Asymmetry Radar ───────── -->
-      <div class="card miGrid--full miStripe--red" id="miAsymCard" style="display:none; margin-top:12px;">
-        <div class="miSectionHead">
-          <span class="miSectionTitle">Asymmetry Radar</span>
-          <span class="pill pill--amber" style="font-size:10px;">MONITOR ONLY</span>
+      <!-- ── Asymmetry Radar ─────────────────────────────────────── -->
+      <div class="miRow miRow--1" style="display:none;" id="miAsymRow">
+        <div class="miCard miCard--red" id="miAsymCard">
+          <div class="miHead">
+            <span class="miTitle">Asymmetry Radar</span>
+            <span class="pill pill--amber" style="font-size:10px;">MONITOR ONLY</span>
+          </div>
+          <div id="miAsymContent"></div>
         </div>
-        <div id="miAsymContent"></div>
       </div>
 
-      <!-- ── Diff Panel ───────── -->
-      <div class="card miGrid--full" id="miDiffPanel" style="display:none; margin-top:12px;">
-        <div class="miSectionHead">
-          <span class="miSectionTitle">Day-over-Day Changes</span>
+      <!-- ── Diff Panel ──────────────────────────────────────────── -->
+      <div class="miRow miRow--1" id="miDiffPanel" style="display:none;">
+        <div class="miCard">
+          <div class="miHead">
+            <span class="miTitle">Day-over-Day Changes</span>
+          </div>
+          <div id="miDiffContent"></div>
         </div>
-        <div id="miDiffContent"></div>
       </div>
 
     </main>
 
-    <!-- ── Asset Insight Popup (dark draggable) ───── -->
+    <!-- ── Insight Popup (dark draggable) ─────────────────────────── -->
     <div class="miInsightPopup" id="miInsightPopup">
       <div class="miInsightHeader" id="miInsightHeader">
-        <span class="miInsightTitle" id="miInsightTitle">Asset Insight</span>
+        <span class="miInsightTitle" id="miInsightTitle">Desk Insight</span>
         <button class="miInsightClose" id="miInsightClose" type="button">&times;</button>
       </div>
       <div class="miInsightBody" id="miInsightBody">

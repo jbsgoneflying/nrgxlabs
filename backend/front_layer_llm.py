@@ -441,6 +441,341 @@ def generate_asset_insight(
 
 
 # ---------------------------------------------------------------------------
+# Generalized Card Insight (desk-level LLM tooltip for any MI card)
+# ---------------------------------------------------------------------------
+
+_CARD_INSIGHT_PROMPTS: Dict[str, str] = {
+    "composite": """You are a senior cross-asset desk strategist.
+
+Given the composite cross-asset stress snapshot (all asset readings, composite score, composite label)
+and the broader DailyMarketState context, produce a desk-ready insight:
+
+1. WHAT THE COMPOSITE IS TELLING US — Is cross-asset stress confirming or contradicting equities right now?
+2. KEY DRIVERS — Which 1-2 asset classes are driving the composite score today and why?
+3. HISTORICAL CONTEXT — Is this composite level unusual? What typically happens at this level?
+4. DESK TAKEAWAY — One sentence: what should the desk understand from this composite reading?
+
+Rules: Never recommend trades. Never mention prices or P&L. Be direct, cite scores. Under 200 words.
+
+Return valid JSON:
+{ "what_its_telling_us": "...", "key_drivers": "...", "historical_context": "...", "desk_takeaway": "..." }""",
+
+    "theme": """You are a senior macro-narrative analyst at a proprietary trading firm.
+
+Given a single news theme cluster (theme name, intensity, acceleration, persistence, affected sectors, keyword hits)
+and the broader DailyMarketState context, produce a desk-ready insight:
+
+1. WHAT THIS THEME MEANS — Plain English: what is this narrative about and why is it showing up?
+2. MARKET IMPACT — How does this type of theme historically affect equities, vol, or sector rotation?
+3. MOMENTUM READ — Is this theme accelerating, fading, or steady? What does the persistence tell us?
+4. DESK TAKEAWAY — One sentence: what should the desk watch for related to this theme?
+
+Rules: Never recommend trades. Be direct, cite intensity/acceleration. Under 200 words.
+
+Return valid JSON:
+{ "what_this_theme_means": "...", "market_impact": "...", "momentum_read": "...", "desk_takeaway": "..." }""",
+
+    "regime": """You are a senior market regime analyst at a proprietary trading firm.
+
+Given the current regime state (score, label, engine gates) and the broader DailyMarketState context,
+produce a desk-ready insight:
+
+1. WHAT THE REGIME IS TELLING US — What does this regime score and label mean in practical terms?
+2. ENGINE IMPLICATIONS — Given the current gate states, which engines should be active and which should be cautious?
+3. REGIME CONTEXT — Is this regime stable, transitioning, or stressed? How long has it persisted?
+4. DESK TAKEAWAY — One sentence: how should the desk think about risk allocation given this regime?
+
+Rules: Never recommend specific trades. Cite the regime score and gate states. Under 200 words.
+
+Return valid JSON:
+{ "what_regime_tells_us": "...", "engine_implications": "...", "regime_context": "...", "desk_takeaway": "..." }""",
+
+    "flow": """You are a senior flow and positioning analyst at a proprietary trading firm.
+
+Given the current flow pressure reading (score, state) and the broader DailyMarketState context,
+produce a desk-ready insight:
+
+1. WHAT FLOW IS TELLING US — What does this flow pressure score and state mean? Is money moving in or out?
+2. FLOW VS REGIME — Is flow confirming or diverging from the regime? What does that divergence imply?
+3. CONTEXT — Is today's flow reading unusual vs recent history? Any inflection signals?
+4. DESK TAKEAWAY — One sentence: what does flow pressure tell the desk about near-term positioning sentiment?
+
+Rules: Never recommend trades. Cite the flow score and regime. Under 200 words.
+
+Return valid JSON:
+{ "what_flow_tells_us": "...", "flow_vs_regime": "...", "context": "...", "desk_takeaway": "..." }""",
+
+    "asymmetry": """You are a senior risk intelligence analyst at a proprietary trading firm.
+
+Given a specific asymmetry signal (type, description, severity, action, sources) and the broader
+DailyMarketState context, produce a desk-ready insight:
+
+1. WHAT THIS ASYMMETRY MEANS — Plain English: what dislocation or divergence has been detected?
+2. WHY IT MATTERS — What is the historical significance of this type of asymmetry?
+3. WHAT TO WATCH — What would confirm or invalidate this signal?
+4. DESK TAKEAWAY — One sentence: how should the desk think about this asymmetry?
+
+Rules: ALWAYS say "Monitor only / No action yet". Never recommend trades. Under 200 words.
+
+Return valid JSON:
+{ "what_this_means": "...", "why_it_matters": "...", "what_to_watch": "...", "desk_takeaway": "..." }""",
+
+    "diff": """You are a senior market intelligence analyst at a proprietary trading firm.
+
+Given the day-over-day changes between yesterday's and today's DailyMarketState (changed fields, old vs new values)
+and today's full DMS context, produce a desk-ready insight:
+
+1. WHAT CHANGED — Summarize the most important changes in plain English. What shifted overnight?
+2. SIGNIFICANCE — Are these changes meaningful or noise? Which changes break from recent patterns?
+3. CASCADING EFFECTS — Do any of these changes affect how the desk should think about other signals?
+4. DESK TAKEAWAY — One sentence: what is the single most important thing that changed?
+
+Rules: Never recommend trades. Be specific about which fields changed and by how much. Under 200 words.
+
+Return valid JSON:
+{ "what_changed": "...", "significance": "...", "cascading_effects": "...", "desk_takeaway": "..." }""",
+
+    # ── Engine 5: Lead-Lag card types ──────────────────────────────────
+
+    "e5_regime": """You are a senior global macro strategist at a proprietary options desk.
+
+Given the Engine 5 Global Regime classification (label, score, stress components for FX, yield,
+commodity, and IV, allowed structures, position size modifier, suppression flags), explain to the desk:
+
+1. WHAT THE REGIME MEANS — What does this regime label and score mean for how the desk trades this week?
+2. STRUCTURE GUIDANCE — Given the allowed structures and position size modifier, what does the desk lean into vs avoid?
+3. STRESS COMPONENTS — Which of the 4 stress components (FX, Yield, Commodity, IV) are driving the regime and why does that matter?
+4. DESK TAKEAWAY — One sentence: how should the desk size and structure given this regime?
+
+Rules: Never recommend specific trades. Cite the stress scores and regime label. Under 250 words.
+
+Return valid JSON:
+{ "what_regime_means": "...", "structure_guidance": "...", "stress_components": "...", "desk_takeaway": "..." }""",
+
+    "e5_vol": """You are a senior volatility strategist at a proprietary options desk.
+
+Given the Engine 5 Vol Lead-Lag data (global vol score, direction, US IV state, vol lag state,
+structure bias, strike width multiplier, vol size multiplier, component z-scores), explain:
+
+1. WHAT VOL IS TELLING US — Is vol leading or lagging the move? Is risk underpriced or overpriced?
+2. STRUCTURE IMPACT — How does the vol lag state affect which option structures the desk should favor?
+3. SIZING IMPLICATIONS — What do the strike width and vol size multipliers mean for position construction?
+4. DESK TAKEAWAY — One sentence: what is vol telling the desk to do or not do right now?
+
+Rules: Never recommend specific trades. Cite vol scores and states. Under 250 words.
+
+Return valid JSON:
+{ "what_vol_tells_us": "...", "structure_impact": "...", "sizing_implications": "...", "desk_takeaway": "..." }""",
+
+    "e5_narrative": """You are a senior global macro strategist at a proprietary options desk.
+
+Given the Engine 5 Global Signal Summary (dominant theme, leaders active, leaders confirming,
+narrative text) and the current regime context, explain:
+
+1. WHAT THE NARRATIVE MEANS — What is the dominant global theme and what is it signaling for US equities?
+2. LEADERSHIP READ — What does the leader count (active vs confirming) tell us about conviction?
+3. CROSS-MARKET CONTEXT — How do the global signals tie into the regime and vol state?
+4. DESK TAKEAWAY — One sentence: what is the global signal telling the desk about positioning this week?
+
+Rules: Never recommend specific trades. Cite the narrative and leadership counts. Under 200 words.
+
+Return valid JSON:
+{ "what_narrative_means": "...", "leadership_read": "...", "cross_market_context": "...", "desk_takeaway": "..." }""",
+
+    "e5_index_bias": """You are a senior index strategist at a proprietary options desk.
+
+Given a single index bias reading (index symbol, direction, confidence, note) from Engine 5's
+global lead-lag analysis, and the broader regime context, explain:
+
+1. WHAT THIS INDEX BIAS MEANS — What is the lead-lag system seeing for this index and why?
+2. CONFIDENCE READ — How strong is this signal? What does the confidence level imply for sizing?
+3. REGIME ALIGNMENT — Does this index bias confirm or diverge from the broader regime?
+4. DESK TAKEAWAY — One sentence: how should the desk think about this index bias for the week?
+
+Rules: Never recommend specific trades. Cite the direction and confidence. Under 180 words.
+
+Return valid JSON:
+{ "what_bias_means": "...", "confidence_read": "...", "regime_alignment": "...", "desk_takeaway": "..." }""",
+
+    "e5_sector_bias": """You are a senior sector rotation analyst at a proprietary options desk.
+
+Given a single sector bias (sector ETF, name, direction, confidence, vol bias, sources) from
+Engine 5's global lead-lag analysis, and the broader regime context, explain:
+
+1. WHAT THIS SECTOR SIGNAL MEANS — What are the global lead-lag signals telling us about this sector?
+2. VOL BIAS IMPACT — How does the vol bias for this sector affect structure selection?
+3. SOURCE ANALYSIS — What do the signal sources tell us about the quality and persistence of this bias?
+4. DESK TAKEAWAY — One sentence: how should the desk think about this sector for the week?
+
+Rules: Never recommend specific trades. Cite the sources and confidence. Under 200 words.
+
+Return valid JSON:
+{ "what_sector_means": "...", "vol_bias_impact": "...", "source_analysis": "...", "desk_takeaway": "..." }""",
+
+    "e5_trade_idea": """You are a senior options strategist at a proprietary desk reviewing a model-generated trade idea.
+
+Given a trade idea from Engine 5 (symbol, structure, directional lean, confidence, regime context,
+source driver, IV rank, expected move, invalidation status, invalidation rules, vol adjustments),
+explain to the desk:
+
+1. IDEA THESIS — What is the lead-lag system seeing that generated this idea? What is the thesis?
+2. STRUCTURE RATIONALE — Why this structure type? How does it fit the regime and vol environment?
+3. RISK MANAGEMENT — What are the invalidation levels and rules? When should this idea be abandoned?
+4. DESK TAKEAWAY — One sentence: is this idea worth desk attention and what would confirm or kill it?
+
+Rules: These are MODEL SUGGESTIONS, never confirmed orders. Say "model suggests" not "you should".
+Cite the confidence, invalidation status, and source driver. Under 250 words.
+
+Return valid JSON:
+{ "idea_thesis": "...", "structure_rationale": "...", "risk_management": "...", "desk_takeaway": "..." }""",
+
+    "e5_triggers": """You are a senior regime transition analyst at a proprietary options desk.
+
+Given the Engine 5 Regime Transition Triggers (top drivers with values, flip-up conditions,
+flip-down conditions, proximity flags, boundary distances), explain:
+
+1. WHERE WE ARE — What are the top drivers of the current regime and how close are we to a flip?
+2. WHAT WOULD FLIP UP — What conditions would push us to a more risk-on regime? How likely?
+3. WHAT WOULD FLIP DOWN — What conditions would push us to a more stressed regime? How likely?
+4. DESK TAKEAWAY — One sentence: how should the desk prepare for a potential regime transition?
+
+Rules: Never recommend specific trades. Cite the boundary distances and proximity flags. Under 250 words.
+
+Return valid JSON:
+{ "where_we_are": "...", "what_flips_up": "...", "what_flips_down": "...", "desk_takeaway": "..." }""",
+
+    "e5_component": """You are a senior cross-asset stress analyst at a proprietary options desk.
+
+Given a single regime stress component (name and score — one of FX Stress, Yield Stress,
+Commodity Stress, or IV Stress) from Engine 5, and the broader regime context, explain:
+
+1. WHAT THIS STRESS READING MEANS — What does this score tell us about conditions in this asset class?
+2. EQUITY TRANSMISSION — How does stress in this asset class historically transmit to US equities and options?
+3. RELATIVE CONTEXT — Is this reading elevated, normal, or low relative to what we typically see?
+4. DESK TAKEAWAY — One sentence: what should the desk watch for in this asset class?
+
+Rules: Never recommend specific trades. Cite the score. Under 180 words.
+
+Return valid JSON:
+{ "what_stress_means": "...", "equity_transmission": "...", "relative_context": "...", "desk_takeaway": "..." }""",
+}
+
+_CARD_INSIGHT_KEYS: Dict[str, set] = {
+    "composite": {"what_its_telling_us", "key_drivers", "historical_context", "desk_takeaway"},
+    "theme": {"what_this_theme_means", "market_impact", "momentum_read", "desk_takeaway"},
+    "regime": {"what_regime_tells_us", "engine_implications", "regime_context", "desk_takeaway"},
+    "flow": {"what_flow_tells_us", "flow_vs_regime", "context", "desk_takeaway"},
+    "asymmetry": {"what_this_means", "why_it_matters", "what_to_watch", "desk_takeaway"},
+    "diff": {"what_changed", "significance", "cascading_effects", "desk_takeaway"},
+    # Engine 5 card types
+    "e5_regime": {"what_regime_means", "structure_guidance", "stress_components", "desk_takeaway"},
+    "e5_vol": {"what_vol_tells_us", "structure_impact", "sizing_implications", "desk_takeaway"},
+    "e5_narrative": {"what_narrative_means", "leadership_read", "cross_market_context", "desk_takeaway"},
+    "e5_index_bias": {"what_bias_means", "confidence_read", "regime_alignment", "desk_takeaway"},
+    "e5_sector_bias": {"what_sector_means", "vol_bias_impact", "source_analysis", "desk_takeaway"},
+    "e5_trade_idea": {"idea_thesis", "structure_rationale", "risk_management", "desk_takeaway"},
+    "e5_triggers": {"where_we_are", "what_flips_up", "what_flips_down", "desk_takeaway"},
+    "e5_component": {"what_stress_means", "equity_transmission", "relative_context", "desk_takeaway"},
+}
+
+
+def generate_card_insight(
+    card_type: str,
+    card_data: dict,
+    dms_summary: dict,
+) -> Dict[str, Any]:
+    """Generate a desk-level LLM insight for any card type.
+
+    Supports Market Intelligence cards (composite, theme, regime, flow, asymmetry,
+    diff) and Engine 5 Lead-Lag cards (e5_regime, e5_vol, e5_narrative,
+    e5_index_bias, e5_sector_bias, e5_trade_idea, e5_triggers, e5_component).
+
+    Args:
+        card_type:   Card type identifier (see _CARD_INSIGHT_PROMPTS keys).
+        card_data:   The specific data for this card.
+        dms_summary: Condensed DailyMarketState or E5 context dict.
+
+    Returns:
+        Dict with insight sections + _source tag.
+    """
+    required_keys = _CARD_INSIGHT_KEYS.get(card_type, set())
+    system_prompt = _CARD_INSIGHT_PROMPTS.get(card_type)
+
+    fallback: Dict[str, Any] = {k: "Insight unavailable." for k in required_keys}
+    fallback["_source"] = "fallback"
+    fallback["_card_type"] = card_type
+
+    if not system_prompt:
+        fallback["_fallback_reason"] = f"Unknown card type: {card_type}"
+        return fallback
+
+    if not _rate_limiter.acquire():
+        LOG.info("Card insight rate-limited for %s", card_type)
+        fallback["_fallback_reason"] = "Rate limited (max 4 calls/minute). Wait a moment and try again."
+        return fallback
+
+    client = _get_openai_client()
+    if client is None:
+        fallback["_fallback_reason"] = "OpenAI client unavailable"
+        return fallback
+
+    # Build compact context
+    context = {
+        "card": card_data,
+        "market": {
+            "regime": dms_summary.get("regime", {}),
+            "flow_pressure": dms_summary.get("flow_pressure", {}),
+            "vol_state": dms_summary.get("vol_state", {}),
+            "composite_stress": dms_summary.get("cross_asset_stress", {}).get("composite_score"),
+            "composite_label": dms_summary.get("cross_asset_stress", {}).get("composite_label"),
+            "active_themes": [
+                {"theme": t.get("theme"), "intensity": t.get("intensity"), "acceleration": t.get("acceleration")}
+                for t in dms_summary.get("news_themes", [])
+                if float(t.get("intensity", 0)) > 10
+            ],
+        },
+    }
+
+    payload_str = json.dumps(context, default=str)
+    model = os.getenv("LLM_MODEL_NARRATIVE", "gpt-4o-mini").strip()
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": payload_str},
+            ],
+            temperature=0.3,
+            max_tokens=400,
+            timeout=12,
+        )
+
+        content = response.choices[0].message.content.strip()
+        result = _parse_llm_json(content)
+
+        if result is None or not required_keys.issubset(set(result.keys())):
+            LOG.warning("Card insight (%s) LLM response missing required keys", card_type)
+            fallback["_fallback_reason"] = "LLM returned invalid JSON"
+            return fallback
+
+        insight: Dict[str, Any] = {}
+        for key in required_keys:
+            val = result.get(key, "")
+            insight[key] = str(val)[:500]
+
+        insight["_source"] = "llm"
+        insight["_card_type"] = card_type
+        return insight
+
+    except Exception as e:
+        reason = f"{type(e).__name__}: {e}"
+        LOG.warning("Card insight (%s) LLM call failed: %s", card_type, reason)
+        fallback["_fallback_reason"] = reason
+        return fallback
+
+
+# ---------------------------------------------------------------------------
 # Asymmetry Radar (deterministic – NOT LLM)
 # ---------------------------------------------------------------------------
 

@@ -1,7 +1,8 @@
-/* ── Raven-Tech Market Intelligence ─────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════════════
+   Raven-Tech · Market Intelligence
    Front Layer: synthesizes all engines into a daily roadmap.
    Read-only. No trade recommendations.
-   ──────────────────────────────────────────────────────────────────── */
+   ═══════════════════════════════════════════════════════════════════════ */
 (function () {
   "use strict";
 
@@ -14,13 +15,16 @@
   var progressFill     = document.getElementById("ravenProgressFill");
   var statusLabel      = document.getElementById("ravenStatus");
 
+  // Layout rows
   var topRow           = document.getElementById("miTopRow");
-  var briefCard        = document.getElementById("miBriefCard");
-  var roadmapCard      = document.getElementById("miRoadmapCard");
+  var briefRow         = document.getElementById("miBriefRow");
+  var roadmapRow       = document.getElementById("miRoadmapRow");
   var bottomGrid       = document.getElementById("miBottomGrid");
+  var asymRow          = document.getElementById("miAsymRow");
   var asymCard         = document.getElementById("miAsymCard");
   var diffPanel        = document.getElementById("miDiffPanel");
 
+  // Card internals
   var regimeScore      = document.getElementById("miRegimeScore");
   var regimeLabel      = document.getElementById("miRegimeLabel");
   var regimeTs         = document.getElementById("miRegimeTs");
@@ -28,26 +32,23 @@
   var fpScore          = document.getElementById("miFpScore");
   var fpLabel          = document.getElementById("miFpLabel");
   var volState         = document.getElementById("miVolState");
+  var briefCard        = document.getElementById("miBriefCard");
   var briefTs          = document.getElementById("miBriefTs");
   var briefStandDown   = document.getElementById("miBriefStandDown");
   var briefContent     = document.getElementById("miBriefContent");
+  var roadmapCard      = document.getElementById("miRoadmapCard");
   var roadmapTs        = document.getElementById("miRoadmapTs");
   var roadmapContent   = document.getElementById("miRoadmapContent");
   var themesContainer  = document.getElementById("miThemes");
   var stressGrid       = document.getElementById("miStressGrid");
   var asymContent      = document.getElementById("miAsymContent");
   var diffContent      = document.getElementById("miDiffContent");
+  var patternList      = document.getElementById("miPatternList");
+  var patternMatch     = document.getElementById("miPatternMatch");
 
   var showDiff = false;
 
   /* ── Helpers ──────────────────────────────────────── */
-  function h(tag, cls, html) {
-    var el = document.createElement(tag);
-    if (cls) el.className = cls;
-    if (html !== undefined) el.innerHTML = html;
-    return el;
-  }
-
   function pillClass(label) {
     var l = (label || "").toLowerCase().replace(/[^a-z]/g, "");
     if (l === "riskon")     return "pill pill--green";
@@ -97,7 +98,6 @@
   function showOverlay() { if (overlay) overlay.style.display = "flex"; }
   function hideOverlay() { if (overlay) overlay.style.display = "none"; }
 
-  /* ── Data fetch ──────────────────────────────────── */
   function fetchJSON(url) {
     return fetch(url).then(function (r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
@@ -105,17 +105,19 @@
     });
   }
 
-  /* ── Render: Regime + Flow Pressure ─────────────── */
+  /* ═══════════════════════════════════════════════════════════════════
+     Render: Regime + Flow Pressure
+     ═══════════════════════════════════════════════════════════════════ */
   function renderDMS(dms) {
+    _lastDms = dms;
     topRow.style.display = "grid";
 
     var regime = dms.regime || {};
     regimeScore.textContent = (regime.score || 0).toFixed(0);
     regimeLabel.textContent = regime.state || "--";
-    regimeLabel.className = "miRegimeBig " + pillClass(regime.state).replace("pill ", "");
+    regimeLabel.className = "miLabel " + pillClass(regime.state).replace("pill ", "");
     regimeTs.textContent = fmt(dms.generated_at);
 
-    // Engine gates
     var gates = dms.engine_gates || {};
     var gatesHtml = "";
     var gateNames = { earnings: "Earnings", red_dog: "Red Dog", ichimoku: "Ichimoku", index_income: "Index Income" };
@@ -126,12 +128,10 @@
     }
     engineGates.innerHTML = gatesHtml;
 
-    // Flow pressure
     var fp = dms.flow_pressure || {};
     fpScore.textContent = (fp.score || 0).toFixed(0);
     fpLabel.textContent = fp.state || "--";
 
-    // Vol state
     var vs = dms.vol_state || {};
     volState.innerHTML =
       '<span style="font-weight:700;">Term:</span> ' + (vs.term_structure || "--") +
@@ -139,22 +139,22 @@
       ' &nbsp; <span style="font-weight:700;">Level:</span> ' + ((vs.level || 0).toFixed(1));
   }
 
-  /* ── Render: Morning Brief ─────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════════
+     Render: Morning Brief
+     ═══════════════════════════════════════════════════════════════════ */
   function renderBrief(brief) {
-    briefCard.style.display = "block";
+    briefRow.style.display = "grid";
     var isFallback = brief._source === "fallback";
     briefTs.textContent = fmt(brief._generated_at) + (isFallback ? " (fallback)" : "");
 
-    // If fallback, show the reason prominently
     if (isFallback && brief._fallback_reason) {
-      briefStandDown.innerHTML = '<div class="miStandDown" style="background:rgba(255,149,0,0.08);color:#995c00;">' +
+      briefStandDown.innerHTML = '<div class="miStandDown" style="background:rgba(255,149,0,0.06);color:#995c00;border:1px solid rgba(255,149,0,0.14);">' +
         '<b>LLM unavailable:</b> ' + brief._fallback_reason +
         '<br><small>Showing placeholder text. Fix the issue and click Refresh Live Data.</small></div>';
       briefContent.innerHTML = "";
       return;
     }
 
-    // Stand-down banner
     var sd = brief.stand_down || "";
     if (sd && sd.toLowerCase().indexOf("no stand-down") === -1 && sd.toLowerCase().indexOf("not required") === -1) {
       briefStandDown.innerHTML = '<div class="miStandDown">' + sd + '</div>';
@@ -163,12 +163,12 @@
     }
 
     var fields = [
-      { key: "market_posture",     label: "Market Posture" },
+      { key: "market_posture",      label: "Market Posture" },
       { key: "changes_vs_yesterday", label: "What Changed" },
-      { key: "active_themes",     label: "Active Themes" },
+      { key: "active_themes",       label: "Active Themes" },
       { key: "cross_asset_signals", label: "Cross-Asset Signals" },
-      { key: "engine_alignment",   label: "Engine Alignment" },
-      { key: "watch_list",         label: "Watch List" },
+      { key: "engine_alignment",    label: "Engine Alignment" },
+      { key: "watch_list",          label: "Watch List" },
     ];
 
     var html = "";
@@ -180,13 +180,78 @@
     briefContent.innerHTML = html;
   }
 
-  /* ── Render: Weekly Roadmap ────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════════
+     Render: Pattern Library
+     ═══════════════════════════════════════════════════════════════════ */
+  var _lastPatterns = {};
+  var _lastPatternMatch = {};
+
+  function loadPatterns() {
+    fetchJSON("/api/command-center/sequencer")
+      .then(function (data) {
+        var patterns = data.patterns || {};
+        var seq = data.sequence || {};
+        var pm = seq.matched_pattern || {};
+        _lastPatterns = patterns;
+        _lastPatternMatch = pm;
+        renderPatterns(patterns, pm);
+      })
+      .catch(function () {
+        if (patternList) patternList.innerHTML = '<div class="miEmpty" style="padding:16px;">Pattern data unavailable.</div>';
+      });
+  }
+
+  function renderPatterns(patterns, matched) {
+    if (!patternList) return;
+
+    // Matched pattern summary
+    if (patternMatch) {
+      if (matched.label) {
+        var guidanceParts = [];
+        var favored = matched.favored_play_types || [];
+        if (favored.length > 0) {
+          guidanceParts.push("Favored: " + favored.map(function (f) { return f.replace(/_/g, " "); }).join(", "));
+        }
+        if (matched.primary_risk) {
+          guidanceParts.push("Risk: " + matched.primary_risk);
+        }
+        patternMatch.innerHTML =
+          '<div style="padding:10px 12px;border-radius:10px;background:rgba(52,199,89,0.06);border:1px solid rgba(52,199,89,0.14);">' +
+          '<div style="font-size:13px;font-weight:800;">' + matched.label +
+          ' <span class="pill pill--green" style="font-size:9px;margin-left:4px;">ACTIVE MATCH</span></div>' +
+          (matched.confidence != null ? '<div class="miPatternConfidence">Confidence: ' + matched.confidence + '%</div>' : '') +
+          (guidanceParts.length ? '<div class="miPatternGuidance">' + guidanceParts.join(' &middot; ') + '</div>' : '') +
+          '</div>';
+      } else {
+        patternMatch.innerHTML =
+          '<div style="padding:8px 12px;border-radius:10px;background:var(--hover);font-size:11px;color:var(--muted);">' +
+          'No pattern matched this week. Events populate as regime and vol states change.</div>';
+      }
+    }
+
+    // Pattern list
+    var html = '';
+    for (var key in patterns) {
+      var p = patterns[key];
+      var isMatch = matched.key === key;
+      html += '<div class="miPatternItem' + (isMatch ? ' miPatternItem--match' : '') + '" data-pattern-key="' + key + '" title="Click for desk insight">' +
+        '<div class="miPatternName">' + (p.label || key) +
+        (isMatch ? ' <span class="pill pill--green" style="font-size:9px;">MATCH</span>' : '') +
+        '</div>' +
+        '<div class="miPatternDesc">' + (p.description || "") + '</div>' +
+      '</div>';
+    }
+    patternList.innerHTML = html;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     Render: Weekly Roadmap
+     ═══════════════════════════════════════════════════════════════════ */
   function renderRoadmap(roadmap) {
-    roadmapCard.style.display = "block";
+    roadmapRow.style.display = "grid";
     var isFallback = roadmap._source === "fallback";
     roadmapTs.textContent = fmt(roadmap._generated_at) + (isFallback ? " (fallback)" : "");
 
-    // If fallback, show the reason instead of placeholder text
     if (isFallback && roadmap._fallback_reason) {
       roadmapContent.innerHTML = '<div style="padding:8px 0;color:#995c00;font-size:12px;">' +
         '<b>LLM unavailable:</b> ' + roadmap._fallback_reason + '</div>';
@@ -210,7 +275,6 @@
         '<div class="miRoadmapBody">' + val + '</div></div>';
     });
 
-    // High risk days
     var hrd = roadmap.high_risk_days || [];
     if (hrd.length > 0) {
       html += '<div class="miRoadmapSection"><div class="miRoadmapHead">High-Risk Days</div><div class="miRoadmapBody"><ul class="miRoadmapList">';
@@ -218,7 +282,6 @@
       html += "</ul></div></div>";
     }
 
-    // Earnings focus
     var ef = roadmap.earnings_focus || [];
     if (ef.length > 0) {
       html += '<div class="miRoadmapSection"><div class="miRoadmapHead">Earnings Focus (max 2)</div><div class="miRoadmapBody">';
@@ -229,13 +292,11 @@
     }
 
     roadmapContent.innerHTML = html;
-
-    if (roadmap._source === "fallback") {
-      roadmapTs.textContent += " (fallback)";
-    }
   }
 
-  /* ── Render: Active Themes ─────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════════
+     Render: Active Themes
+     ═══════════════════════════════════════════════════════════════════ */
   function renderThemes(dms) {
     var themes = dms.news_themes || [];
     if (themes.length === 0) {
@@ -243,7 +304,6 @@
       return;
     }
 
-    // Show only themes with intensity > 0
     var active = themes.filter(function (t) { return (t.intensity || 0) > 0; });
     if (active.length === 0) {
       themesContainer.innerHTML = '<div class="miEmpty">All themes below threshold.</div>';
@@ -251,9 +311,9 @@
     }
 
     var html = "";
-    active.forEach(function (t) {
+    active.forEach(function (t, idx) {
       var barColor = themeBarColor(t.intensity || 0);
-      html += '<div class="miThemeCard">' +
+      html += '<div class="miThemeCard" data-theme-idx="' + idx + '" title="Click for desk insight">' +
         '<div class="miThemeHeader">' +
           '<span class="miThemeName">' + (t.theme || "") + '</span>' +
           '<span class="miThemeIntensity" style="color:' + barColor + ';">' + (t.intensity || 0).toFixed(0) + '/100</span>' +
@@ -270,7 +330,9 @@
     themesContainer.innerHTML = html;
   }
 
-  /* ── Render: Cross-Asset Stress ────────────────── */
+  /* ═══════════════════════════════════════════════════════════════════
+     Render: Cross-Asset Stress
+     ═══════════════════════════════════════════════════════════════════ */
   function renderStress(dms) {
     var xa = dms.cross_asset_stress || {};
     var readings = xa.readings || [];
@@ -281,14 +343,12 @@
     }
 
     var html = '';
-    // Composite header
-    html += '<div class="miStressItem" style="grid-column:1/-1;border-left:3px solid ' + stressColor(xa.composite_score || 50) + ';">' +
+    html += '<div class="miStressItem" style="grid-column:1/-1;border-left:3px solid ' + stressColor(xa.composite_score || 50) + ';" title="Click for desk insight">' +
       '<div class="miStressName">COMPOSITE</div>' +
       '<span class="miStressScore" style="color:' + stressColor(xa.composite_score || 50) + ';">' + (xa.composite_score || 50).toFixed(0) + '</span>' +
       ' <span class="' + pillClass(xa.composite_label) + '">' + (xa.composite_label || "Neutral") + '</span>' +
     '</div>';
 
-    // Store readings for popup access
     _lastReadings = readings;
 
     readings.forEach(function (r, idx) {
@@ -309,20 +369,22 @@
     stressGrid.innerHTML = html;
   }
 
-  /* ── Render: Asymmetry Radar ───────────────────── */
+  /* ═══════════════════════════════════════════════════════════════════
+     Render: Asymmetry Radar
+     ═══════════════════════════════════════════════════════════════════ */
   function renderAsymmetry(dms) {
     var signals = dms.asymmetry_signals || [];
 
     if (signals.length === 0) {
-      asymCard.style.display = "block";
+      asymRow.style.display = "grid";
       asymContent.innerHTML = '<div class="miEmpty">No asymmetries detected. All clear.</div>';
       return;
     }
 
-    asymCard.style.display = "block";
+    asymRow.style.display = "grid";
     var html = "";
-    signals.forEach(function (s) {
-      html += '<div class="miAsymCard">' +
+    signals.forEach(function (s, idx) {
+      html += '<div class="miAsymCard" data-asym-idx="' + idx + '" title="Click for desk insight">' +
         '<div class="miAsymType">' + (s.type || "").replace(/_/g, " ") + '</div>' +
         '<div class="miAsymDesc">' + (s.description || "") + '</div>' +
         '<div class="miAsymAction">' + (s.action || "Monitor only.") + '</div>' +
@@ -332,9 +394,12 @@
     asymContent.innerHTML = html;
   }
 
-  /* ── Render: Diff ──────────────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════════
+     Render: Diff
+     ═══════════════════════════════════════════════════════════════════ */
   function renderDiff(diffData) {
-    diffPanel.style.display = showDiff ? "block" : "none";
+    _lastDiff = diffData || {};
+    diffPanel.style.display = showDiff ? "grid" : "none";
     if (!showDiff) return;
 
     if (!diffData || !diffData.has_changes) {
@@ -361,11 +426,16 @@
     diffContent.innerHTML = html;
   }
 
-  /* ── Main load sequence ────────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════════
+     Main load sequence
+     ═══════════════════════════════════════════════════════════════════ */
   function loadAll() {
     showOverlay();
     setProgress(5, "Fetching DailyMarketState...");
     runBtn.disabled = true;
+
+    // Load patterns in parallel
+    loadPatterns();
 
     fetchJSON("/api/front-layer/daily-market-state")
       .then(function (dms) {
@@ -400,9 +470,12 @@
       });
   }
 
-  /* ── Refresh Live Data ──────────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════════
+     Refresh Live Data
+     ═══════════════════════════════════════════════════════════════════ */
   function refreshLiveData() {
     if (!refreshBtn) return;
+    _insightCache = {};
     refreshBtn.disabled = true;
     refreshBtn.classList.add("isRefreshing");
     refreshBtn.textContent = "Refreshing...";
@@ -412,13 +485,15 @@
       refreshBanner.textContent = "Pulling fresh data from all engines and data sources...";
     }
 
+    // Reload patterns too
+    loadPatterns();
+
     fetch("/api/front-layer/refresh", { method: "POST" })
       .then(function (r) {
         if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
       })
       .then(function (result) {
-        // Show success banner
         if (refreshBanner) {
           var ts = result.refreshed_at ? fmt(result.refreshed_at) : "now";
           var llm = result.llm || {};
@@ -439,7 +514,6 @@
             ' &middot; ' + briefStatus;
         }
 
-        // Now reload all panels with the fresh data
         return fetchJSON("/api/front-layer/daily-market-state").then(function (dms) {
           renderDMS(dms);
           renderThemes(dms);
@@ -469,13 +543,8 @@
   }
 
   /* ── Event bindings ────────────────────────────── */
-  if (runBtn) {
-    runBtn.addEventListener("click", loadAll);
-  }
-
-  if (refreshBtn) {
-    refreshBtn.addEventListener("click", refreshLiveData);
-  }
+  if (runBtn)      runBtn.addEventListener("click", loadAll);
+  if (refreshBtn)  refreshBtn.addEventListener("click", refreshLiveData);
 
   if (diffToggle) {
     diffToggle.addEventListener("click", function () {
@@ -484,13 +553,17 @@
       if (showDiff && diffPanel.style.display === "none") {
         fetchJSON("/api/front-layer/diff").then(renderDiff).catch(function () {});
       }
-      diffPanel.style.display = showDiff ? "block" : "none";
+      diffPanel.style.display = showDiff ? "grid" : "none";
     });
   }
 
-  /* ── Asset Insight Popup (dark draggable) ──────── */
+  /* ═══════════════════════════════════════════════════════════════════
+     Desk Insight Popup (dark draggable)
+     ═══════════════════════════════════════════════════════════════════ */
   var _lastReadings = [];
-  var _insightCache = {};  // keyed by asset name to avoid repeat LLM calls
+  var _lastDms = {};
+  var _lastDiff = {};
+  var _insightCache = {};
 
   var insightPopup  = document.getElementById("miInsightPopup");
   var insightHeader = document.getElementById("miInsightHeader");
@@ -498,7 +571,6 @@
   var insightClose  = document.getElementById("miInsightClose");
   var insightBody   = document.getElementById("miInsightBody");
 
-  // Drag state
   var _dragState = { isDragging: false, offsetX: 0, offsetY: 0 };
 
   function startInsightDrag(e) {
@@ -515,16 +587,11 @@
   }
 
   function doInsightDrag(e) {
-    if (!_dragState.isDragging) return;
-    if (!insightPopup) return;
+    if (!_dragState.isDragging || !insightPopup) return;
     var clientX = e.touches ? e.touches[0].clientX : e.clientX;
     var clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    var newX = clientX - _dragState.offsetX;
-    var newY = clientY - _dragState.offsetY;
-    var maxX = window.innerWidth - insightPopup.offsetWidth;
-    var maxY = window.innerHeight - insightPopup.offsetHeight;
-    newX = Math.max(0, Math.min(newX, maxX));
-    newY = Math.max(0, Math.min(newY, maxY));
+    var newX = Math.max(0, Math.min(clientX - _dragState.offsetX, window.innerWidth - insightPopup.offsetWidth));
+    var newY = Math.max(0, Math.min(clientY - _dragState.offsetY, window.innerHeight - insightPopup.offsetHeight));
     insightPopup.style.left = newX + "px";
     insightPopup.style.top = newY + "px";
   }
@@ -540,85 +607,46 @@
   document.addEventListener("touchmove", doInsightDrag, { passive: false });
   document.addEventListener("touchend", endInsightDrag);
 
-  function showInsightPopup(reading, clickEvent) {
+  function openPopup(title, clickEvent) {
     if (!insightPopup) return;
-    var name = reading.name || reading.symbol || "Asset";
-    insightTitle.textContent = name + " — Desk Insight";
-
-    // Loading state
+    insightTitle.textContent = title;
     insightBody.innerHTML =
       '<div class="miInsightLoading">' +
-      '<span class="miInsightDot"></span>' +
-      '<span class="miInsightDot"></span>' +
-      '<span class="miInsightDot"></span>' +
+      '<span class="miInsightDot"></span><span class="miInsightDot"></span><span class="miInsightDot"></span>' +
       '<br>Generating desk insight...</div>';
 
-    // Position near click
     var posX = (clickEvent ? clickEvent.clientX : window.innerWidth / 2) + 20;
     var posY = (clickEvent ? clickEvent.clientY : window.innerHeight / 2) - 120;
     if (posX + 420 > window.innerWidth) posX = (clickEvent ? clickEvent.clientX : 200) - 420;
-    if (posX < 16) posX = 16;
-    if (posY < 16) posY = 16;
+    posX = Math.max(16, posX);
+    posY = Math.max(16, posY);
     if (posY + 400 > window.innerHeight) posY = window.innerHeight - 420;
     insightPopup.style.left = posX + "px";
     insightPopup.style.top = posY + "px";
     insightPopup.style.display = "block";
 
-    // Attach drag to header
     insightHeader.removeEventListener("mousedown", startInsightDrag);
     insightHeader.removeEventListener("touchstart", startInsightDrag);
     insightHeader.addEventListener("mousedown", startInsightDrag);
     insightHeader.addEventListener("touchstart", startInsightDrag, { passive: false });
-
-    // Check cache
-    var cacheKey = name;
-    if (_insightCache[cacheKey]) {
-      renderInsight(_insightCache[cacheKey], reading);
-      return;
-    }
-
-    // Fetch from LLM
-    fetch("/api/front-layer/asset-insight", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ asset: reading }),
-    })
-    .then(function (r) {
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return r.json();
-    })
-    .then(function (insight) {
-      _insightCache[cacheKey] = insight;
-      renderInsight(insight, reading);
-    })
-    .catch(function (err) {
-      insightBody.innerHTML =
-        '<div class="miInsightText" style="color:rgba(255,200,150,0.8);">Insight unavailable: ' + err.message + '</div>';
-    });
   }
 
-  function renderInsight(insight, reading) {
-    var sc = (reading.stress_score || 50).toFixed(0);
-    var dir = reading.direction || "flat";
-    var rel = reading.equity_relationship || "neutral";
-    var chg = ((reading.change_vs_prior || 0) >= 0 ? "+" : "") + (reading.change_vs_prior || 0).toFixed(2) + "%";
+  function hideInsightPopup() { if (insightPopup) insightPopup.style.display = "none"; }
+  if (insightClose) insightClose.addEventListener("click", hideInsightPopup);
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") hideInsightPopup(); });
 
+  function renderSourceFooter(insight) {
+    if (insight._source === "fallback" && insight._fallback_reason) {
+      return '<div class="miInsightSource" style="color:rgba(255,180,100,0.6);">Fallback: ' + insight._fallback_reason + '</div>';
+    }
+    if (insight._source === "llm") {
+      return '<div class="miInsightSource">Generated by LLM &middot; Read-only &middot; Not a trade recommendation</div>';
+    }
+    return '';
+  }
+
+  function renderSections(insight, sections) {
     var html = '';
-    // Meta row
-    html += '<div class="miInsightMeta">' +
-      '<div class="miInsightMetaItem">Stress Score<br><span class="miInsightMetaValue" style="color:' + stressColor(parseFloat(sc)) + ';">' + sc + '/100</span></div>' +
-      '<div class="miInsightMetaItem">Direction<br><span class="miInsightMetaValue">' + dir + ' (' + chg + ')</span></div>' +
-      '<div class="miInsightMetaItem">vs Equities<br><span class="miInsightMetaValue">' + rel + '</span></div>' +
-      '<div class="miInsightMetaItem">Asset Class<br><span class="miInsightMetaValue">' + (reading.asset_class || "--") + '</span></div>' +
-    '</div>';
-
-    var sections = [
-      { key: "what_its_telling_us", title: "What This Asset Is Telling Us" },
-      { key: "why_it_matters",      title: "Why It Matters for Equities" },
-      { key: "context",             title: "Context" },
-      { key: "desk_takeaway",       title: "Desk Takeaway" },
-    ];
-
     sections.forEach(function (s) {
       var val = insight[s.key] || "";
       if (!val) return;
@@ -628,43 +656,236 @@
         '<div class="miInsightText"' + (isDesk ? ' style="font-weight:700;color:rgba(255,255,255,0.95);"' : '') + '>' + val + '</div>' +
       '</div>';
     });
+    return html;
+  }
 
-    // Source + fallback reason
-    if (insight._source === "fallback" && insight._fallback_reason) {
-      html += '<div class="miInsightSource" style="color:rgba(255,180,100,0.6);">Fallback: ' + insight._fallback_reason + '</div>';
-    } else if (insight._source === "llm") {
-      html += '<div class="miInsightSource">Generated by LLM &middot; Read-only &middot; Not a trade recommendation</div>';
+  function fetchCardInsight(cardType, cardData, cacheKey, sections, metaHtml) {
+    if (_insightCache[cacheKey]) {
+      insightBody.innerHTML = (metaHtml || '') + renderSections(_insightCache[cacheKey], sections) + renderSourceFooter(_insightCache[cacheKey]);
+      return;
     }
-
-    insightBody.innerHTML = html;
-  }
-
-  function hideInsightPopup() {
-    if (insightPopup) insightPopup.style.display = "none";
-  }
-
-  // Close button
-  if (insightClose) {
-    insightClose.addEventListener("click", hideInsightPopup);
-  }
-
-  // Escape to close
-  document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") hideInsightPopup();
-  });
-
-  // Click on stress cards
-  if (stressGrid) {
-    stressGrid.addEventListener("click", function (e) {
-      var card = e.target.closest(".miStressCard");
-      if (!card) return;
-      var idx = parseInt(card.getAttribute("data-reading-idx"), 10);
-      if (isNaN(idx) || !_lastReadings[idx]) return;
-      showInsightPopup(_lastReadings[idx], e);
+    fetch("/api/front-layer/card-insight", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ card_type: cardType, card_data: cardData }),
+    })
+    .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(function (insight) {
+      _insightCache[cacheKey] = insight;
+      insightBody.innerHTML = (metaHtml || '') + renderSections(insight, sections) + renderSourceFooter(insight);
+    })
+    .catch(function (err) {
+      insightBody.innerHTML = '<div class="miInsightText" style="color:rgba(255,200,150,0.8);">Insight unavailable: ' + err.message + '</div>';
     });
   }
 
-  /* ── Backfill status check ──────────────────────── */
+  /* ── 1. Asset stress cards ─────────────────────────── */
+  if (stressGrid) {
+    stressGrid.addEventListener("click", function (e) {
+      var card = e.target.closest(".miStressCard");
+      if (card) {
+        var idx = parseInt(card.getAttribute("data-reading-idx"), 10);
+        if (isNaN(idx) || !_lastReadings[idx]) return;
+        var reading = _lastReadings[idx];
+        var name = reading.name || reading.symbol || "Asset";
+        openPopup(name + " — Desk Insight", e);
+        var cacheKey = "asset:" + name;
+        if (_insightCache[cacheKey]) {
+          renderAssetInsightBody(_insightCache[cacheKey], reading);
+          return;
+        }
+        fetch("/api/front-layer/asset-insight", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ asset: reading }),
+        })
+        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+        .then(function (insight) { _insightCache[cacheKey] = insight; renderAssetInsightBody(insight, reading); })
+        .catch(function (err) { insightBody.innerHTML = '<div class="miInsightText" style="color:rgba(255,200,150,0.8);">Insight unavailable: ' + err.message + '</div>'; });
+        return;
+      }
+
+      // Composite row click
+      var item = e.target.closest(".miStressItem");
+      if (!item || item.classList.contains("miStressCard")) return;
+      var nameEl = item.querySelector(".miStressName");
+      if (!nameEl || nameEl.textContent !== "COMPOSITE") return;
+      var xa = _lastDms.cross_asset_stress || {};
+      openPopup("Composite Stress — Desk Insight", e);
+      var sc = (xa.composite_score || 50).toFixed(0);
+      var metaHtml = '<div class="miInsightMeta">' +
+        '<div class="miInsightMetaItem">Composite<br><span class="miInsightMetaValue" style="color:' + stressColor(parseFloat(sc)) + ';">' + sc + '/100</span></div>' +
+        '<div class="miInsightMetaItem">Label<br><span class="miInsightMetaValue">' + (xa.composite_label || "Neutral") + '</span></div>' +
+        '<div class="miInsightMetaItem">Readings<br><span class="miInsightMetaValue">' + (xa.readings || []).length + ' assets</span></div>' +
+        '<div class="miInsightMetaItem">Date<br><span class="miInsightMetaValue">' + (_lastDms.date || "--") + '</span></div></div>';
+      fetchCardInsight("composite", xa, "composite", [
+        { key: "what_its_telling_us", title: "What the Composite Is Telling Us" },
+        { key: "key_drivers",         title: "Key Drivers" },
+        { key: "historical_context",  title: "Historical Context" },
+        { key: "desk_takeaway",       title: "Desk Takeaway" },
+      ], metaHtml);
+    });
+  }
+
+  function renderAssetInsightBody(insight, reading) {
+    var sc = (reading.stress_score || 50).toFixed(0);
+    var html = '<div class="miInsightMeta">' +
+      '<div class="miInsightMetaItem">Stress Score<br><span class="miInsightMetaValue" style="color:' + stressColor(parseFloat(sc)) + ';">' + sc + '/100</span></div>' +
+      '<div class="miInsightMetaItem">Direction<br><span class="miInsightMetaValue">' + (reading.direction || "flat") + ' (' + ((reading.change_vs_prior||0)>=0?"+":"") + (reading.change_vs_prior||0).toFixed(2) + '%)</span></div>' +
+      '<div class="miInsightMetaItem">vs Equities<br><span class="miInsightMetaValue">' + (reading.equity_relationship || "neutral") + '</span></div>' +
+      '<div class="miInsightMetaItem">Asset Class<br><span class="miInsightMetaValue">' + (reading.asset_class || "--") + '</span></div></div>';
+    html += renderSections(insight, [
+      { key: "what_its_telling_us", title: "What This Asset Is Telling Us" },
+      { key: "why_it_matters",      title: "Why It Matters for Equities" },
+      { key: "context",             title: "Context" },
+      { key: "desk_takeaway",       title: "Desk Takeaway" },
+    ]);
+    html += renderSourceFooter(insight);
+    insightBody.innerHTML = html;
+  }
+
+  /* ── 2. Theme cards ────────────────────────────────── */
+  if (themesContainer) {
+    themesContainer.addEventListener("click", function (e) {
+      var card = e.target.closest(".miThemeCard");
+      if (!card) return;
+      var idx = parseInt(card.getAttribute("data-theme-idx"), 10);
+      var themes = (_lastDms.news_themes || []).filter(function (t) { return (t.intensity || 0) > 0; });
+      if (isNaN(idx) || !themes[idx]) return;
+      var t = themes[idx];
+      openPopup((t.theme || "Theme") + " — Desk Insight", e);
+      var metaHtml = '<div class="miInsightMeta">' +
+        '<div class="miInsightMetaItem">Intensity<br><span class="miInsightMetaValue" style="color:' + themeBarColor(t.intensity || 0) + ';">' + (t.intensity || 0).toFixed(0) + '/100</span></div>' +
+        '<div class="miInsightMetaItem">Acceleration<br><span class="miInsightMetaValue">' + (t.acceleration || "stable") + '</span></div>' +
+        '<div class="miInsightMetaItem">Persistence<br><span class="miInsightMetaValue">' + (t.persistence_days || 0) + ' days</span></div>' +
+        '<div class="miInsightMetaItem">Hits<br><span class="miInsightMetaValue">' + (t.keyword_hits || 0) + '</span></div></div>';
+      fetchCardInsight("theme", t, "theme:" + t.theme, [
+        { key: "what_this_theme_means", title: "What This Theme Means" },
+        { key: "market_impact",         title: "Market Impact" },
+        { key: "momentum_read",         title: "Momentum Read" },
+        { key: "desk_takeaway",         title: "Desk Takeaway" },
+      ], metaHtml);
+    });
+  }
+
+  /* ── 3. Regime card ────────────────────────────────── */
+  var regimeCard = document.getElementById("miRegimeCard");
+  if (regimeCard) {
+    regimeCard.addEventListener("click", function (e) {
+      if (e.target.closest("button")) return;
+      var r = _lastDms.regime || {};
+      openPopup("Regime State — Desk Insight", e);
+      var metaHtml = '<div class="miInsightMeta">' +
+        '<div class="miInsightMetaItem">Regime Score<br><span class="miInsightMetaValue">' + (r.score || 0).toFixed(0) + '</span></div>' +
+        '<div class="miInsightMetaItem">State<br><span class="miInsightMetaValue">' + (r.state || "--") + '</span></div>' +
+        '<div class="miInsightMetaItem">Vol Term<br><span class="miInsightMetaValue">' + ((_lastDms.vol_state || {}).term_structure || "--") + '</span></div>' +
+        '<div class="miInsightMetaItem">Vol Skew<br><span class="miInsightMetaValue">' + ((_lastDms.vol_state || {}).skew || "--") + '</span></div></div>';
+      fetchCardInsight("regime", { regime: r, engine_gates: _lastDms.engine_gates || {}, vol_state: _lastDms.vol_state || {} }, "regime", [
+        { key: "what_regime_tells_us", title: "What the Regime Is Telling Us" },
+        { key: "engine_implications",  title: "Engine Implications" },
+        { key: "regime_context",       title: "Regime Context" },
+        { key: "desk_takeaway",        title: "Desk Takeaway" },
+      ], metaHtml);
+    });
+  }
+
+  /* ── 4. Flow card ──────────────────────────────────── */
+  var flowCard = document.getElementById("miFlowCard");
+  if (flowCard) {
+    flowCard.addEventListener("click", function (e) {
+      if (e.target.closest("button")) return;
+      var fp = _lastDms.flow_pressure || {};
+      openPopup("Flow Pressure — Desk Insight", e);
+      var metaHtml = '<div class="miInsightMeta">' +
+        '<div class="miInsightMetaItem">Flow Score<br><span class="miInsightMetaValue">' + (fp.score || 0).toFixed(0) + '</span></div>' +
+        '<div class="miInsightMetaItem">State<br><span class="miInsightMetaValue">' + (fp.state || "--") + '</span></div>' +
+        '<div class="miInsightMetaItem">Regime<br><span class="miInsightMetaValue">' + ((_lastDms.regime || {}).state || "--") + '</span></div>' +
+        '<div class="miInsightMetaItem">Regime Score<br><span class="miInsightMetaValue">' + ((_lastDms.regime || {}).score || 0).toFixed(0) + '</span></div></div>';
+      fetchCardInsight("flow", { flow_pressure: fp, regime: _lastDms.regime || {} }, "flow", [
+        { key: "what_flow_tells_us", title: "What Flow Is Telling Us" },
+        { key: "flow_vs_regime",     title: "Flow vs Regime" },
+        { key: "context",            title: "Context" },
+        { key: "desk_takeaway",      title: "Desk Takeaway" },
+      ], metaHtml);
+    });
+  }
+
+  /* ── 5. Asymmetry cards ────────────────────────────── */
+  if (asymContent) {
+    asymContent.addEventListener("click", function (e) {
+      var card = e.target.closest(".miAsymCard");
+      if (!card) return;
+      var idx = parseInt(card.getAttribute("data-asym-idx"), 10);
+      var signals = (_lastDms.asymmetry_signals || []);
+      if (isNaN(idx) || !signals[idx]) return;
+      var s = signals[idx];
+      var label = (s.type || "").replace(/_/g, " ");
+      openPopup("Asymmetry: " + label + " — Desk Insight", e);
+      var metaHtml = '<div class="miInsightMeta">' +
+        '<div class="miInsightMetaItem">Type<br><span class="miInsightMetaValue" style="text-transform:capitalize;">' + label + '</span></div>' +
+        '<div class="miInsightMetaItem">Severity<br><span class="miInsightMetaValue" style="color:var(--amber);">' + (s.severity || "--") + '</span></div>' +
+        '<div class="miInsightMetaItem">Action<br><span class="miInsightMetaValue" style="font-size:11px;">' + (s.action || "Monitor only") + '</span></div>' +
+        '<div class="miInsightMetaItem">Sources<br><span class="miInsightMetaValue" style="font-size:10px;">' + (s.sources || []).join(", ") + '</span></div></div>';
+      fetchCardInsight("asymmetry", s, "asym:" + s.type, [
+        { key: "what_this_means", title: "What This Asymmetry Means" },
+        { key: "why_it_matters",  title: "Why It Matters" },
+        { key: "what_to_watch",   title: "What to Watch" },
+        { key: "desk_takeaway",   title: "Desk Takeaway" },
+      ], metaHtml);
+    });
+  }
+
+  /* ── 6. Diff panel ─────────────────────────────────── */
+  if (diffContent) {
+    diffContent.addEventListener("click", function (e) {
+      if (!_lastDiff || !_lastDiff.has_changes) return;
+      openPopup("Day-over-Day Changes — Desk Insight", e);
+      var metaHtml = '<div class="miInsightMeta">' +
+        '<div class="miInsightMetaItem">From<br><span class="miInsightMetaValue">' + (_lastDiff.from_date || "?") + '</span></div>' +
+        '<div class="miInsightMetaItem">To<br><span class="miInsightMetaValue">' + (_lastDiff.to_date || "?") + '</span></div>' +
+        '<div class="miInsightMetaItem">Sections Changed<br><span class="miInsightMetaValue">' + Object.keys(_lastDiff.changes || {}).length + '</span></div>' +
+        '<div class="miInsightMetaItem">Regime<br><span class="miInsightMetaValue">' + ((_lastDms.regime || {}).state || "--") + '</span></div></div>';
+      fetchCardInsight("diff", _lastDiff, "diff:" + _lastDiff.to_date, [
+        { key: "what_changed",       title: "What Changed" },
+        { key: "significance",       title: "Significance" },
+        { key: "cascading_effects",  title: "Cascading Effects" },
+        { key: "desk_takeaway",      title: "Desk Takeaway" },
+      ], metaHtml);
+    });
+  }
+
+  /* ── 7. Pattern Library cards ──────────────────────── */
+  if (patternList) {
+    patternList.addEventListener("click", function (e) {
+      var item = e.target.closest(".miPatternItem");
+      if (!item) return;
+      var key = item.getAttribute("data-pattern-key");
+      if (!key || !_lastPatterns[key]) return;
+      var p = _lastPatterns[key];
+      var isMatch = _lastPatternMatch.key === key;
+      openPopup((p.label || key) + " — Pattern Insight", e);
+      var metaHtml = '<div class="miInsightMeta">' +
+        '<div class="miInsightMetaItem">Pattern<br><span class="miInsightMetaValue">' + (p.label || key) + '</span></div>' +
+        '<div class="miInsightMetaItem">Status<br><span class="miInsightMetaValue" style="color:' + (isMatch ? 'var(--green)' : 'var(--muted)') + ';">' + (isMatch ? 'ACTIVE MATCH' : 'Not Matched') + '</span></div>' +
+        '<div class="miInsightMetaItem">Regime<br><span class="miInsightMetaValue">' + ((_lastDms.regime || {}).state || "--") + '</span></div>' +
+        '<div class="miInsightMetaItem">Flow<br><span class="miInsightMetaValue">' + ((_lastDms.flow_pressure || {}).state || "--") + '</span></div></div>';
+      var cardData = {
+        pattern_key: key, label: p.label, description: p.description,
+        is_match: isMatch, confidence: _lastPatternMatch.confidence || 0,
+        favored_play_types: _lastPatternMatch.favored_play_types || [],
+        primary_risk: _lastPatternMatch.primary_risk || "",
+      };
+      fetchCardInsight("regime", cardData, "pattern:" + key, [
+        { key: "what_regime_tells_us", title: "What This Pattern Tells Us" },
+        { key: "engine_implications",  title: "How the Desk Should Think About It" },
+        { key: "regime_context",       title: "When This Pattern Works / Fails" },
+        { key: "desk_takeaway",        title: "Desk Takeaway" },
+      ], metaHtml);
+    });
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     Backfill status check
+     ═══════════════════════════════════════════════════════════════════ */
   var backfillStatus = document.getElementById("miBackfillStatus");
 
   function checkBackfillStatus() {
@@ -683,22 +904,18 @@
             data.snapshot_count + ' snapshots (' +
             (range.earliest || "?") + ' to ' + (range.latest || "?") + ')' +
             ' &middot; Cross-asset: ' + crossAssetDays + 'd' +
-            ' &middot; Themes: ' + themeDays + 'd' +
-            '</span>';
+            ' &middot; Themes: ' + themeDays + 'd</span>';
         } else {
           backfillStatus.className = "miBackfillStatus miBackfillStatus--empty";
           backfillStatus.innerHTML =
             '<span class="miBackfillDot miBackfillDot--amber"></span>' +
             '<span><b>No historical data</b> &middot; ' +
-            'Run <code>python3 scripts/backfill_front_layer.py</code> to seed 14 days of cross-asset and theme history for richer insights.</span>';
+            'Run <code>python3 scripts/backfill_front_layer.py</code> to seed history.</span>';
         }
       })
-      .catch(function () {
-        // Silently ignore – non-critical
-      });
+      .catch(function () { /* non-critical */ });
   }
 
-  // Check backfill status on page load
   checkBackfillStatus();
 
   /* ── Auto-load on page open ────────────────────── */

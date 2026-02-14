@@ -744,6 +744,65 @@
         margin: 0 auto;
         line-height: 1.6;
       }
+
+      /* ── Desk Insight popup (dark draggable, shared pattern) ──── */
+      .e5InsightPopup {
+        position: fixed; z-index: 10000;
+        width: 420px; max-height: 80vh; overflow-y: auto;
+        border-radius: 16px;
+        background: rgba(28, 28, 30, 0.98);
+        backdrop-filter: blur(40px) saturate(180%);
+        -webkit-backdrop-filter: blur(40px) saturate(180%);
+        box-shadow: 0 20px 60px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.08) inset;
+        user-select: none; transition: opacity 0.15s ease;
+        color: #fff; display: none;
+      }
+      .e5InsightPopup.isDragging { cursor: grabbing; transition: none; }
+      .e5InsightHeader {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 12px; padding: 14px 16px;
+        background: rgba(255,255,255,0.06);
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        cursor: grab;
+      }
+      .e5InsightHeader:active { cursor: grabbing; }
+      .e5InsightTitle { font-size: 14px; font-weight: 700; line-height: 1.3; color: #fff; flex: 1; }
+      .e5InsightClose {
+        width: 24px; height: 24px; border-radius: 6px; border: none;
+        background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.7);
+        font-size: 16px; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        transition: background 0.15s ease;
+      }
+      .e5InsightClose:hover { background: rgba(255,255,255,0.20); color: #fff; }
+      .e5InsightBody { padding: 16px; }
+      .e5InsightSection { margin-bottom: 16px; }
+      .e5InsightSection:last-child { margin-bottom: 0; }
+      .e5InsightSectionTitle {
+        font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.5);
+        text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;
+      }
+      .e5InsightText { font-size: 12px; font-weight: 500; line-height: 1.5; color: rgba(255,255,255,0.88); }
+      .e5InsightMeta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+      .e5InsightMetaItem { font-size: 11px; color: rgba(255,255,255,0.6); }
+      .e5InsightMetaValue { font-size: 14px; font-weight: 700; color: #fff; }
+      .e5InsightLoading { text-align: center; padding: 32px 16px; color: rgba(255,255,255,0.6); font-size: 12px; }
+      .e5InsightDot {
+        display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+        background: rgba(255,255,255,0.5); margin: 0 2px;
+        animation: e5DotPulse 1.2s ease-in-out infinite;
+      }
+      .e5InsightDot:nth-child(2) { animation-delay: 0.2s; }
+      .e5InsightDot:nth-child(3) { animation-delay: 0.4s; }
+      .e5InsightSource {
+        font-size: 10px; color: rgba(255,255,255,0.35);
+        text-align: right; margin-top: 12px; font-style: italic;
+      }
+      @keyframes e5DotPulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+      /* Clickable affordance for E5 cards */
+      .e5Clickable { cursor: pointer; transition: box-shadow 0.15s ease; }
+      .e5Clickable:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
     </style>
   </head>
   <body>
@@ -956,6 +1015,20 @@
         </div>
       </section>
     </main>
+
+    <!-- ── Desk Insight Popup (dark draggable) ───── -->
+    <div class="e5InsightPopup" id="e5InsightPopup">
+      <div class="e5InsightHeader" id="e5InsightHeader">
+        <span class="e5InsightTitle" id="e5InsightTitle">Desk Insight</span>
+        <button class="e5InsightClose" id="e5InsightClose" type="button">&times;</button>
+      </div>
+      <div class="e5InsightBody" id="e5InsightBody">
+        <div class="e5InsightLoading">
+          <span class="e5InsightDot"></span><span class="e5InsightDot"></span><span class="e5InsightDot"></span>
+          <br>Generating desk insight...
+        </div>
+      </div>
+    </div>
 
     <script src="/static/ui_kit.js?v=3"></script>
     <script src="/static/engine5.js?v=2"></script>

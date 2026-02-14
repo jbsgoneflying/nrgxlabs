@@ -582,13 +582,12 @@ function render(payload) {
       const rest = rows.length - shown.length;
       return `
         <div class="calEGroup ${cls}">
-          <div class="calEGroupHead">${escapeHtml(label)}</div>
+          <div class="calEGroupHead">${escapeHtml(label)} <span class="calEGroupCount">${rows.length}</span></div>
           <div class="calTiles">
             ${shown.map((r) => {
               const tk = String(r?.ticker || "").toUpperCase();
               const src = logoUrlForTicker(tk);
               const colorIdx = getColorIndex(tk);
-              // Logo-only tile with tooltip via title attribute for hover
               return `<button class="calTile" type="button" data-ticker="${escapeHtml(tk)}" data-date="${escapeHtml(date)}" data-color="${colorIdx}" aria-label="${escapeHtml(tk)}" title="${escapeHtml(tk)}">
                 <img class="calTileLogo" src="${escapeHtml(src || '')}" alt="${escapeHtml(tk)}" loading="lazy" decoding="async" data-ticker="${escapeHtml(tk)}" />
               </button>`;
@@ -610,7 +609,7 @@ function render(payload) {
         <div class="calEarnings">
           ${grp("Before Open", "BMO", bmo, "bmo", caps.BMO)}
           ${grp("After Close", "AMC", amc, "amc", caps.AMC)}
-          ${grp("Other", "UNK", unk, "unk", caps.UNK)}
+          ${grp("TBD", "UNK", unk, "unk", caps.UNK)}
         </div>
       </div>
     `);

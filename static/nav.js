@@ -7,7 +7,6 @@
   var NAV_ITEMS = [
     { href: "/",                label: "Home",            desc: "Platform overview and engine directory" },
     { href: "/market-intelligence", label: "Market Intelligence", desc: "Pre-open roadmap and cross-asset stress" },
-    { href: "/command-center",  label: "Command Center",  desc: "Weekly planning and intraday monitoring" },
     { href: "/breach",          label: "Engine 1",        desc: "Earnings hold risk with Monte Carlo" },
     { href: "/spx",             label: "Engine 2",        desc: "SPX/SPY iron condor scanner" },
     { href: "/lead-lag",        label: "Engine 5",        desc: "Global lead-lag regime intelligence" },
@@ -16,8 +15,6 @@
     { href: "/calendar",        label: "Earnings Calendar", desc: "Mega-cap earnings dates and compare workflow" },
     { href: "/compare",         label: "Compare",         desc: "Multi-ticker side-by-side" },
     { href: "/news-risk",       label: "News Risk",       desc: "Macro events and headline risk" },
-    { href: "/backtest",        label: "Backtest",        desc: "Historical engine back-testing" },
-    { href: "/research-lab",    label: "Research Lab",    desc: "LLM feature discovery + backtest queue" },
   ];
 
   /* Which nav item matches the current URL? */
