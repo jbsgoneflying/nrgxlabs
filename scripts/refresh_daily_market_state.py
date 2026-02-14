@@ -147,7 +147,7 @@ def main() -> int:
         headlines = []
         try:
             from backend.eodhd_client import EodhdClient
-            eodhd = EodhdClient()
+            eodhd = EodhdClient.from_env()
             resp = eodhd.get_news(topic="market", limit=50)
             headlines.extend(extract_headlines_from_eodhd(resp.rows))
         except Exception as e:
@@ -155,8 +155,8 @@ def main() -> int:
 
         try:
             from backend.benzinga_client import BenzingaClient
-            benz = BenzingaClient()
-            resp = benz.get_news(page_size=50)
+            benz = BenzingaClient.from_env()
+            resp = benz.news(page_size=50)
             headlines.extend(extract_headlines_from_benzinga(resp.rows))
         except Exception as e:
             LOG.warning("Benzinga news unavailable: %s", e)

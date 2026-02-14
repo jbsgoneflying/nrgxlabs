@@ -156,6 +156,28 @@
         border-color: rgba(52,199,89,0.2);
       }
 
+      /* Backfill status indicator */
+      .miBackfillStatus {
+        padding: 8px 14px; border-radius: 8px; font-size: 11px;
+        font-weight: 600; margin-top: 8px;
+        border: 1px solid rgba(0,122,255,0.2);
+        display: flex; align-items: center; gap: 8px;
+      }
+      .miBackfillStatus--seeded {
+        background: rgba(52,199,89,0.08); color: #1b8a3e;
+        border-color: rgba(52,199,89,0.2);
+      }
+      .miBackfillStatus--empty {
+        background: rgba(255,149,0,0.08); color: #995c00;
+        border-color: rgba(255,149,0,0.2);
+      }
+      .miBackfillDot {
+        width: 8px; height: 8px; border-radius: 50%;
+        display: inline-block; flex-shrink: 0;
+      }
+      .miBackfillDot--green { background: var(--green); }
+      .miBackfillDot--amber { background: var(--amber); }
+
       /* Diff toggle */
       .miDiffBtn {
         font-size: 11px; font-weight: 700; padding: 4px 12px;
@@ -248,6 +270,9 @@
 
       <!-- ── Refresh status banner ───────── -->
       <div class="miRefreshBanner" id="miRefreshBanner"></div>
+
+      <!-- ── Backfill status indicator ───── -->
+      <div class="miBackfillStatus" id="miBackfillStatus" style="display:none;"></div>
 
       <!-- ── Regime + Flow Top Row ───────── -->
       <div class="miGrid" id="miTopRow" style="display:none;">

@@ -465,6 +465,45 @@
     });
   }
 
+  /* ── Backfill status check ──────────────────────── */
+  var backfillStatus = document.getElementById("miBackfillStatus");
+
+  function checkBackfillStatus() {
+    if (!backfillStatus) return;
+    fetchJSON("/api/front-layer/backfill-status")
+      .then(function (data) {
+        backfillStatus.style.display = "flex";
+        if (data.seeded) {
+          var range = data.date_range || {};
+          var crossAssetDays = (data.days || []).filter(function (d) { return d.has_cross_asset; }).length;
+          var themeDays = (data.days || []).filter(function (d) { return d.has_themes; }).length;
+          var backfillDays = (data.days || []).filter(function (d) { return d.is_backfill; }).length;
+          backfillStatus.className = "miBackfillStatus miBackfillStatus--seeded";
+          backfillStatus.innerHTML =
+            '<span class="miBackfillDot miBackfillDot--green"></span>' +
+            '<span><b>Historical data seeded</b> &middot; ' +
+            data.snapshot_count + ' snapshots (' +
+            (range.earliest || "?") + ' to ' + (range.latest || "?") + ')' +
+            ' &middot; Cross-asset: ' + crossAssetDays + 'd' +
+            ' &middot; Themes: ' + themeDays + 'd' +
+            (backfillDays > 0 ? ' &middot; ' + backfillDays + ' backfilled' : '') +
+            '</span>';
+        } else {
+          backfillStatus.className = "miBackfillStatus miBackfillStatus--empty";
+          backfillStatus.innerHTML =
+            '<span class="miBackfillDot miBackfillDot--amber"></span>' +
+            '<span><b>No historical data</b> &middot; ' +
+            'Run <code>python3 scripts/backfill_front_layer.py</code> to seed 14 days of cross-asset and theme history for richer insights.</span>';
+        }
+      })
+      .catch(function () {
+        // Silently ignore – non-critical
+      });
+  }
+
+  // Check backfill status on page load
+  checkBackfillStatus();
+
   /* ── Auto-load on page open ────────────────────── */
   hideOverlay();
 

@@ -56,7 +56,7 @@ from backend.sequencer import (
 from backend.llm_client import generate_desk_brief, suggest_features
 from backend.daily_market_state import (
     DailyMarketState, build_daily_market_state, persist_dms,
-    load_dms, load_dms_history, compute_dms_diff,
+    load_dms, load_dms_history, compute_dms_diff, DMS_INDEX_KEY,
 )
 from backend.cross_asset_stress import (
     CrossAssetStressSnapshot, AssetStressReading,
@@ -3436,15 +3436,15 @@ def _build_live_dms(today_str: str, store) -> dict:
         # Try EODHD
         try:
             from backend.eodhd_client import EodhdClient
-            eodhd = EodhdClient()
+            eodhd = EodhdClient.from_env()
             resp = eodhd.get_news(topic="market", limit=50)
             headlines.extend(extract_headlines_from_eodhd(resp.rows))
         except Exception:
             pass
         # Try Benzinga
         try:
-            benz = BenzingaClient()
-            resp = benz.get_news(page_size=50)
+            benz = BenzingaClient.from_env()
+            resp = benz.news(page_size=50)
             headlines.extend(extract_headlines_from_benzinga(resp.rows))
         except Exception:
             pass
@@ -3686,3 +3686,66 @@ def api_front_layer_diff():
         return {"has_changes": False, "changes": {}, "error": "Insufficient history for diff"}
 
     return compute_dms_diff(today_dms, yesterday_dms)
+
+
+@app.get("/api/front-layer/backfill-status")
+def api_front_layer_backfill_status():
+    """Report whether historical DMS data has been seeded.
+
+    Returns snapshot count, date range, and per-day data quality flags.
+    Useful for the UI to show whether the backfill script has been run.
+    """
+    flags = get_flags()
+    if not flags.ENABLE_FRONT_LAYER:
+        raise HTTPException(status_code=503, detail="Front Layer is disabled.")
+
+    store = get_store_optional()
+    if not store:
+        return {
+            "seeded": False,
+            "snapshot_count": 0,
+            "date_range": None,
+            "days": [],
+        }
+
+    index = store.get_json(DMS_INDEX_KEY) or []
+    if not isinstance(index, list):
+        index = []
+
+    if not index:
+        return {
+            "seeded": False,
+            "snapshot_count": 0,
+            "date_range": None,
+            "days": [],
+        }
+
+    # Gather per-day summaries (limited to last 14 for UI)
+    days = []
+    for date_str in index[:14]:
+        dms = load_dms(date_str, store)
+        if dms is None:
+            continue
+        d = dms.to_dict()
+        has_cross_asset = bool(d.get("cross_asset_stress", {}).get("readings"))
+        has_themes = bool(d.get("news_themes"))
+        has_regime = d.get("regime", {}).get("state", "Transitional") != "Transitional" or bool(d.get("regime", {}).get("drivers"))
+        is_backfill = bool(d.get("_backfill"))
+        days.append({
+            "date": date_str,
+            "has_cross_asset": has_cross_asset,
+            "has_themes": has_themes,
+            "has_regime": has_regime,
+            "is_backfill": is_backfill,
+        })
+
+    sorted_dates = sorted(index)
+    return {
+        "seeded": len(index) >= 3,
+        "snapshot_count": len(index),
+        "date_range": {
+            "earliest": sorted_dates[0] if sorted_dates else None,
+            "latest": sorted_dates[-1] if sorted_dates else None,
+        },
+        "days": days,
+    }

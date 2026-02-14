@@ -357,6 +357,48 @@ class EodhdClient:
         return self._get(url, params)
 
     # -----------------------------------------------------------------------
+    # Public API: News
+    # -----------------------------------------------------------------------
+
+    def get_news(
+        self,
+        *,
+        ticker: Optional[str] = None,
+        topic: Optional[str] = None,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> EodhdResponse:
+        """Fetch financial news articles.
+
+        ticker:    EODHD ticker (e.g. "AAPL.US") for company news.
+        topic:     Topic tag (e.g. "market", "earnings", "mergers").
+                   Use topic **or** ticker, not both.
+        from_date: Start date filter (YYYY-MM-DD).
+        to_date:   End date filter (YYYY-MM-DD).
+        limit:     1-1000 articles per request (default 50).
+        offset:    Pagination offset.
+
+        1 API call per request.
+        """
+        url = f"{self._base_url}/news"
+        params: Dict[str, Any] = {
+            "fmt": "json",
+            "limit": min(max(int(limit), 1), 1000),
+            "offset": max(int(offset), 0),
+        }
+        if ticker:
+            params["s"] = ticker
+        if topic:
+            params["t"] = topic
+        if from_date:
+            params["from"] = from_date
+        if to_date:
+            params["to"] = to_date
+        return self._get(url, params)
+
+    # -----------------------------------------------------------------------
     # Public API: Stock Market Screener
     # -----------------------------------------------------------------------
 
