@@ -73,10 +73,13 @@ services:
     build:
       context: ./kalshi
       dockerfile: apps/web/Dockerfile
+      args:
+        # Server-only: used by Next.js rewrites to proxy API calls to the backend
+        API_URL: http://kalshi-api:3100
     env_file:
       - ./kalshi/.env
     environment:
-      NEXT_PUBLIC_API_URL: http://kalshi-api:3100
+      API_URL: http://kalshi-api:3100
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:

@@ -18,7 +18,8 @@ export function useSSE({ url, onAlert, onTicker, onTrade, enabled = true }: UseS
   const connect = useCallback(() => {
     if (!enabled) return;
 
-    const es = new EventSource(url);
+    const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+    const es = new EventSource(`${basePath}${url}`);
     esRef.current = es;
 
     es.addEventListener("connected", () => {

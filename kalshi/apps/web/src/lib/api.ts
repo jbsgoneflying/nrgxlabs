@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
+const API_BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
