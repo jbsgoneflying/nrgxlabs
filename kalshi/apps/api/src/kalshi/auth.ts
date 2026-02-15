@@ -82,11 +82,21 @@ export function createWsAuthHeaders(): Record<string, string> {
  * Check if authentication is available.
  */
 export function isAuthAvailable(): boolean {
-  if (!kalshiConfig.hasAuth) return false;
+  if (!kalshiConfig.hasAuth) {
+    // Log why hasAuth is false for debugging
+    const { apiKeyId, privateKeyPath, privateKeyPem } = kalshiConfig;
+    console.log(
+      `[auth] hasAuth=false: apiKeyId.length=${apiKeyId.length}, ` +
+      `privateKeyPath.length=${privateKeyPath.length}, ` +
+      `privateKeyPem.length=${privateKeyPem.length}`
+    );
+    return false;
+  }
   try {
     getPrivateKey();
     return true;
-  } catch {
+  } catch (err) {
+    console.error("[auth] getPrivateKey() failed:", err);
     return false;
   }
 }

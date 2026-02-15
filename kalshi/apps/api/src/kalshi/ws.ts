@@ -302,7 +302,11 @@ export class KalshiWsClient extends EventEmitter {
   // ─── Reconnection ────────────────────────────────────────
 
   private scheduleReconnect(): void {
-    if (this.isClosing) return;
+    // Guard: only one reconnect timer at a time.
+    // Without this, both the "close" handler AND the promise rejection
+    // in catch{} would each schedule their own timer — doubling every
+    // failure cycle and causing an exponential reconnect storm.
+    if (this.isClosing || this.reconnectTimer) return;
 
     // Exponential backoff: 1s, 2s, 4s, 8s, ... up to 60s
     const delay = Math.min(
@@ -315,11 +319,14 @@ export class KalshiWsClient extends EventEmitter {
     logger.info({ delay, attempt: this.reconnectAttempts }, "Scheduling WS reconnect");
 
     this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null; // Clear before attempting so guard resets
       try {
         await this.connect();
       } catch (err) {
         logger.error({ err }, "Reconnect failed");
-        this.scheduleReconnect();
+        if (!this.isClosing) {
+          this.scheduleReconnect();
+        }
       }
     }, delay);
   }
