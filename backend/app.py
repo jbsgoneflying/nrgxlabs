@@ -4579,6 +4579,9 @@ You will receive a JSON payload with:
 - context.breach_stats: historical breach rate, overshoot, realized/implied ratio
 - context.thresholds: dollar price levels at 1.0x/1.5x/2.0x EM
 - context.strike_targets: IC wing distances at EM multiples
+- context.dealer_flow (when available): real-time dealer gamma positioning for both the ticker and SPX:
+  - ticker_gamma: netGammaSign (positive=dealer long gamma, dampens moves; negative=dealer short gamma, amplifies moves), magnitudeBucket (low/medium/high), callPutImbalance, topGammaStrikes, putWallStrike, callWallStrike, tailIgnition (up/down risk scores 0-100 with labels)
+  - spx_gamma: same structure for SPX — provides the macro gamma backdrop
 
 Write a trade ticket in this exact JSON structure:
 
@@ -4601,7 +4604,7 @@ Write a trade ticket in this exact JSON structure:
   "risk_notes": "Breach rate context, tail risk, what the realized/implied ratio tells us about this name's tendency to surprise. 2-3 sentences.",
   "historical_anchor": "Cite the matched events — how many, what happened, what the average drift was. Be specific with dates and numbers. 2-3 sentences.",
   "what_if_wrong": "If this scenario plays out opposite to the action — what does the trader do? Flip, stop out, or wait? 2-3 sentences.",
-  "gamma_read": "If gamma/vol/regime data is provided, interpret it. If not, say 'No gamma context available for this evaluation.' 1-2 sentences.",
+  "gamma_read": "Interpret the dealer_flow data: Is the ticker in positive or negative gamma? How does that affect post-earnings drift (negative gamma amplifies, positive dampens)? What does SPX gamma tell us about the macro backdrop? Reference put/call walls, tail ignition scores, and top gamma strikes. If no dealer_flow data, say 'No gamma context available.' 2-3 sentences.",
   "desk_voice": "The senior quant's parting words. Is this a bread-and-butter setup or an edge case? How does it compare to the average earnings trade? Be direct. 2-3 sentences."
 }
 
@@ -4614,8 +4617,77 @@ Rules:
 - If hold_pct >= 50%, highlight that gap-and-hold is the strongest PEAD signal.
 - For FADE scenarios, look for low volume + high reversion rates. The instrument should be a reversal play.
 - For CONTINUE scenarios, the instrument should capture drift in the gap direction.
+- If dealer_flow.ticker_gamma is provided: negative gamma (dealer short gamma) amplifies moves — favors continuation plays. Positive gamma dampens moves — fade setups need stronger conviction. Reference the put/call wall strikes as support/resistance levels.
+- If dealer_flow.spx_gamma is provided: negative SPX gamma means broader market moves are amplified — increases tail risk on ALL trades. Positive SPX gamma is stabilizing.
+- If tailIgnition scores are HIGH (>60), warn about tail risk in that direction.
 - Keep each field concise — under 75 words per field.
 - Output valid JSON only."""
+
+
+def _fetch_dealer_gamma_summary(orats, ticker: str) -> dict | None:
+    """Best-effort fetch of dealer gamma context for a single ticker."""
+    try:
+        from backend.dealer_gamma_context import compute_dealer_gamma_context
+        from backend.oi_clusters import compute_open_interest_clusters
+        from backend.engine2_gamma_addons import compute_tail_ignition
+
+        resp = orats.live_strikes(
+            ticker=ticker,
+            fields="strike,gamma,callOpenInterest,putOpenInterest,spotPrice,stockPrice,callVolume,putVolume",
+        )
+        rows = resp.rows if resp and getattr(resp, "rows", None) else []
+        if not rows:
+            return None
+
+        dg = compute_dealer_gamma_context(rows, contract_multiplier=100, band_pct=0.05, top_n=5)
+        spot = dg.get("spot")
+
+        put_wall_strike = None
+        call_wall_strike = None
+        try:
+            oi = compute_open_interest_clusters(rows, band_pct=0.10, top_n=5, cluster_steps=2)
+            pw = oi.get("putWall")
+            cw = oi.get("callWall")
+            if pw:
+                put_wall_strike = pw.get("peakStrike")
+            if cw:
+                call_wall_strike = cw.get("peakStrike")
+        except Exception:
+            pass
+
+        ti = None
+        try:
+            ti = compute_tail_ignition(
+                rows,
+                spot=float(spot) if spot else None,
+                put_wall_strike=put_wall_strike,
+                call_wall_strike=call_wall_strike,
+                contract_multiplier=100,
+            )
+        except Exception:
+            pass
+
+        summary = {
+            "ticker": ticker,
+            "spot": spot,
+            "netGex": dg.get("netGex"),
+            "netGammaSign": dg.get("netGammaSign"),
+            "magnitudeBucket": dg.get("magnitudeBucket"),
+            "callPutImbalance": dg.get("callPutImbalance"),
+            "topGammaStrikes": dg.get("topGammaStrikes", [])[:3],
+            "putWallStrike": put_wall_strike,
+            "callWallStrike": call_wall_strike,
+        }
+        if ti and ti.get("enabled"):
+            summary["tailIgnition"] = {
+                "down": {"score": ti["down"]["score"], "label": ti["down"]["label"]},
+                "up": {"score": ti["up"]["score"], "label": ti["up"]["label"]},
+                "gammaFlipStrike": ti.get("gammaFlipStrike"),
+            }
+        return summary
+    except Exception as exc:
+        LOG.debug("Dealer gamma fetch failed for %s: %s", ticker, exc)
+        return None
 
 
 @app.post("/api/engine8/row-playbook")
@@ -4629,28 +4701,42 @@ def engine8_row_playbook(body: dict):
     try:
         from backend.llm_client import _get_openai_client, _parse_desk_brief_json
 
-        client = _get_openai_client()
-        if client is None:
+        llm_client = _get_openai_client()
+        if llm_client is None:
             raise HTTPException(status_code=503, detail="OpenAI client unavailable — set OPENAI_API_KEY")
+
+        ticker = (context.get("ticker") or "").upper()
+
+        # Best-effort: enrich with dealer gamma for ticker + SPX
+        gamma_context: dict = {}
+        orats = _get_client_optional()
+        if orats and ticker:
+            ticker_gamma = _fetch_dealer_gamma_summary(orats, ticker)
+            if ticker_gamma:
+                gamma_context["ticker_gamma"] = ticker_gamma
+            spx_gamma = _fetch_dealer_gamma_summary(orats, "SPX")
+            if spx_gamma:
+                gamma_context["spx_gamma"] = spx_gamma
 
         import json as _json
         payload = {
             "scenario": scenario,
             "matched_events": scenario.get("matched_events", []),
             "context": {
-                "ticker": context.get("ticker", ""),
+                "ticker": ticker,
                 "stock_price": context.get("stock_price"),
                 "em_pct": context.get("em_pct"),
                 "breach_stats": context.get("breach_stats", {}),
                 "thresholds": context.get("thresholds", {}),
                 "strike_targets": context.get("strike_targets", {}),
+                "dealer_flow": gamma_context if gamma_context else None,
             },
         }
         payload_str = _json.dumps(payload, default=str)
-        if len(payload_str) > 12000:
-            payload_str = payload_str[:12000]
+        if len(payload_str) > 16000:
+            payload_str = payload_str[:16000]
 
-        resp = client.chat.completions.create(
+        resp = llm_client.chat.completions.create(
             model="gpt-5.2",
             messages=[
                 {"role": "system", "content": _E8_ROW_PLAYBOOK_SYSTEM},
@@ -4658,7 +4744,7 @@ def engine8_row_playbook(body: dict):
             ],
             temperature=0.3,
             max_completion_tokens=2000,
-            timeout=45,
+            timeout=60,
             response_format={"type": "json_object"},
         )
         content = resp.choices[0].message.content or ""
