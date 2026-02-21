@@ -102,7 +102,8 @@ export async function discoverPolymarketMarkets(): Promise<void> {
       }, "Polymarket sample event structure");
     }
 
-    const MIN_VOLUME_FOR_WS = 1_000; // Only subscribe to WS for markets with >$1k volume
+    const MIN_VOLUME_FOR_WS = 50_000; // Only subscribe to WS for markets with >$50k volume
+    const MAX_WS_TOKENS = 2_000;     // Hard cap on total WS subscriptions
     let skippedLowVolume = 0;
 
     for (const event of events) {
@@ -156,9 +157,16 @@ export async function discoverPolymarketMarkets(): Promise<void> {
       await populateTokenMap(tokenMapEntries);
     }
 
-    // Subscribe to all discovered asset IDs on the WS
-    if (allAssetIds.length > 0) {
-      subscribeToPolymarketTokens(allAssetIds);
+    // Subscribe to discovered asset IDs on WS (enforce hard cap)
+    const wsTokens = allAssetIds.slice(0, MAX_WS_TOKENS);
+    if (wsTokens.length > 0) {
+      subscribeToPolymarketTokens(wsTokens);
+    }
+    if (allAssetIds.length > MAX_WS_TOKENS) {
+      logger.warn(
+        { eligible: allAssetIds.length, subscribed: wsTokens.length, cap: MAX_WS_TOKENS },
+        "Polymarket WS token cap applied"
+      );
     }
 
     logger.info(

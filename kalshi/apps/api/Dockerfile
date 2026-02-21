@@ -31,7 +31,7 @@ COPY --from=base /app/apps/api/package.json ./apps/api/
 COPY --from=base /app/apps/api/src/db/migrations ./apps/api/src/db/migrations
 
 ENV NODE_ENV=production
-ENV NODE_OPTIONS="--max-old-space-size=768"
+ENV NODE_OPTIONS="--max-old-space-size=512"
 EXPOSE 3100
 
 CMD ["node", "apps/api/dist/index.js"]
