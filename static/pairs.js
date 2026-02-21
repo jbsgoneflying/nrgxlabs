@@ -125,13 +125,14 @@
 
     /* Headline / scan diagnostics banner */
     var diagLines = [];
-    diagLines.push("Headlines: " + (meta.headlineCount || 0) + " | Window: " + (meta.headlineWindowStart || "?") + " → " + (meta.headlineWindowEnd || "?"));
-    diagLines.push("Source: " + (meta.headlineSource || "EODHD"));
+    var topics = (meta.headlineTopics || []).join("+") || "market";
+    diagLines.push("Headlines: " + (meta.headlineCount || 0) + " (limit " + (meta.headlineFetchLimit || "?") + ", topics: " + topics + ")");
+    diagLines.push("Window: " + (meta.headlineWindowStart || "?") + " → " + (meta.headlineWindowEnd || "?"));
+    if (meta.recencyDecay) diagLines.push("Decay: " + meta.recencyDecay);
     diagLines.push("Active themes: " + (meta.activeThemeCount || 0) + " / " + diagThemes.length + " candidates");
     if (meta.activeThemeNames && meta.activeThemeNames.length) {
       diagLines.push("Active: " + meta.activeThemeNames.join(", "));
     }
-    diagLines.push("Cache version: " + (meta.cacheVersion || "?"));
     statusEl.textContent = diagLines.join(" · ");
 
     /* Themes section */

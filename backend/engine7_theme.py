@@ -313,27 +313,40 @@ def classify_themes_deterministic(
                 hm["idx"], hm["themes"], hm["keywords"], hm["title"],
             )
 
+    # Recency decay: EODHD returns newest-first.  The first 60% of
+    # headlines are treated as "recent" (weight 1.0) and the remaining
+    # 40% as "older" (weight 0.5).  This biases activation toward themes
+    # that are driving the current tape without losing weekend coverage.
+    _RECENT_CUTOFF = 0.60
+    _RECENT_WEIGHT = 1.0
+    _OLDER_WEIGHT = 0.5
+    recent_boundary = int(n * _RECENT_CUTOFF)
+    headline_weights = [_RECENT_WEIGHT if i < recent_boundary else _OLDER_WEIGHT for i in range(n)]
+    total_weight = sum(headline_weights)
+
     for theme_id, tdef in THEME_KEYWORD_MAP.items():
         kws = tdef["keywords"]
         threshold = tdef.get("activation_threshold", 0.02)
-        hits = 0
+        raw_hits = 0
+        weighted_hits = 0.0
         matched_kws: List[str] = []
 
-        for hl in lower_headlines:
+        for idx_hl, hl in enumerate(lower_headlines):
             for kw in kws:
                 if kw in hl:
-                    hits += 1
+                    raw_hits += 1
+                    weighted_hits += headline_weights[idx_hl]
                     if kw not in matched_kws:
                         matched_kws.append(kw)
                     break  # one hit per headline per theme
 
-        hit_ratio = hits / float(n) if n > 0 else 0.0
-        intensity = min(100.0, hit_ratio * 500.0)  # 20% hit ratio -> 100
-        active = hit_ratio >= threshold and hits >= 1
+        hit_ratio = weighted_hits / total_weight if total_weight > 0 else 0.0
+        intensity = min(100.0, hit_ratio * 500.0)  # 20% weighted ratio -> 100
+        active = hit_ratio >= threshold and raw_hits >= 1
 
         _LOG.info(
-            "  THEME %-22s | hits=%3d ratio=%.4f threshold=%.4f intensity=%6.2f → %s",
-            theme_id, hits, hit_ratio, threshold, intensity, "ACTIVE" if active else "inactive",
+            "  THEME %-22s | raw=%3d weighted=%.1f ratio=%.4f threshold=%.4f intensity=%6.2f → %s",
+            theme_id, raw_hits, weighted_hits, hit_ratio, threshold, intensity, "ACTIVE" if active else "inactive",
         )
 
         results.append(ThemeClassification(
@@ -341,7 +354,7 @@ def classify_themes_deterministic(
             label=tdef["label"],
             active=active,
             intensity=round(intensity, 2),
-            keyword_hits=hits,
+            keyword_hits=raw_hits,
             sample_keywords=matched_kws[:5],
         ))
 
@@ -519,19 +532,25 @@ def annotate_themes_llm(
 # ---------------------------------------------------------------------------
 
 
+_HEADLINE_FETCH_LIMIT = 500
+_HEADLINE_TOPICS = ("market", "earnings")
+
+
 def fetch_headlines(date_str: str, lookback_days: int = 7) -> List[str]:
     """Fetch recent headlines from EODHD (primary) with Benzinga fallback.
 
-    Default lookback is 7 days to ensure full coverage across weekends
-    and holidays when market news may be sparse.
+    Fetches across multiple EODHD topics (market + earnings) for denser
+    keyword surface area, then deduplicates.  Default lookback is 7 days
+    to ensure full coverage across weekends and holidays.
     """
     import os as _os
 
     end = dt.date.fromisoformat(date_str)
     start = end - dt.timedelta(days=lookback_days)
+    seen: set = set()
     titles: List[str] = []
 
-    # --- Primary source: EODHD ---
+    # --- Primary source: EODHD (multi-topic) ---
     try:
         from backend.eodhd_client import EodhdClient
         token = _os.getenv("EODHD_API_TOKEN", "")
@@ -539,19 +558,30 @@ def fetch_headlines(date_str: str, lookback_days: int = 7) -> List[str]:
             _LOG.warning("Engine7 headline fetch: EODHD_API_TOKEN not set — skipping EODHD")
         else:
             client = EodhdClient(token=token)
-            resp = client.get_news(
-                topic="market",
-                from_date=start.isoformat(),
-                to_date=end.isoformat(),
-                limit=200,
-            )
-            for row in (resp.rows or []):
-                title = row.get("title") or ""
-                if title.strip():
-                    titles.append(title.strip())
+            for topic in _HEADLINE_TOPICS:
+                try:
+                    resp = client.get_news(
+                        topic=topic,
+                        from_date=start.isoformat(),
+                        to_date=end.isoformat(),
+                        limit=_HEADLINE_FETCH_LIMIT,
+                    )
+                    topic_count = 0
+                    for row in (resp.rows or []):
+                        title = (row.get("title") or "").strip()
+                        if title and title not in seen:
+                            seen.add(title)
+                            titles.append(title)
+                            topic_count += 1
+                    _LOG.info(
+                        "Engine7 headline fetch [EODHD/%s]: %d unique headlines, window=%s→%s",
+                        topic, topic_count, start.isoformat(), end.isoformat(),
+                    )
+                except Exception as topic_exc:
+                    _LOG.warning("Engine7 headline fetch [EODHD/%s] failed: %s", topic, topic_exc)
             _LOG.info(
-                "Engine7 headline fetch [EODHD]: %d headlines, window=%s→%s",
-                len(titles), start.isoformat(), end.isoformat(),
+                "Engine7 headline fetch [EODHD total]: %d unique headlines across topics %s",
+                len(titles), _HEADLINE_TOPICS,
             )
     except Exception as exc:
         _LOG.warning("Engine7 headline fetch [EODHD] failed: %s", exc)
@@ -566,12 +596,13 @@ def fetch_headlines(date_str: str, lookback_days: int = 7) -> List[str]:
                 bz_resp = bz.get_news(
                     from_date=start.isoformat(),
                     to_date=end.isoformat(),
-                    page_size=200,
+                    page_size=_HEADLINE_FETCH_LIMIT,
                 )
                 for row in (bz_resp if isinstance(bz_resp, list) else (bz_resp.rows if hasattr(bz_resp, "rows") else [])):
-                    title = row.get("title") or row.get("headline") or "" if isinstance(row, dict) else ""
-                    if title.strip():
-                        titles.append(title.strip())
+                    title = (row.get("title") or row.get("headline") or "").strip() if isinstance(row, dict) else ""
+                    if title and title not in seen:
+                        seen.add(title)
+                        titles.append(title)
                 _LOG.info(
                     "Engine7 headline fetch [Benzinga fallback]: %d headlines, window=%s→%s",
                     len(titles), start.isoformat(), end.isoformat(),

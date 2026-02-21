@@ -46,7 +46,7 @@ _LOG = logging.getLogger(__name__)
 # change to prevent stale results from replaying.
 # ---------------------------------------------------------------------------
 
-_CACHE_VERSION = "v3"
+_CACHE_VERSION = "v4"
 
 _bars_cache: TTLCache = TTLCache(maxsize=200, ttl=6 * 3600)
 _bars_cache_lock = threading.Lock()
@@ -550,9 +550,12 @@ def compute_engine7_scan(
             "watchlistCount": len(watchlist),
             "ineligibleCount": len(ineligible),
             "headlineCount": theme_result.headline_count,
+            "headlineFetchLimit": 500,
+            "headlineTopics": ["market", "earnings"],
             "headlineWindowStart": (today - dt.timedelta(days=7)).isoformat(),
             "headlineWindowEnd": date_str,
-            "headlineSource": "EODHD (primary) + Benzinga (fallback)",
+            "headlineSource": "EODHD multi-topic (market + earnings) + Benzinga fallback",
+            "recencyDecay": "60% recent (1.0x) / 40% older (0.5x)",
             "activeThemeCount": len(theme_result.active_themes),
             "activeThemeNames": theme_result.active_themes,
             "themeRequired": theme_required,
