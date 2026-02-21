@@ -9,7 +9,8 @@
   var statusEl   = document.getElementById("status");
   var resultsEl  = document.getElementById("results");
 
-  function qs(id) { return document.getElementById(id); }
+  var _dummyEl = document.createElement("span");
+  function qs(id) { return document.getElementById(id) || _dummyEl; }
   function fmt(v, d) { return v == null ? "—" : Number(v).toFixed(d == null ? 2 : d); }
   function pct(v) { return v == null ? "—" : (Number(v) * 100).toFixed(1) + "%"; }
 
