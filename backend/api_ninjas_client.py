@@ -578,3 +578,163 @@ class ApiNinjasClient:
         
         sorted_transcripts = sorted(available, key=sort_key, reverse=True)
         return sorted_transcripts[:limit]
+
+    # =========================================================================
+    # INSIDER TRADING METHODS (Engine 9: Credit Stress Drift)
+    # =========================================================================
+
+    def get_insider_transactions(
+        self,
+        ticker: str,
+        *,
+        transaction_type: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[dict]:
+        """
+        Get SEC Form 4 insider transactions for a ticker.
+
+        Args:
+            ticker: Stock symbol (e.g., ARCC)
+            transaction_type: Optional filter -- 'buy', 'sell', or None for all
+            limit: Max results per page (1-100)
+            offset: Pagination offset
+
+        Returns:
+            List of dicts with keys: filing_date, trade_date, ticker, owner_name,
+            transaction_type, shares_traded, price, shares_owned, company_name, etc.
+        """
+        params: Dict[str, Any] = {
+            "ticker": str(ticker).upper(),
+            "limit": min(100, max(1, int(limit))),
+        }
+        if offset > 0:
+            params["offset"] = int(offset)
+        if transaction_type:
+            params["transaction_type"] = str(transaction_type).lower()
+        try:
+            resp = self.get("/insidertransactions", params)
+            return resp.rows or []
+        except Exception as e:
+            self._log.warning("Failed to get insider transactions for %s: %s", ticker, e)
+            return []
+
+    def get_insider_net_selling(
+        self,
+        ticker: str,
+        days: int = 90,
+    ) -> Dict[str, Any]:
+        """
+        Compute net insider selling ($ value) over a rolling window.
+
+        Returns dict with buy_total, sell_total, net_selling, transaction_count,
+        and the raw transactions list.
+        """
+        from datetime import datetime, timedelta as td
+
+        cutoff = (datetime.utcnow() - td(days=days)).strftime("%Y-%m-%d")
+        rows = self.get_insider_transactions(ticker, limit=100)
+
+        buy_total = 0.0
+        sell_total = 0.0
+        count = 0
+        filtered: List[dict] = []
+
+        for row in rows:
+            trade_date = row.get("transaction_date") or row.get("trade_date") or row.get("filing_date") or ""
+            if trade_date < cutoff:
+                continue
+            filtered.append(row)
+            count += 1
+
+            shares = abs(float(row.get("shares_traded") or row.get("amount") or 0))
+            price = float(row.get("price") or row.get("share_price") or 0)
+            dollar = shares * price
+
+            tx_type = str(row.get("transaction_type") or "").lower()
+            if "buy" in tx_type or "purchase" in tx_type:
+                buy_total += dollar
+            elif "sell" in tx_type or "sale" in tx_type or "disposition" in tx_type:
+                sell_total += dollar
+
+        return {
+            "ticker": ticker,
+            "days": days,
+            "buy_total": round(buy_total, 2),
+            "sell_total": round(sell_total, 2),
+            "net_selling": round(sell_total - buy_total, 2),
+            "transaction_count": count,
+            "transactions": filtered,
+        }
+
+    # =========================================================================
+    # ETF INFO METHODS (Engine 9: Credit Stress Drift)
+    # =========================================================================
+
+    def get_etf_info(self, ticker: str) -> Optional[dict]:
+        """
+        Get ETF information including AUM, expense ratio, holdings.
+
+        Args:
+            ticker: ETF symbol (e.g., HYG, JNK, BKLN)
+
+        Returns:
+            Dict with etf_name, aum, expense_ratio, holdings_count, etc.
+        """
+        try:
+            resp = self.get("/etf", {"name": str(ticker).upper()})
+            if resp.rows:
+                return resp.rows[0]
+            return None
+        except Exception as e:
+            self._log.warning("Failed to get ETF info for %s: %s", ticker, e)
+            return None
+
+    def get_transcript_history(
+        self,
+        ticker: str,
+        quarters: int = 4,
+    ) -> List[dict]:
+        """
+        Fetch full transcript text for the most recent N quarters.
+
+        Used by Engine 9 NLP delta-of-language signal to compare tone
+        across quarters.
+
+        Args:
+            ticker: Stock symbol
+            quarters: Number of recent quarters to fetch (default 4)
+
+        Returns:
+            List of full transcript dicts (with 'transcript' text), newest first.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        meta = self.get_latest_transcripts(ticker, limit=quarters)
+        if not meta:
+            return []
+
+        results: List[dict] = []
+
+        def _fetch(item: dict) -> Optional[dict]:
+            y = int(item.get("year", 0))
+            q = int(item.get("quarter", 0))
+            if y and q:
+                return self.get_transcript(ticker, y, q)
+            return None
+
+        with ThreadPoolExecutor(max_workers=min(4, len(meta))) as pool:
+            futs = {pool.submit(_fetch, m): m for m in meta}
+            for fut in as_completed(futs):
+                try:
+                    result = fut.result()
+                    if result:
+                        results.append(result)
+                except Exception as exc:
+                    self._log.debug("Transcript fetch error: %s", exc)
+
+        def _sort_key(t: dict) -> tuple:
+            return (int(t.get("year", 0)), int(t.get("quarter", 0)))
+
+        results.sort(key=_sort_key, reverse=True)
+        return results

@@ -247,6 +247,11 @@ class FeatureFlags:
 
     # --- Engine 8: Post-Event Trade Extension ---
     ENABLE_ENGINE8_POST_EVENT: bool = True
+
+    # --- Engine 9: Credit Stress Drift ---
+    ENABLE_ENGINE9_CREDIT_STRESS: bool = True
+    ENGINE9_CACHE_TTL_SCAN: int = 5 * 60            # 5 min in-memory scan cache
+    ENGINE9_MAX_WORKERS: int = 8                     # Parallel price fetch workers
     ENGINE8_CACHE_TTL_EVAL: int = 30 * 60            # 30 min in-memory cache for evaluations
     ENGINE8_SNAPSHOT_TTL_S: int = 30 * 86400          # 30 days Redis TTL for persisted snapshots
     ENGINE8_LLM_RESULT_TTL_S: int = 90 * 86400        # 90 days Redis TTL for persisted LLM results
@@ -471,6 +476,11 @@ class FeatureFlags:
 
             # --- Engine 8 ---
             ENABLE_ENGINE8_POST_EVENT=_get_bool("ENABLE_ENGINE8_POST_EVENT", True),
+
+            # --- Engine 9 ---
+            ENABLE_ENGINE9_CREDIT_STRESS=_get_bool("ENABLE_ENGINE9_CREDIT_STRESS", True),
+            ENGINE9_CACHE_TTL_SCAN=_get_int("ENGINE9_CACHE_TTL_SCAN", 5 * 60),
+            ENGINE9_MAX_WORKERS=_get_int("ENGINE9_MAX_WORKERS", 8),
             ENGINE8_CACHE_TTL_EVAL=_get_int("ENGINE8_CACHE_TTL_EVAL", 30 * 60),
             ENGINE8_SNAPSHOT_TTL_S=_get_int("ENGINE8_SNAPSHOT_TTL_S", 30 * 86400),
             ENGINE8_LLM_RESULT_TTL_S=_get_int("ENGINE8_LLM_RESULT_TTL_S", 90 * 86400),

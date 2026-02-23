@@ -14,6 +14,7 @@
     { href: "/ichimoku",        label: "Ichimoku",        desc: "Trend-continuation scanner" },
     { href: "/pairs",           label: "Engine 7",        desc: "Thematic relative value pairs scanner" },
     { href: "/post-event",      label: "Engine 8",        desc: "Post-event trade extension evaluator" },
+    { href: "/credit-stress",   label: "Engine 9",        desc: "Credit stress drift detection" },
     { href: "/calendar",        label: "Earnings Calendar", desc: "Mega-cap earnings dates and compare workflow" },
     { href: "/compare",         label: "Compare",         desc: "Multi-ticker side-by-side" },
     { href: "/news-risk",       label: "News Risk",       desc: "Macro events and headline risk" },

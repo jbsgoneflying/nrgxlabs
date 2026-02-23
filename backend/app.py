@@ -338,6 +338,12 @@ _fmp_client: FmpClient | None = None
 _api_ninjas_client_lock = threading.Lock()
 _api_ninjas_client: ApiNinjasClient | None = None
 
+_fred_client_lock = threading.Lock()
+_fred_client = None  # FredClient | None
+
+_engine9_cache = TTLCache(maxsize=64, ttl=5 * 60)  # 5 min
+_engine9_cache_lock = threading.Lock()
+
 _breach_cache = TTLCache(maxsize=512, ttl=6 * 60 * 60)  # 6 hours
 _breach_cache_lock = threading.Lock()
 
@@ -440,6 +446,21 @@ def _get_api_ninjas_client_optional() -> ApiNinjasClient | None:
                     return None
                 _api_ninjas_client = ApiNinjasClient.from_env()
         return _api_ninjas_client
+    except Exception:
+        return None
+
+
+def _get_fred_client_optional():
+    """Optional FRED client (always available since FRED is free)."""
+    global _fred_client
+    try:
+        if _fred_client is not None:
+            return _fred_client
+        with _fred_client_lock:
+            if _fred_client is None:
+                from backend.fred_client import FredClient
+                _fred_client = FredClient.from_env()
+        return _fred_client
     except Exception:
         return None
 
@@ -605,6 +626,18 @@ def post_event_page():
     if not pe_path.exists():
         raise HTTPException(status_code=500, detail="Missing static/post-event.html")
     return FileResponse(str(pe_path))
+
+
+@app.get("/credit-stress")
+def credit_stress_page():
+    """Engine 9: Credit Stress Drift page."""
+    flags = get_flags()
+    if not getattr(flags, "ENABLE_ENGINE9_CREDIT_STRESS", True):
+        raise HTTPException(status_code=404, detail="Engine 9 disabled")
+    p = STATIC_DIR / "engine9.html"
+    if not p.exists():
+        raise HTTPException(status_code=500, detail="Missing static/engine9.html")
+    return FileResponse(str(p))
 
 
 @app.get("/api/spx-ic")
@@ -5197,3 +5230,453 @@ def api_front_layer_card_insight(body: dict):
 
     insight = generate_card_insight(card_type, card_data, dms_dict)
     return insight
+
+
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║  ENGINE 9 — CREDIT STRESS DRIFT                                    ║
+# ╚══════════════════════════════════════════════════════════════════════╝
+
+@app.get("/api/engine9/scan")
+def engine9_scan():
+    """Full dashboard scan: all tiers, all 8 signals, phase + triggers, forced seller map."""
+    flags = get_flags()
+    if not getattr(flags, "ENABLE_ENGINE9_CREDIT_STRESS", True):
+        raise HTTPException(status_code=404, detail="Engine 9 disabled")
+
+    with _engine9_cache_lock:
+        cached = _engine9_cache.get("scan")
+    if cached is not None:
+        return cached
+
+    from backend.fred_client import FredClient, SERIES_HY_OAS, SERIES_IG_OAS, SERIES_DGS2, SERIES_DGS10, SERIES_FEDFUNDS
+    from backend.engine9_signals import (
+        compute_bdc_divergence, compute_spread_signal, compute_nlp_delta_of_language,
+        compute_insider_signal, compute_correlation_breakdown, compute_etf_nav_deviation,
+        compute_funding_stress, compute_time_compression, compute_weighted_composite,
+        evaluate_triggers, evaluate_thesis_health, SignalResult,
+    )
+    from backend.engine9_watchlist import (
+        TIERS, TIER_1_BDCS, TIER_2_ALT_MANAGERS, TIER_3_CREDIT_ETFS, TIER_4_VOL_HEDGES,
+        compute_ticker_score, compute_forced_seller_map, compute_put_skew_25d, compute_iv_rank,
+    )
+    from backend.eodhd_client import EodhdClient
+
+    fred = _get_fred_client_optional()
+    orats = _get_client_optional()
+    ninjas = _get_api_ninjas_client_optional()
+
+    try:
+        eodhd = EodhdClient.from_env()
+    except Exception:
+        eodhd = None
+
+    today_str = dt.date.today().isoformat()
+    one_year_ago = (dt.date.today() - dt.timedelta(days=365)).isoformat()
+
+    # ── Fetch FRED data ──
+    hy_oas_values: list[float] = []
+    ig_oas_values: list[float] = []
+    dgs2_values: list[float] = []
+    dgs10_values: list[float] = []
+    ff_latest = None
+    ff_30d = None
+
+    if fred:
+        try:
+            hy_res = fred.get_series(SERIES_HY_OAS, one_year_ago, today_str)
+            hy_oas_values = [o.value for o in hy_res.observations if o.value is not None]
+        except Exception as e:
+            LOG.warning("FRED HY OAS fetch failed: %s", e)
+        try:
+            ig_res = fred.get_series(SERIES_IG_OAS, one_year_ago, today_str)
+            ig_oas_values = [o.value for o in ig_res.observations if o.value is not None]
+        except Exception as e:
+            LOG.warning("FRED IG OAS fetch failed: %s", e)
+        try:
+            d2_res = fred.get_series(SERIES_DGS2, one_year_ago, today_str)
+            dgs2_values = [o.value for o in d2_res.observations if o.value is not None]
+        except Exception as e:
+            LOG.warning("FRED DGS2 fetch failed: %s", e)
+        try:
+            d10_res = fred.get_series(SERIES_DGS10, one_year_ago, today_str)
+            dgs10_values = [o.value for o in d10_res.observations if o.value is not None]
+        except Exception as e:
+            LOG.warning("FRED DGS10 fetch failed: %s", e)
+        try:
+            ff_res = fred.get_series(SERIES_FEDFUNDS, (dt.date.today() - dt.timedelta(days=60)).isoformat(), today_str)
+            ff_vals = [o.value for o in ff_res.observations if o.value is not None]
+            if ff_vals:
+                ff_latest = ff_vals[-1]
+                ff_30d = ff_vals[-30] if len(ff_vals) >= 30 else ff_vals[0]
+        except Exception:
+            pass
+
+    # ── Fetch price data via EODHD ──
+    def _fetch_prices(ticker: str, days: int = 120) -> list[float]:
+        if not eodhd:
+            return []
+        try:
+            start = (dt.date.today() - dt.timedelta(days=days)).isoformat()
+            resp = eodhd.get_eod(ticker + ".US", start)
+            return [float(r.get("adjusted_close") or r.get("close", 0)) for r in (resp.rows or []) if r.get("adjusted_close") or r.get("close")]
+        except Exception:
+            return []
+
+    all_tickers = TIER_1_BDCS + TIER_2_ALT_MANAGERS + TIER_3_CREDIT_ETFS + TIER_4_VOL_HEDGES + ["SPY"]
+    price_data: dict[str, list[float]] = {}
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futs = {pool.submit(_fetch_prices, t): t for t in all_tickers}
+        for fut in as_completed(futs):
+            t = futs[fut]
+            try:
+                price_data[t] = fut.result()
+            except Exception:
+                price_data[t] = []
+
+    # ── Fetch VIX for spread signal ──
+    vix_prices = _fetch_prices("VIX") if eodhd else []
+
+    # ── Compute Signals ──
+    signal_results: list[SignalResult] = []
+
+    # Signal 1: BDC Divergence (aggregate across Tier 1)
+    bdc_scores = []
+    for bdc in TIER_1_BDCS:
+        p = price_data.get(bdc, [])
+        sig = compute_bdc_divergence(
+            prices_30d=p[-30:] if len(p) >= 30 else p,
+            prices_60d=p[-60:] if len(p) >= 60 else p,
+            prices_90d=p[-90:] if len(p) >= 90 else p,
+            last_book_value=None,
+            current_price=p[-1] if p else None,
+        )
+        bdc_scores.append(sig.score)
+    avg_bdc = sum(bdc_scores) / len(bdc_scores) if bdc_scores else 0
+    bdc_signal = SignalResult(
+        key="bdc_divergence", label="BDC Divergence",
+        score=round(avg_bdc, 1), weight=0.25,
+        detail=f"Avg across {len(TIER_1_BDCS)} BDCs", triggered=avg_bdc > 40,
+        data={"avg_score": round(avg_bdc, 1), "bdc_count": len(TIER_1_BDCS)},
+    )
+    signal_results.append(bdc_signal)
+
+    # Signal 2: Spread Acceleration
+    spread_signal = compute_spread_signal(hy_oas_values, vix_prices)
+    signal_results.append(spread_signal)
+
+    # Signal 3: NLP Delta-of-Language (use API Ninjas transcripts if available)
+    nlp_signal = SignalResult(
+        key="nlp_language", label="NLP Language Drift",
+        score=0, weight=0.05, detail="Awaiting transcript data",
+    )
+    if ninjas:
+        all_transcripts: list[dict] = []
+        for t in (TIER_1_BDCS[:2] + TIER_2_ALT_MANAGERS[:2]):
+            try:
+                transcripts = ninjas.get_transcript_history(t, quarters=4)
+                all_transcripts.extend(transcripts)
+            except Exception:
+                pass
+        if all_transcripts:
+            nlp_signal = compute_nlp_delta_of_language(all_transcripts)
+    signal_results.append(nlp_signal)
+
+    # Signal 4: Insider Selling (aggregate)
+    insider_totals = {"net_30d": 0, "net_60d": 0, "net_90d": 0, "txn_count": 0}
+    if ninjas:
+        for t in (TIER_1_BDCS + TIER_2_ALT_MANAGERS):
+            try:
+                data = ninjas.get_insider_net_selling(t, days=90)
+                insider_totals["net_30d"] += data.get("net_selling", 0) if data.get("days", 90) <= 30 else 0
+                insider_totals["net_60d"] += data.get("net_selling", 0) if data.get("days", 90) <= 60 else 0
+                insider_totals["net_90d"] += data.get("net_selling", 0)
+                insider_totals["txn_count"] += data.get("transaction_count", 0)
+            except Exception:
+                pass
+        insider_30_data = {}
+        for t in (TIER_1_BDCS + TIER_2_ALT_MANAGERS):
+            try:
+                d = ninjas.get_insider_net_selling(t, days=30)
+                insider_30_data[t] = d.get("net_selling", 0)
+            except Exception:
+                insider_30_data[t] = 0
+    else:
+        insider_30_data = {}
+
+    insider_signal = compute_insider_signal(
+        insider_totals["net_30d"], insider_totals["net_60d"],
+        insider_totals["net_90d"], insider_totals["txn_count"],
+    )
+    signal_results.append(insider_signal)
+
+    # Signal 5: Correlation Breakdown
+    spy_prices = price_data.get("SPY", [])
+    hyg_prices = price_data.get("HYG", [])
+    spy_rets = [(spy_prices[i] / spy_prices[i-1] - 1) for i in range(1, len(spy_prices))] if len(spy_prices) > 1 else []
+    hyg_rets = [(hyg_prices[i] / hyg_prices[i-1] - 1) for i in range(1, len(hyg_prices))] if len(hyg_prices) > 1 else []
+    corr_signal = compute_correlation_breakdown(spy_rets, hyg_rets, hyg_prices)
+    signal_results.append(corr_signal)
+
+    # Signal 6: ETF Price/NAV
+    nav_signal = compute_etf_nav_deviation(hyg_prices, etf_nav=None)
+    signal_results.append(nav_signal)
+
+    # Signal 7: Funding Stress
+    bkln_prices = price_data.get("BKLN", [])
+    funding_signal = compute_funding_stress(bkln_prices, hyg_prices, dgs2_values, dgs10_values)
+    signal_results.append(funding_signal)
+
+    # Signal 8: Time Compression
+    tc_signal = compute_time_compression(signal_results, {})
+    signal_results.append(tc_signal)
+
+    # ── Composite & Phase ──
+    composite = compute_weighted_composite(signal_results, tc_signal.triggered)
+
+    # ── Triggers ──
+    sig_map = {s.key: s for s in signal_results}
+    triggers = evaluate_triggers(sig_map, hyg_prices)
+
+    # ── Thesis Health ──
+    hy_20d_ma = None
+    if len(hy_oas_values) >= 20:
+        hy_20d_ma = sum(hy_oas_values[-20:]) / 20
+    thesis = evaluate_thesis_health(ff_latest, ff_30d, hy_oas_values[-1] if hy_oas_values else None, hy_20d_ma)
+
+    # ── Watchlist Scores ──
+    def _skew_for(ticker: str) -> float | None:
+        if not orats:
+            return None
+        try:
+            resp = orats.live_strikes(ticker, fields="strike,putIv,callIv,putDelta,smvVol,spotPrice,stockPrice")
+            return compute_put_skew_25d(resp.rows or [])
+        except Exception:
+            return None
+
+    watchlist_by_tier: dict[str, list] = {}
+    for tier_key, tier_info in TIERS.items():
+        scores = []
+        for ticker in tier_info["tickers"]:
+            p = price_data.get(ticker, [])
+            skew = _skew_for(ticker) if tier_key in ("tier1", "tier2") else None
+            insider = insider_30_data.get(ticker, 0) if insider_30_data else None
+            ts = compute_ticker_score(
+                ticker, p,
+                iv_rank=None,
+                put_skew_25d=skew,
+                insider_net_30d=insider,
+                current_phase=composite.get("phase", 1),
+            )
+            scores.append({
+                "ticker": ts.ticker, "tier": ts.tier, "price": ts.price,
+                "change_5d_pct": ts.change_5d_pct, "change_20d_pct": ts.change_20d_pct,
+                "iv_rank": ts.iv_rank, "put_skew_25d": ts.put_skew_25d,
+                "insider_net_30d": ts.insider_net_30d, "signal_score": ts.signal_score,
+                "phase_alignment": ts.phase_alignment, "conviction": ts.conviction,
+            })
+        scores.sort(key=lambda x: x["signal_score"], reverse=True)
+        watchlist_by_tier[tier_key] = scores
+
+    # ── Forced Seller Map ──
+    fsd: dict[str, dict] = {}
+    for t in TIER_1_BDCS + TIER_2_ALT_MANAGERS:
+        p = price_data.get(t, [])
+        chg20 = (p[-1] / p[-21] - 1) * 100 if len(p) >= 21 else None
+        fsd[t] = {
+            "leverage": None,
+            "liquidity_mismatch": None,
+            "retail_exposure": None,
+            "put_skew_25d": _skew_for(t),
+            "price_20d_pct": chg20,
+            "insider_net_30d": insider_30_data.get(t, 0) if insider_30_data else None,
+        }
+    forced_map = compute_forced_seller_map(ticker_data=fsd)
+
+    result = {
+        "composite": composite,
+        "signals": [{
+            "key": s.key, "label": s.label, "score": s.score,
+            "weight": s.weight, "detail": s.detail, "triggered": s.triggered,
+            "data": s.data,
+        } for s in signal_results],
+        "triggers": [{
+            "name": t.name, "level": t.level, "active": t.active,
+            "condition": t.condition, "action": t.action, "sizing": t.sizing,
+        } for t in triggers],
+        "thesis_health": thesis,
+        "forced_seller_map": [{
+            "ticker": e.ticker, "tier": e.tier,
+            "fragility_score": e.fragility_score, "leverage": e.leverage,
+            "liquidity_mismatch": e.liquidity_mismatch,
+            "retail_exposure": e.retail_exposure,
+            "put_skew_25d": e.put_skew_25d,
+            "price_20d_pct": e.price_20d_pct,
+            "insider_net_30d": e.insider_net_30d,
+        } for e in forced_map],
+        "watchlist": watchlist_by_tier,
+        "updated_at": dt.datetime.utcnow().isoformat() + "Z",
+    }
+
+    with _engine9_cache_lock:
+        _engine9_cache["scan"] = result
+    return result
+
+
+@app.get("/api/engine9/spreads")
+def engine9_spreads():
+    """Credit spread time series for the chart: HY OAS, IG OAS, 2s10s curve."""
+    from backend.fred_client import SERIES_HY_OAS, SERIES_IG_OAS, SERIES_DGS2, SERIES_DGS10
+    fred = _get_fred_client_optional()
+    if not fred:
+        raise HTTPException(status_code=503, detail="FRED client unavailable")
+
+    today_str = dt.date.today().isoformat()
+    one_year_ago = (dt.date.today() - dt.timedelta(days=365)).isoformat()
+
+    result: dict = {}
+    try:
+        hy = fred.get_series(SERIES_HY_OAS, one_year_ago, today_str)
+        result["hy_oas"] = {
+            "dates": [o.date for o in hy.observations if o.value is not None],
+            "values": [o.value for o in hy.observations if o.value is not None],
+        }
+    except Exception:
+        result["hy_oas"] = {"dates": [], "values": []}
+
+    try:
+        ig = fred.get_series(SERIES_IG_OAS, one_year_ago, today_str)
+        result["ig_oas"] = {
+            "dates": [o.date for o in ig.observations if o.value is not None],
+            "values": [o.value for o in ig.observations if o.value is not None],
+        }
+    except Exception:
+        result["ig_oas"] = {"dates": [], "values": []}
+
+    try:
+        d2 = fred.get_series(SERIES_DGS2, one_year_ago, today_str)
+        d10 = fred.get_series(SERIES_DGS10, one_year_ago, today_str)
+        d2_map = {o.date: o.value for o in d2.observations if o.value is not None}
+        d10_map = {o.date: o.value for o in d10.observations if o.value is not None}
+        common_dates = sorted(set(d2_map.keys()) & set(d10_map.keys()))
+        result["curve_2s10s"] = {
+            "dates": common_dates,
+            "values": [round(d10_map[d] - d2_map[d], 3) for d in common_dates],
+        }
+    except Exception:
+        result["curve_2s10s"] = {"dates": [], "values": []}
+
+    return result
+
+
+@app.get("/api/engine9/ticker/{ticker}")
+def engine9_ticker_detail(ticker: str):
+    """Deep dive on a single ticker: price, IV, skew, insider, transcript history."""
+    from backend.engine9_watchlist import compute_put_skew_25d, get_tier_for_ticker
+    from backend.eodhd_client import EodhdClient
+
+    ticker = ticker.upper().strip()
+    tier = get_tier_for_ticker(ticker)
+
+    orats = _get_client_optional()
+    ninjas = _get_api_ninjas_client_optional()
+
+    try:
+        eodhd = EodhdClient.from_env()
+    except Exception:
+        eodhd = None
+
+    result: dict = {"ticker": ticker, "tier": tier}
+
+    if eodhd:
+        try:
+            start = (dt.date.today() - dt.timedelta(days=120)).isoformat()
+            resp = eodhd.get_eod(ticker + ".US", start)
+            prices = [float(r.get("adjusted_close") or r.get("close", 0)) for r in (resp.rows or []) if r.get("adjusted_close") or r.get("close")]
+            result["prices"] = prices[-60:]
+            result["price"] = prices[-1] if prices else None
+            result["change_5d"] = round((prices[-1] / prices[-6] - 1) * 100, 2) if len(prices) >= 6 else None
+            result["change_20d"] = round((prices[-1] / prices[-21] - 1) * 100, 2) if len(prices) >= 21 else None
+        except Exception:
+            result["prices"] = []
+
+    if orats:
+        try:
+            resp = orats.live_strikes(ticker, fields="strike,putIv,callIv,putDelta,smvVol,spotPrice,stockPrice")
+            result["put_skew_25d"] = compute_put_skew_25d(resp.rows or [])
+        except Exception:
+            result["put_skew_25d"] = None
+
+    if ninjas:
+        try:
+            insider = ninjas.get_insider_net_selling(ticker, days=90)
+            result["insider"] = insider
+        except Exception:
+            result["insider"] = None
+        try:
+            transcripts = ninjas.get_latest_transcripts(ticker, limit=4)
+            result["transcripts"] = transcripts
+        except Exception:
+            result["transcripts"] = []
+
+    return result
+
+
+@app.post("/api/engine9/desk-notes")
+def engine9_desk_notes(body: dict):
+    """LLM-powered credit desk morning brief (GPT-5.2)."""
+    import openai
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+
+    scan_data = body.get("scan_data") or {}
+
+    system_prompt = """You are the head of a credit trading desk at a top-tier quantitative hedge fund.
+You are writing a morning brief for the desk, focused on private credit stress and short positioning.
+
+Your tone: direct, professional, no hedging language. Speak like a senior desk head.
+
+You receive the current state of our Credit Stress Drift engine including:
+- 8 signal scores with weights
+- Current phase (1-4) and composite score
+- Active execution triggers (A/B/C)
+- Forced seller rankings
+- Thesis health indicators
+
+Respond ONLY with valid JSON containing these fields:
+{
+  "phase_assessment": "2-3 sentence assessment of current credit stress phase",
+  "active_triggers_commentary": "commentary on which triggers are active and what they mean for positioning",
+  "top_trades": [
+    {"instrument": "TICKER", "action": "short/put spread/avoid", "sizing": "% of book", "rationale": "why"}
+  ],
+  "forced_seller_spotlight": "1-2 sentences on the most vulnerable player and why",
+  "risk_flags": "what could go wrong this week",
+  "invalidation_triggers": "what would make us unwind positions",
+  "position_sizing_guidance": "overall book risk guidance based on current phase"
+}"""
+
+    payload_str = json.dumps(scan_data, default=str)[:12000]
+    user_msg = f"Current Engine 9 scan state:\n{payload_str}"
+
+    try:
+        client = openai.OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.4,
+            max_tokens=2000,
+        )
+        text = resp.choices[0].message.content or ""
+        try:
+            parsed = json.loads(text)
+            return parsed
+        except json.JSONDecodeError:
+            return {"raw_text": text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM call failed: {type(e).__name__}: {e}")

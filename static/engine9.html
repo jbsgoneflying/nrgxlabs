@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raven-Tech.co · Engine 9 · Credit Stress Drift</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="Raven-Tech.co — Engine 9 Credit Stress Drift detection, pre-event positioning engine for private credit stress monitoring." />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="apple-touch-icon" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=10" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <style>
+      :root {
+        --e9-green:  #34c759;
+        --e9-amber:  #ff9f0a;
+        --e9-orange: #ff6723;
+        --e9-red:    #ff3b30;
+        --e9-muted:  var(--muted, #888);
+        --e9-border: var(--border, rgba(11,11,15,0.08));
+        --e9-card-bg: var(--surface-card, #fff);
+        --e9-bg:     var(--bg, #fafafa);
+      }
+
+      .e9Wrap { max-width: 1280px; margin: 0 auto; padding: 20px 16px 80px; }
+
+      /* ── Section A: Phase + Triggers ── */
+      .e9PhaseRow {
+        display: flex; align-items: stretch; gap: 16px; flex-wrap: wrap; margin-bottom: 20px;
+      }
+      .e9PhaseBadge {
+        flex: 0 0 200px; display: flex; flex-direction: column; align-items: center;
+        justify-content: center; padding: 24px 20px; border-radius: 14px;
+        border: 2px solid var(--e9-border); background: var(--e9-card-bg); text-align: center;
+      }
+      .e9PhaseBadge[data-phase="1"] { border-color: var(--e9-green); }
+      .e9PhaseBadge[data-phase="2"] { border-color: var(--e9-amber); }
+      .e9PhaseBadge[data-phase="3"] { border-color: var(--e9-orange); }
+      .e9PhaseBadge[data-phase="4"] { border-color: var(--e9-red); }
+      .e9PhaseNum { font-size: 48px; font-weight: 800; line-height: 1; }
+      .e9PhaseBadge[data-phase="1"] .e9PhaseNum { color: var(--e9-green); }
+      .e9PhaseBadge[data-phase="2"] .e9PhaseNum { color: var(--e9-amber); }
+      .e9PhaseBadge[data-phase="3"] .e9PhaseNum { color: var(--e9-orange); }
+      .e9PhaseBadge[data-phase="4"] .e9PhaseNum { color: var(--e9-red); }
+      .e9PhaseLabel { font-size: 12px; color: var(--e9-muted); margin-top: 6px; }
+      .e9Composite { font-size: 14px; font-weight: 700; margin-top: 4px; }
+
+      .e9TriggersCard {
+        flex: 1 1 300px; padding: 20px; border-radius: 14px;
+        border: 1px solid var(--e9-border); background: var(--e9-card-bg);
+      }
+      .e9TriggersTitle { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--e9-muted); margin-bottom: 12px; }
+      .e9TriggerRow { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--e9-border); }
+      .e9TriggerRow:last-child { border-bottom: none; }
+      .e9TriggerBadge {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 32px; height: 32px; border-radius: 8px; font-weight: 800; font-size: 14px;
+        background: rgba(0,0,0,0.04); color: var(--e9-muted); border: 2px solid transparent;
+      }
+      .e9TriggerBadge.active { background: var(--e9-red); color: #fff; border-color: var(--e9-red); animation: e9pulse 1.5s infinite; }
+      .e9TriggerBadge.active[data-level="A"] { background: var(--e9-amber); border-color: var(--e9-amber); }
+      .e9TriggerBadge.active[data-level="B"] { background: var(--e9-orange); border-color: var(--e9-orange); }
+      @keyframes e9pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
+      .e9TriggerInfo { flex: 1; }
+      .e9TriggerName { font-size: 13px; font-weight: 600; }
+      .e9TriggerCondition { font-size: 11px; color: var(--e9-muted); }
+
+      .e9ThesisCard {
+        flex: 0 0 220px; padding: 20px; border-radius: 14px;
+        border: 1px solid var(--e9-border); background: var(--e9-card-bg);
+      }
+      .e9ThesisTitle { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--e9-muted); margin-bottom: 12px; }
+      .e9ThesisItem { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
+      .e9ThesisDot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+      .e9ThesisDot.healthy { background: var(--e9-green); }
+      .e9ThesisDot.warning { background: var(--e9-red); }
+
+      /* ── Time Compression Banner ── */
+      .e9CompressionBanner {
+        display: none; padding: 10px 16px; margin-bottom: 16px; border-radius: 10px;
+        background: rgba(255,59,48,0.08); border: 1px solid rgba(255,59,48,0.3);
+        font-size: 13px; font-weight: 600; color: var(--e9-red); text-align: center;
+      }
+      .e9CompressionBanner.visible { display: block; }
+
+      /* ── Section B: Signal Grid ── */
+      .e9SectionTitle {
+        font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+        color: var(--e9-muted); margin: 24px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--e9-border);
+      }
+      .e9SignalGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-bottom: 20px; }
+      .e9SigCard {
+        padding: 16px; border-radius: 12px; border: 1px solid var(--e9-border);
+        background: var(--e9-card-bg); position: relative; overflow: hidden;
+      }
+      .e9SigCard.triggered { border-color: var(--e9-red); }
+      .e9SigHeader { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+      .e9SigName { font-size: 13px; font-weight: 700; }
+      .e9SigWeight { font-size: 11px; color: var(--e9-muted); background: rgba(0,0,0,0.03); padding: 2px 6px; border-radius: 4px; }
+      .e9SigScore { font-size: 28px; font-weight: 800; line-height: 1; }
+      .e9SigScore.low { color: var(--e9-green); }
+      .e9SigScore.med { color: var(--e9-amber); }
+      .e9SigScore.high { color: var(--e9-red); }
+      .e9SigBar { height: 4px; border-radius: 2px; background: rgba(0,0,0,0.06); margin: 8px 0; }
+      .e9SigBarFill { height: 100%; border-radius: 2px; transition: width 0.4s; }
+      .e9SigBarFill.low { background: var(--e9-green); }
+      .e9SigBarFill.med { background: var(--e9-amber); }
+      .e9SigBarFill.high { background: var(--e9-red); }
+      .e9SigDetail { font-size: 11px; color: var(--e9-muted); line-height: 1.4; }
+
+      /* ── Section C: Forced Seller Map ── */
+      .e9Table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 20px; }
+      .e9Table th {
+        text-align: left; padding: 8px 10px; font-weight: 700; font-size: 11px;
+        text-transform: uppercase; letter-spacing: 0.03em; color: var(--e9-muted);
+        border-bottom: 2px solid var(--e9-border); cursor: pointer; white-space: nowrap;
+      }
+      .e9Table td { padding: 8px 10px; border-bottom: 1px solid var(--e9-border); }
+      .e9Table tr:hover td { background: rgba(0,0,0,0.02); }
+      .e9FragHigh { color: var(--e9-red); font-weight: 700; }
+      .e9FragMed { color: var(--e9-orange); font-weight: 600; }
+      .e9FragLow { color: var(--e9-muted); }
+      .e9Ticker { font-weight: 700; font-family: var(--font-mono, monospace); }
+      .e9Negative { color: var(--e9-red); }
+      .e9Positive { color: var(--e9-green); }
+
+      /* ── Section D: Tiered Watchlist ── */
+      .e9TierGroup { margin-bottom: 16px; }
+      .e9TierHeader {
+        display: flex; align-items: center; gap: 8px; padding: 10px 14px; cursor: pointer;
+        background: rgba(0,0,0,0.02); border-radius: 10px; border: 1px solid var(--e9-border);
+        font-size: 13px; font-weight: 700;
+      }
+      .e9TierHeader:hover { background: rgba(0,0,0,0.04); }
+      .e9TierChevron { transition: transform 0.2s; font-size: 10px; }
+      .e9TierHeader.open .e9TierChevron { transform: rotate(90deg); }
+      .e9TierBody { display: none; padding-top: 8px; }
+      .e9TierBody.open { display: block; }
+      .e9TierBadge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
+      .e9TierBadge.tier1 { background: rgba(255,59,48,0.1); color: #cc2f26; }
+      .e9TierBadge.tier2 { background: rgba(255,103,35,0.1); color: #cc5217; }
+      .e9TierBadge.tier3 { background: rgba(255,159,10,0.1); color: #997a00; }
+      .e9TierBadge.tier4 { background: rgba(52,199,89,0.1); color: #1b8a3e; }
+      .e9ConvBadge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
+      .e9ConvBadge.high { background: rgba(255,59,48,0.1); color: #cc2f26; }
+      .e9ConvBadge.medium { background: rgba(255,159,10,0.1); color: #997a00; }
+      .e9ConvBadge.low { background: rgba(0,0,0,0.04); color: var(--e9-muted); }
+      .e9ConvBadge.neutral { background: rgba(0,0,0,0.02); color: var(--e9-muted); }
+
+      /* ── Section E: Chart ── */
+      .e9ChartWrap {
+        padding: 20px; border-radius: 14px; border: 1px solid var(--e9-border);
+        background: var(--e9-card-bg); margin-bottom: 20px; min-height: 320px;
+      }
+      .e9ChartCanvas { width: 100% !important; max-height: 360px; }
+
+      /* ── Desk Notes Button ── */
+      .e9DeskBtn {
+        display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px;
+        border-radius: 10px; border: 1px solid var(--e9-border); background: var(--e9-card-bg);
+        font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s;
+      }
+      .e9DeskBtn:hover { background: rgba(0,0,0,0.04); }
+      .e9DeskBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+      /* ── Desk Notes Popup ── */
+      .e9DeskPopup {
+        display: none; position: fixed; top: 60px; right: 20px; width: 520px; max-height: 80vh;
+        overflow-y: auto; padding: 20px; border-radius: 14px; border: 1px solid var(--e9-border);
+        background: var(--e9-card-bg); box-shadow: 0 12px 40px rgba(0,0,0,0.15); z-index: 9000;
+      }
+      .e9DeskPopup.visible { display: block; }
+      .e9DeskPopupHeader { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+      .e9DeskPopupTitle { font-size: 15px; font-weight: 700; }
+      .e9DeskPopupClose { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--e9-muted); padding: 4px 8px; }
+      .e9DeskContent { font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+      .e9DeskContent h3 { font-size: 13px; font-weight: 700; margin: 12px 0 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+
+      /* ── Scan button ── */
+      .e9ScanRow { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+      .e9ScanBtn {
+        display: inline-flex; align-items: center; gap: 8px; padding: 10px 24px; border-radius: 10px;
+        background: #0a0a0f; color: #fff; font-size: 13px; font-weight: 700; border: none; cursor: pointer;
+      }
+      .e9ScanBtn:hover { background: #1a1a2e; }
+      .e9ScanBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+      .e9Updated { font-size: 11px; color: var(--e9-muted); }
+
+      /* ── Loading State ── */
+      .e9Loading { text-align: center; padding: 60px 20px; color: var(--e9-muted); font-size: 14px; }
+      .e9Spinner { display: inline-block; width: 24px; height: 24px; border: 3px solid rgba(0,0,0,0.1); border-top-color: #0a0a0f; border-radius: 50%; animation: e9spin 0.8s linear infinite; margin-bottom: 12px; }
+      @keyframes e9spin { to { transform: rotate(360deg); } }
+
+      /* ── Phase Action Banner ── */
+      .e9ActionBanner {
+        padding: 12px 16px; border-radius: 10px; font-size: 13px; font-weight: 600;
+        margin-bottom: 16px; background: rgba(0,0,0,0.03); border: 1px solid var(--e9-border);
+      }
+
+      /* ── Dark mode ── */
+      @media (prefers-color-scheme: dark) {
+        .e9TierHeader { background: rgba(255,255,255,0.04); }
+        .e9TierHeader:hover { background: rgba(255,255,255,0.06); }
+        .e9ScanBtn { background: #e0e0e0; color: #0a0a0f; }
+        .e9ScanBtn:hover { background: #fff; }
+        .e9Table tr:hover td { background: rgba(255,255,255,0.03); }
+        .e9SigWeight { background: rgba(255,255,255,0.06); }
+        .e9SigBar { background: rgba(255,255,255,0.08); }
+        .e9ActionBanner { background: rgba(255,255,255,0.03); }
+      }
+
+      @media (max-width: 768px) {
+        .e9PhaseRow { flex-direction: column; }
+        .e9PhaseBadge { flex: unset; }
+        .e9ThesisCard { flex: unset; }
+        .e9SignalGrid { grid-template-columns: 1fr; }
+        .e9DeskPopup { width: calc(100vw - 32px); right: 16px; top: 40px; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="appHeader">
+      <a class="appLogo" href="/">
+        <img src="/static/RavenONLY.png" alt="Raven-Tech" width="32" height="32" />
+        <span>Engine 9 <small style="opacity:.5">Credit Stress Drift</small></span>
+      </a>
+    </header>
+
+    <main class="e9Wrap" id="e9Root">
+      <!-- Scan controls -->
+      <div class="e9ScanRow">
+        <button class="e9ScanBtn" id="e9ScanBtn">Run Full Scan</button>
+        <span class="e9Updated" id="e9Updated"></span>
+        <button class="e9DeskBtn" id="e9DeskNotesBtn" disabled>Desk Notes</button>
+      </div>
+
+      <!-- Loading state -->
+      <div class="e9Loading" id="e9Loading" style="display:none;">
+        <div class="e9Spinner"></div>
+        <div>Scanning credit stress signals across all tiers...</div>
+      </div>
+
+      <!-- Time Compression Banner -->
+      <div class="e9CompressionBanner" id="e9CompressionBanner">
+        TIME COMPRESSION DETECTED — Multiple signals clustering within 5 trading days. Events may be accelerating.
+      </div>
+
+      <!-- Section A: Phase + Triggers + Thesis -->
+      <div class="e9PhaseRow" id="e9PhaseRow" style="display:none;">
+        <div class="e9PhaseBadge" id="e9PhaseBadge" data-phase="1">
+          <div class="e9PhaseNum" id="e9PhaseNum">—</div>
+          <div class="e9PhaseLabel" id="e9PhaseLabel">Awaiting scan</div>
+          <div class="e9Composite" id="e9Composite"></div>
+        </div>
+        <div class="e9TriggersCard" id="e9TriggersCard">
+          <div class="e9TriggersTitle">Execution Triggers</div>
+          <div id="e9TriggersList"></div>
+        </div>
+        <div class="e9ThesisCard" id="e9ThesisCard">
+          <div class="e9ThesisTitle">Thesis Health</div>
+          <div id="e9ThesisHealth"></div>
+        </div>
+      </div>
+
+      <!-- Phase Action -->
+      <div class="e9ActionBanner" id="e9ActionBanner" style="display:none;"></div>
+
+      <!-- Section B: Signal Grid -->
+      <div class="e9SectionTitle" id="e9SigTitle" style="display:none;">Signal Grid</div>
+      <div class="e9SignalGrid" id="e9SignalGrid"></div>
+
+      <!-- Section C: Forced Seller Map -->
+      <div class="e9SectionTitle" id="e9ForcedTitle" style="display:none;">Forced Seller Map</div>
+      <div id="e9ForcedWrap"></div>
+
+      <!-- Section D: Tiered Watchlist -->
+      <div class="e9SectionTitle" id="e9WatchTitle" style="display:none;">Tiered Watchlist</div>
+      <div id="e9WatchWrap"></div>
+
+      <!-- Section E: Credit Spread Chart -->
+      <div class="e9SectionTitle" id="e9ChartTitle" style="display:none;">Credit Spread History</div>
+      <div class="e9ChartWrap" id="e9ChartWrap" style="display:none;">
+        <canvas class="e9ChartCanvas" id="e9SpreadChart"></canvas>
+      </div>
+    </main>
+
+    <!-- Desk Notes Popup -->
+    <div class="e9DeskPopup" id="e9DeskPopup">
+      <div class="e9DeskPopupHeader">
+        <span class="e9DeskPopupTitle">Credit Desk — Morning Brief</span>
+        <button class="e9DeskPopupClose" id="e9DeskPopupClose">&times;</button>
+      </div>
+      <div class="e9DeskContent" id="e9DeskContent">
+        <div class="e9Loading">
+          <div class="e9Spinner"></div>
+          <div>Generating desk brief...</div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/ui_kit.js?v=3"></script>
+    <script src="/static/engine9.js?v=1"></script>
+    <script src="/static/nav.js"></script>
+  </body>
+</html>
