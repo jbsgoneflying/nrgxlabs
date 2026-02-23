@@ -12,14 +12,103 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <style>
       /* ── Engine 9 — Credit Stress Drift ──────────────────────────────── */
-
-      /* Override body gradient for Engine 9 — clean flat background */
       body { background: var(--bg) !important; }
 
-      /* ── Section A: Phase + Triggers ── */
-      .e9PhaseRow {
-        display: flex; align-items: stretch; gap: 14px; flex-wrap: wrap; margin-bottom: 18px;
+      /* ── Dark Glass Draggable Popups (matches E8 pattern) ── */
+      .e9Popup {
+        position: fixed; z-index: 10000; width: 520px; max-height: 85vh;
+        overflow-y: auto; border-radius: 16px;
+        background: rgba(28,28,30,.98);
+        backdrop-filter: blur(40px) saturate(180%);
+        -webkit-backdrop-filter: blur(40px) saturate(180%);
+        box-shadow: 0 20px 60px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.08) inset;
+        user-select: none; color: #fff; display: none;
       }
+      .e9Popup.visible { display: block; }
+      .e9Popup.isDragging { cursor: grabbing; transition: none; }
+      .e9PopupHeader {
+        display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        padding: 14px 16px; background: rgba(255,255,255,.06);
+        border-bottom: 1px solid rgba(255,255,255,.08); cursor: grab;
+      }
+      .e9PopupTitle { font-size: 14px; font-weight: 700; line-height: 1.3; color: #fff; flex: 1; }
+      .e9PopupClose {
+        width: 24px; height: 24px; border-radius: 6px; border: none;
+        background: rgba(255,255,255,.12); color: rgba(255,255,255,.7);
+        font-size: 16px; cursor: pointer; display: flex; align-items: center;
+        justify-content: center; transition: background .15s ease;
+      }
+      .e9PopupClose:hover { background: rgba(255,255,255,.22); }
+      .e9PopupBody {
+        padding: 16px; font-size: 12px; line-height: 1.6;
+        color: rgba(255,255,255,.88); white-space: normal; word-wrap: break-word;
+      }
+      .e9PopupBody h3 {
+        font-size: 11px; font-weight: 700; margin: 14px 0 6px;
+        text-transform: uppercase; letter-spacing: 0.05em;
+        color: rgba(255,255,255,.5); border-bottom: 1px solid rgba(255,255,255,.08);
+        padding-bottom: 4px;
+      }
+      .e9PopupBody h3:first-child { margin-top: 0; }
+      .e9PopupBody p { margin: 0 0 8px; }
+      .e9PopupBody strong { color: #fff; }
+      .e9PopupBody ul { margin: 4px 0 8px; padding-left: 16px; }
+      .e9PopupBody li { margin-bottom: 3px; }
+      .e9PopupBody pre { white-space: pre-wrap; font-size: 11px; color: rgba(255,255,255,.7); }
+      .e9PopupSpinner {
+        display: inline-block; width: 18px; height: 18px;
+        border: 2px solid rgba(255,255,255,.15); border-top-color: rgba(255,255,255,.7);
+        border-radius: 50%; animation: e9spin 0.8s linear infinite;
+      }
+      .e9PopupLoading { text-align: center; padding: 40px 20px; color: rgba(255,255,255,.5); font-size: 13px; }
+
+      /* ── Thesis-specific inside popup ── */
+      .e9ThesisSection { margin-bottom: 14px; }
+      .e9ThesisSection h4 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: rgba(255,255,255,.45); margin: 0 0 6px; }
+      .e9ScenarioGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+      .e9ScenarioCard {
+        padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.1);
+        background: rgba(255,255,255,.04); font-size: 10px;
+      }
+      .e9ScenarioCard .label { font-weight: 700; margin-bottom: 4px; color: rgba(255,255,255,.6); }
+      .e9ScenarioCard .prob { font-size: 16px; font-weight: 800; color: #fff; }
+      .e9RiskItem, .e9ConnectionItem, .e9InstrItem {
+        padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: 11px; line-height: 1.4;
+      }
+      .e9OneLiner {
+        font-size: 13px; font-weight: 700; padding: 10px 14px; border-radius: 8px;
+        background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); margin-bottom: 14px;
+      }
+
+      /* ── Contextual LLM Insight Button ── */
+      .e9InsightBtn {
+        display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px;
+        border-radius: 6px; border: 1px solid var(--border); background: var(--surfaceSolid);
+        font-size: 9px; font-weight: 600; color: var(--muted); cursor: pointer;
+        transition: all .15s ease; letter-spacing: 0.02em;
+      }
+      .e9InsightBtn:hover { background: var(--hover); color: var(--text); border-color: var(--text); }
+      .e9InsightBtn.loading { opacity: 0.5; cursor: wait; }
+      .e9InsightBtn .ico { font-size: 11px; }
+
+      /* Insight rendered inside popup */
+      .e9InsightField { margin-bottom: 10px; }
+      .e9InsightField .e9ILabel {
+        font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+        color: rgba(255,255,255,.4); margin-bottom: 3px;
+      }
+      .e9InsightField .e9IValue { font-size: 12px; line-height: 1.5; color: rgba(255,255,255,.85); }
+      .e9ProxBadge {
+        display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700;
+        margin-left: 6px;
+      }
+      .e9ProxBadge.far { background: rgba(52,199,89,.15); color: #34c759; }
+      .e9ProxBadge.approaching { background: rgba(255,159,10,.15); color: #ff9f0a; }
+      .e9ProxBadge.imminent { background: rgba(255,59,48,.15); color: #ff3b30; }
+      .e9ProxBadge.active { background: rgba(255,59,48,.3); color: #ff3b30; }
+
+      /* ── Section A: Phase + Triggers ── */
+      .e9PhaseRow { display: flex; align-items: stretch; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
       .e9PhaseBadge {
         flex: 0 0 180px; display: flex; flex-direction: column; align-items: center;
         justify-content: center; padding: 22px 18px; border-radius: var(--radius-card);
@@ -69,7 +158,6 @@
       .e9ThesisDot.healthy { background: var(--green); }
       .e9ThesisDot.warning { background: var(--red); }
 
-      /* ── Time Compression Banner ── */
       .e9CompressionBanner {
         display: none; padding: 10px 16px; margin-bottom: 14px; border-radius: var(--radius-card);
         background: rgba(255,59,48,0.06); border: 1px solid rgba(255,59,48,0.2);
@@ -97,6 +185,7 @@
       .e9SigBarFill.med { background: var(--amber); }
       .e9SigBarFill.high { background: var(--red); }
       .e9SigDetail { font-size: 10px; color: var(--muted); line-height: 1.4; }
+      .e9SigFooter { display: flex; justify-content: flex-end; margin-top: 8px; }
 
       /* ── Tables ── */
       .e9Table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 18px; }
@@ -162,29 +251,14 @@
       .e9DeskBtn:disabled { opacity: 0.4; cursor: not-allowed; }
       .e9Updated { font-size: 10px; color: var(--muted); }
 
-      /* ── Phase Action Banner ── */
       .e9ActionBanner {
         padding: 10px 14px; border-radius: var(--radius-card); font-size: 12px; font-weight: 600;
         margin-bottom: 16px; background: var(--hover); border: 1px solid var(--border);
       }
 
-      /* ── Loading ── */
       .e9Loading { text-align: center; padding: 48px 20px; color: var(--muted); font-size: 13px; }
       .e9Spinner { display: inline-block; width: 22px; height: 22px; border: 2px solid var(--line); border-top-color: var(--text); border-radius: 50%; animation: e9spin 0.8s linear infinite; margin-bottom: 10px; }
       @keyframes e9spin { to { transform: rotate(360deg); } }
-
-      /* ── Desk Notes Popup ── */
-      .e9DeskPopup {
-        display: none; position: fixed; top: 60px; right: 20px; width: 500px; max-height: 80vh;
-        overflow-y: auto; padding: 20px; border-radius: var(--radius-card); border: 1px solid var(--border);
-        background: var(--surfaceSolid); box-shadow: var(--shadow); z-index: 9000;
-      }
-      .e9DeskPopup.visible { display: block; }
-      .e9DeskPopupHeader { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-      .e9DeskPopupTitle { font-size: 14px; font-weight: 700; }
-      .e9DeskPopupClose { background: none; border: none; font-size: 18px; cursor: pointer; color: var(--muted); padding: 4px 8px; }
-      .e9DeskContent { font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
-      .e9DeskContent h3 { font-size: 12px; font-weight: 700; margin: 12px 0 4px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 
       /* ── News Cards ── */
       .e9NewsGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
@@ -206,34 +280,18 @@
         border: 1px solid var(--border); font-size: 11px; font-weight: 600; margin-bottom: 12px;
       }
 
-      /* ── Thesis Popup ── */
-      .e9ThesisSection { margin-bottom: 14px; }
-      .e9ThesisSection h4 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 6px; }
-      .e9ScenarioGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-      .e9ScenarioCard {
-        padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surfaceSolid); font-size: 10px;
-      }
-      .e9ScenarioCard .label { font-weight: 700; margin-bottom: 4px; }
-      .e9ScenarioCard .prob { font-size: 16px; font-weight: 800; }
-      .e9RiskItem, .e9ConnectionItem, .e9InstrItem {
-        padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 11px; line-height: 1.4;
-      }
-      .e9OneLiner {
-        font-size: 13px; font-weight: 700; padding: 10px 14px; border-radius: var(--radius-card);
-        background: var(--hover); border: 1px solid var(--border); margin-bottom: 14px;
-      }
-
-      /* ── Section dividers ── */
+      /* ── Section dividers with insight button ── */
       .e9Divider {
         font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
         color: var(--muted); margin: 22px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border);
+        display: flex; align-items: center; justify-content: space-between;
       }
 
       @media (max-width: 768px) {
         .e9PhaseRow { flex-direction: column; }
         .e9PhaseBadge, .e9ThesisCard { flex: unset; }
         .e9SignalGrid { grid-template-columns: 1fr; }
-        .e9DeskPopup { width: calc(100vw - 32px); right: 16px; top: 40px; }
+        .e9Popup { width: calc(100vw - 32px) !important; left: 16px !important; right: auto !important; }
       }
     </style>
   </head>
@@ -249,7 +307,6 @@
         </div>
       </header>
 
-      <!-- Scan controls -->
       <div class="e9BtnRow">
         <button class="e9ScanBtn" id="e9ScanBtn">Run Full Scan</button>
         <button class="e9DeskBtn" id="e9DeskNotesBtn" disabled>Desk Notes</button>
@@ -257,21 +314,16 @@
         <span class="e9Updated" id="e9Updated"></span>
       </div>
 
-      <!-- Loading state -->
       <div class="e9Loading" id="e9Loading" style="display:none;">
         <div class="e9Spinner"></div>
         <div>Scanning credit stress signals across all tiers...</div>
       </div>
 
-      <!-- Time Compression Banner -->
       <div class="e9CompressionBanner" id="e9CompressionBanner">
         TIME COMPRESSION DETECTED — Multiple signals clustering within 5 trading days. Events may be accelerating.
       </div>
 
-      <!-- Content (hidden until scan completes) -->
       <div id="e9Content" style="display:none;">
-
-        <!-- Section A: Phase + Triggers + Thesis -->
         <div class="e9PhaseRow" id="e9PhaseRow">
           <div class="e9PhaseBadge" id="e9PhaseBadge" data-phase="1">
             <div class="e9PhaseNum" id="e9PhaseNum">—</div>
@@ -288,64 +340,62 @@
           </div>
         </div>
 
-        <!-- Phase Action -->
         <div class="e9ActionBanner" id="e9ActionBanner" style="display:none;"></div>
 
-        <!-- Section B: Signal Grid -->
-        <div class="e9Divider">Signal Grid</div>
+        <div class="e9Divider"><span>Signal Grid</span></div>
         <div class="e9SignalGrid" id="e9SignalGrid"></div>
 
-        <!-- Section B2: News Cycle -->
-        <div class="e9Divider">News Cycle — Credit Stress</div>
+        <div class="e9Divider"><span>News Cycle — Credit Stress</span></div>
         <div id="e9NewsWrap" style="margin-bottom:18px;"></div>
 
-        <!-- Section C: Forced Seller Map -->
-        <div class="e9Divider">Forced Seller Map</div>
+        <div class="e9Divider"><span>Forced Seller Map</span></div>
         <div id="e9ForcedWrap"></div>
 
-        <!-- Section D: Tiered Watchlist -->
-        <div class="e9Divider">Tiered Watchlist</div>
+        <div class="e9Divider"><span>Tiered Watchlist</span></div>
         <div id="e9WatchWrap"></div>
 
-        <!-- Section E: Credit Spread Chart -->
-        <div class="e9Divider">Credit Spread History</div>
+        <div class="e9Divider"><span>Credit Spread History</span></div>
         <div class="e9ChartWrap" id="e9ChartWrap">
           <canvas class="e9ChartCanvas" id="e9SpreadChart"></canvas>
         </div>
-
-      </div><!-- /e9Content -->
+      </div>
     </main>
 
-    <!-- Desk Notes Popup -->
-    <div class="e9DeskPopup" id="e9DeskPopup">
-      <div class="e9DeskPopupHeader">
-        <span class="e9DeskPopupTitle">Credit Desk — Morning Brief</span>
-        <button class="e9DeskPopupClose" id="e9DeskPopupClose">&times;</button>
+    <!-- Desk Notes Popup (dark glass, draggable) -->
+    <div class="e9Popup" id="e9DeskPopup" style="top:60px;right:20px;">
+      <div class="e9PopupHeader" id="e9DeskPopupHeader">
+        <span class="e9PopupTitle">Credit Desk — Morning Brief</span>
+        <button class="e9PopupClose" id="e9DeskPopupClose">&times;</button>
       </div>
-      <div class="e9DeskContent" id="e9DeskContent">
-        <div class="e9Loading">
-          <div class="e9Spinner"></div>
-          <div>Generating desk brief...</div>
-        </div>
+      <div class="e9PopupBody" id="e9DeskContent">
+        <div class="e9PopupLoading"><div class="e9PopupSpinner"></div><div>Generating desk brief...</div></div>
       </div>
     </div>
 
-    <!-- Thesis Discovery Popup -->
-    <div class="e9DeskPopup" id="e9ThesisPopup" style="left:20px;right:auto;width:560px;">
-      <div class="e9DeskPopupHeader">
-        <span class="e9DeskPopupTitle">Thesis Discovery — GPT-5.2</span>
-        <button class="e9DeskPopupClose" id="e9ThesisPopupClose">&times;</button>
+    <!-- Thesis Discovery Popup (dark glass, draggable) -->
+    <div class="e9Popup" id="e9ThesisPopup" style="top:60px;left:20px;width:560px;">
+      <div class="e9PopupHeader" id="e9ThesisPopupHeader">
+        <span class="e9PopupTitle">Thesis Discovery — GPT-5.2</span>
+        <button class="e9PopupClose" id="e9ThesisPopupClose">&times;</button>
       </div>
-      <div class="e9DeskContent" id="e9ThesisContent">
-        <div class="e9Loading">
-          <div class="e9Spinner"></div>
-          <div>Running thesis analysis...</div>
-        </div>
+      <div class="e9PopupBody" id="e9ThesisContent">
+        <div class="e9PopupLoading"><div class="e9PopupSpinner"></div><div>Running thesis analysis...</div></div>
+      </div>
+    </div>
+
+    <!-- Contextual Insight Popup (dark glass, draggable, reusable) -->
+    <div class="e9Popup" id="e9InsightPopup" style="top:100px;right:30px;width:480px;">
+      <div class="e9PopupHeader" id="e9InsightPopupHeader">
+        <span class="e9PopupTitle" id="e9InsightTitle">Desk Insight</span>
+        <button class="e9PopupClose" id="e9InsightPopupClose">&times;</button>
+      </div>
+      <div class="e9PopupBody" id="e9InsightContent">
+        <div class="e9PopupLoading"><div class="e9PopupSpinner"></div><div>Analyzing...</div></div>
       </div>
     </div>
 
     <script src="/static/ui_kit.js?v=3"></script>
-    <script src="/static/engine9.js?v=3"></script>
+    <script src="/static/engine9.js?v=5"></script>
     <script src="/static/nav.js"></script>
   </body>
 </html>

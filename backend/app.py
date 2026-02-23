@@ -5777,6 +5777,65 @@ Respond ONLY with valid JSON containing these fields:
         raise HTTPException(status_code=500, detail=f"LLM call failed: {type(e).__name__}: {e}")
 
 
+@app.post("/api/engine9/explain")
+def engine9_explain(body: dict):
+    """Contextual LLM explanation for any Engine 9 section, signal, ticker, or metric."""
+    import openai
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+
+    context_type = body.get("type", "")       # signal, ticker, section, metric
+    context_key = body.get("key", "")          # e.g. "bdc_divergence", "ARCC", "forced_seller"
+    context_data = body.get("data", {})        # relevant data payload
+    scan_summary = body.get("scan_summary", {})  # composite, phase, etc.
+
+    system_prompt = """You are a senior credit research analyst and trading desk head at a top quantitative hedge fund. You specialize in private credit stress detection and short positioning.
+
+A junior analyst or portfolio manager is looking at our proprietary Engine 9 Credit Stress Drift dashboard and needs your expert interpretation of a specific element. Explain it as if you're teaching someone who is smart but new to this specific domain.
+
+Your response must be valid JSON with these keys:
+{
+  "headline": "1-line summary of what this means right now",
+  "what_it_is": "2-3 sentences explaining what this metric/signal/ticker actually measures and why it matters in credit stress detection",
+  "current_read": "2-3 sentences interpreting the current values — what does this specific reading tell us about market conditions?",
+  "what_to_watch": "2-3 bullet points of specific things to monitor that would change your interpretation",
+  "trade_implication": "How this affects positioning — should we be adding, holding, or reducing exposure based on this? Be specific about instruments.",
+  "breaking_event_proximity": "How close are we to this signal triggering a structural break? Scale: Far (months), Approaching (weeks), Imminent (days), Active (now)",
+  "fixing_event_risk": "What would invalidate or fix this signal? What would tell us the stress is resolving?",
+  "desk_note": "1-2 sentences in the voice of a desk head — what would you tell the PM in the morning meeting about this?"
+}
+
+Be direct, specific, and actionable. No hedging language. Speak like money is on the line."""
+
+    user_msg = f"Context type: {context_type}\nContext key: {context_key}\n\nData:\n{json.dumps(context_data, default=str)[:6000]}\n\nCurrent scan summary:\n{json.dumps(scan_summary, default=str)[:3000]}"
+
+    try:
+        client = openai.OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.3,
+            max_tokens=1200,
+            response_format={"type": "json_object"},
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[:-3].strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {"raw_text": text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Explain failed: {type(e).__name__}: {e}")
+
+
 @app.post("/api/engine9/thesis-scan")
 def engine9_thesis_scan(body: dict):
     """
