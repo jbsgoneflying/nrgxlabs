@@ -437,7 +437,8 @@ def compute_insider_signal(
     key = "insider_selling"
     if transaction_count < 1:
         return SignalResult(key=key, label="Insider Selling", score=0, weight=0.10,
-                           detail="No insider data", data={})
+                           detail="No insider transactions found in window",
+                           data={"status": "no_data"})
 
     avg_90d = net_selling_90d / 3 if net_selling_90d else 0
     ratio = (net_selling_30d / avg_90d) if avg_90d > 0 else 0

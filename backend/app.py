@@ -5364,6 +5364,15 @@ def engine9_scan():
         except TimeoutError:
             LOG.warning("BDC book value fetch timed out after 15s")
 
+    # ── Fetch ETF NAV for Price/NAV signal ──
+    etf_nav_map: dict[str, float | None] = {}
+    if eodhd:
+        for etf_sym in ["HYG", "BKLN", "JNK", "LQD"]:
+            try:
+                etf_nav_map[etf_sym] = eodhd.get_etf_nav(f"{etf_sym}.US")
+            except Exception:
+                etf_nav_map[etf_sym] = None
+
     # ── Compute Signals ──
     signal_results: list[SignalResult] = []
 
@@ -5482,9 +5491,27 @@ def engine9_scan():
     corr_signal = compute_correlation_breakdown(spy_rets, hyg_rets, hyg_prices)
     signal_results.append(corr_signal)
 
-    # Signal 6: ETF Price/NAV
-    nav_signal = compute_etf_nav_deviation(hyg_prices, etf_nav=None)
-    signal_results.append(nav_signal)
+    # Signal 6: ETF Price/NAV — check multiple ETFs, use best signal
+    _nav_candidates = [
+        ("HYG", hyg_prices, etf_nav_map.get("HYG")),
+        ("BKLN", price_data.get("BKLN", []), etf_nav_map.get("BKLN")),
+        ("JNK", price_data.get("JNK", []), etf_nav_map.get("JNK")),
+    ]
+    best_nav_signal = None
+    for _etf_name, _etf_px, _etf_nav in _nav_candidates:
+        _ns = compute_etf_nav_deviation(_etf_px, etf_nav=_etf_nav)
+        if _ns.score > 0 or _etf_nav:
+            _ns.data = _ns.data or {}
+            _ns.data["etf"] = _etf_name
+            _ns.data["nav"] = _etf_nav
+            if best_nav_signal is None or _ns.score > best_nav_signal.score:
+                best_nav_signal = _ns
+    if best_nav_signal is None:
+        best_nav_signal = compute_etf_nav_deviation(hyg_prices, etf_nav=None)
+    # Attach all NAV data for context
+    best_nav_signal.data = best_nav_signal.data or {}
+    best_nav_signal.data["all_navs"] = {k: v for k, v in etf_nav_map.items() if v}
+    signal_results.append(best_nav_signal)
 
     # Signal 7: Funding Stress
     bkln_prices = price_data.get("BKLN", [])

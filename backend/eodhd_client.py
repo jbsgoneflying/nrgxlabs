@@ -567,3 +567,23 @@ class EodhdClient:
         except Exception:
             pass
         return None
+
+    def get_etf_nav(self, symbol: str) -> Optional[float]:
+        """Extract latest NAV for an ETF from EODHD fundamentals.
+
+        Checks ETF_Data.NetAssetValue first, then falls back to
+        Technicals.BookValue as a proxy.
+        """
+        try:
+            data = self.get_fundamentals(symbol)
+            etf_data = data.get("ETF_Data") or {}
+            nav = etf_data.get("NetAssetValue") or etf_data.get("Net_Assets")
+            if nav:
+                return float(nav)
+            technicals = data.get("Technicals") or {}
+            bv = technicals.get("BookValue")
+            if bv:
+                return float(bv)
+        except Exception:
+            pass
+        return None
