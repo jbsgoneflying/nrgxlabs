@@ -85,78 +85,48 @@ async function rv2Load() {
 
 
 /* ══════════════════════════════════════════════════════════════ */
-/*  FULL REFRESH — orchestrates CC + RTv2 pipeline               */
+/*  FULL REFRESH — synchronous engine scans + RTv2 pipeline      */
 /* ══════════════════════════════════════════════════════════════ */
 async function rv2Refresh() {
-  showOverlay('Starting full dashboard refresh…');
-  setProgress(2);
+  showOverlay('Clearing caches and scanning engines…');
+  setProgress(3);
   const btn = $('rv2Refresh');
-  if (btn) { btn.disabled = true; btn.textContent = 'Running…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Scanning engines…'; }
 
-  const status = {};
+  const refreshStatus = {};
 
   try {
-    // Step 1: Bootstrap engines in background via CC init
-    setStatus('Step 1/6 — Bootstrapping engines (E3, E4, E5)…');
+    // ── Step 1: Synchronous engine refresh (blocks until E3/E4/E5 finish) ──
+    setStatus('Step 1/5 — Running E5 (regime), E3 (Red Dog), E4 (Ichimoku)… this takes 30-90s');
     setProgress(5);
+    let engineData = null;
     try {
-      const initResp = await fetch(CC + '/init');
-      const initData = await initResp.json();
-      status.ccInit = initData.status || 'ok';
-    } catch (e) {
-      status.ccInit = 'error: ' + e.message;
-    }
-
-    // Step 2: Fetch tradable ideas (also ensures E3/E4 caches are populated)
-    setStatus('Step 2/6 — Scanning tradable ideas (E3 Red Dog, E4 Ichimoku)…');
-    setProgress(20);
-    let ideas = [];
-    try {
-      const idResp = await fetch(CC + '/tradable-ideas');
-      if (idResp.ok) {
-        const idData = await idResp.json();
-        ideas = idData.ideas || [];
-        status.tradableIdeas = ideas.length + ' ideas';
+      const engineResp = await fetch('/api/desk/refresh-engines', { method: 'POST' });
+      if (!engineResp.ok) {
+        const err = await engineResp.json().catch(() => ({}));
+        throw new Error(err.detail || 'Engine refresh failed: ' + engineResp.status);
       }
+      engineData = await engineResp.json();
+      refreshStatus.engines = engineData.status || {};
+      refreshStatus.ideasFound = engineData.ideas_count || 0;
     } catch (e) {
-      status.tradableIdeas = 'error: ' + e.message;
+      console.error('Engine refresh error:', e);
+      refreshStatus.engines = { error: e.message };
     }
+    setProgress(50);
 
-    // Step 3: Fetch CC data in parallel: flow-pressure, desk-brief, sequencer, alerts
-    setStatus('Step 3/6 — Loading context (flow, brief, sequencer, alerts)…');
-    setProgress(40);
-    const [fpResp, briefResp, seqResp, alertResp] = await Promise.allSettled([
-      fetch(CC + '/flow-pressure').then(r => r.ok ? r.json() : null),
-      fetch(CC + '/desk-brief').then(r => r.ok ? r.json() : null),
-      fetch(CC + '/sequencer').then(r => r.ok ? r.json() : null),
-      fetch(CC + '/alerts').then(r => r.ok ? r.json() : null),
-    ]);
-    _cc.flowPressure = fpResp.status === 'fulfilled' ? fpResp.value : null;
-    _cc.deskBrief    = briefResp.status === 'fulfilled' ? briefResp.value : null;
-    _cc.sequencer    = seqResp.status === 'fulfilled' ? seqResp.value : null;
-    _cc.alerts       = alertResp.status === 'fulfilled' ? alertResp.value : null;
-
-    // Step 4: Feed tradable ideas into RTv2 ingest pipeline
-    setStatus('Step 4/6 — Scoring & ingesting signals into RTv2 pipeline…');
-    setProgress(55);
+    // ── Step 2: Ingest ideas into RTv2 scoring pipeline ──
+    setStatus('Step 2/5 — Scoring & ingesting signals into RTv2 pipeline…');
+    const ideas = (engineData && engineData.ideas) || [];
     if (ideas.length > 0) {
-      const engineOutputs = {};
+      const engineOutputs = { auto: true };
       for (const idea of ideas) {
-        const eng = idea.engine || '';
-        let key = '';
-        if (eng.includes('Red Dog') || eng.includes('E3')) key = 'E3';
-        else if (eng.includes('Ichimoku') || eng.includes('E4')) key = 'E4';
-        else if (eng.includes('Earnings') || eng.includes('E1')) key = 'E1';
-        else if (eng.includes('SPX') || eng.includes('E2')) key = 'E2';
-        else if (eng.includes('Pairs') || eng.includes('E7')) key = 'E7';
-        else if (eng.includes('Post-Event') || eng.includes('E8')) key = 'E8';
-        else if (eng.includes('Lead-Lag') || eng.includes('E5')) key = 'E5';
+        const key = idea.engine || '';
         if (key) {
           if (!engineOutputs[key]) engineOutputs[key] = [];
           engineOutputs[key].push(idea);
         }
       }
-      engineOutputs.auto = true;
       try {
         const ingestResp = await fetch(API + '/ingest', {
           method: 'POST',
@@ -165,38 +135,50 @@ async function rv2Refresh() {
         });
         if (ingestResp.ok) {
           const ingestData = await ingestResp.json();
-          status.ingest = (ingestData.signals_extracted || 0) + ' signals, ' + (ingestData.trades_created || 0) + ' trades';
+          refreshStatus.ingest = (ingestData.signals_extracted || 0) + ' signals, ' + (ingestData.trades_created || 0) + ' trades';
         }
       } catch (e) {
-        status.ingest = 'error: ' + e.message;
+        refreshStatus.ingest = 'error: ' + e.message;
       }
     } else {
-      status.ingest = 'no ideas to ingest';
+      refreshStatus.ingest = 'no ideas found';
     }
+    setProgress(65);
 
-    // Step 5: Load full RTv2 init payload
-    setStatus('Step 5/6 — Building portfolio state…');
-    setProgress(75);
+    // ── Step 3: Fetch CC context (desk brief, sequencer, alerts) in parallel ──
+    setStatus('Step 3/5 — Loading desk brief, sequencer, alerts…');
+    const [briefResp, seqResp, alertResp] = await Promise.allSettled([
+      fetch(CC + '/desk-brief').then(r => r.ok ? r.json() : null),
+      fetch(CC + '/sequencer').then(r => r.ok ? r.json() : null),
+      fetch(CC + '/alerts').then(r => r.ok ? r.json() : null),
+    ]);
+    _cc.deskBrief = briefResp.status === 'fulfilled' ? briefResp.value : null;
+    _cc.sequencer = seqResp.status === 'fulfilled' ? seqResp.value : null;
+    _cc.alerts    = alertResp.status === 'fulfilled' ? alertResp.value : null;
+    setProgress(80);
+
+    // ── Step 4: Load full RTv2 init payload ──
+    setStatus('Step 4/5 — Building portfolio state…');
     try {
       const rv2Resp = await fetch(API + '/init');
       if (rv2Resp.ok) _data = await rv2Resp.json();
     } catch (e) {
       console.error('RTv2 init after refresh:', e);
     }
-
-    // Step 6: Render
-    setStatus('Step 6/6 — Rendering dashboard…');
     setProgress(90);
+
+    // ── Step 5: Render ──
+    setStatus('Step 5/5 — Rendering dashboard…');
     renderAll();
-    renderRefreshSummary(status);
+    renderRefreshSummary(refreshStatus);
     setProgress(100);
-    setTimeout(hideOverlay, 300);
+    setTimeout(hideOverlay, 400);
 
   } catch (e) {
     console.error('RTv2 refresh error:', e);
     setStatus('Refresh failed: ' + e.message);
     setProgress(100);
-    setTimeout(hideOverlay, 2000);
+    setTimeout(hideOverlay, 3000);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Refresh Dashboard'; }
   }

@@ -2951,6 +2951,137 @@ def api_command_center_init():
     return {"status": "initializing", "message": "Bootstrapping engines in background..."}
 
 
+@app.post("/api/desk/refresh-engines")
+def api_desk_refresh_engines():
+    """Synchronous engine refresh for RTv2.0 dashboard.
+
+    Clears engine caches, reruns E5/E3/E4, rebuilds DMS, returns
+    fresh tradable ideas and context. Blocks until all engines finish.
+    """
+    flags = get_flags()
+    store = get_store_optional()
+    status = {}
+
+    # 1. Clear all caches so engines are forced to re-scan
+    with _engine3_cache_lock:
+        _engine3_cache.clear()
+    with _engine4_cache_lock:
+        _engine4_cache.clear()
+    with _fp_cache_lock:
+        _fp_cache.clear()
+    with _desk_brief_cache_lock:
+        _desk_brief_cache.clear()
+    _dms_cache.clear()
+
+    # 2. Engine 5 — regime/vol (must run first, feeds gating)
+    try:
+        snap = _ensure_engine5_snapshot(flags)
+        status["E5"] = "ok" if snap else "no_data"
+    except Exception as exc:
+        LOG.warning("RTv2 refresh: Engine 5 failed: %s", exc)
+        status["E5"] = f"error"
+
+    # 3. Engine 3 + 4 in parallel (synchronous, blocks until done)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f3 = pool.submit(_ensure_engine3_cache, flags)
+        f4 = pool.submit(_ensure_engine4_cache, flags)
+        try:
+            f3.result(timeout=300)
+            status["E3"] = "ok"
+        except Exception as exc:
+            LOG.warning("RTv2 refresh: Engine 3 failed: %s", exc)
+            status["E3"] = "error"
+        try:
+            f4.result(timeout=300)
+            status["E4"] = "ok"
+        except Exception as exc:
+            LOG.warning("RTv2 refresh: Engine 4 failed: %s", exc)
+            status["E4"] = "error"
+
+    # 4. Collect tradable ideas from fresh caches
+    ideas = []
+    try:
+        with _engine3_cache_lock:
+            for _k, v in list(_engine3_cache.items()):
+                if isinstance(v, dict):
+                    for tier in ("aPlus", "watchlist", "standard"):
+                        for s in (v.get(tier) or []):
+                            if isinstance(s, dict):
+                                quality = s.get("quality", {})
+                                score = quality.get("score") if isinstance(quality, dict) else s.get("score", 0)
+                                ideas.append({
+                                    "ticker": s.get("ticker", ""),
+                                    "engine": "E3",
+                                    "setupType": "Mean Reversion",
+                                    "direction": s.get("direction", ""),
+                                    "score": score,
+                                    "gate": s.get("gate", {}),
+                                    "levels": s.get("levels", {}),
+                                    "indicators": s.get("indicators", {}),
+                                })
+                break
+    except Exception:
+        pass
+
+    try:
+        with _engine4_cache_lock:
+            for _k, v in list(_engine4_cache.items()):
+                if isinstance(v, dict):
+                    for tier in ("actionable", "structure", "watchlist"):
+                        for s in (v.get(tier) or []):
+                            if isinstance(s, dict):
+                                quality = s.get("quality", {})
+                                score = quality.get("score") if isinstance(quality, dict) else s.get("score", 0)
+                                ideas.append({
+                                    "ticker": s.get("ticker", ""),
+                                    "engine": "E4",
+                                    "setupType": "Trend Continuation",
+                                    "direction": s.get("direction", ""),
+                                    "score": score,
+                                    "gate": s.get("gate", {}),
+                                    "levels": s.get("levels", {}),
+                                    "ichimoku": s.get("ichimoku", {}),
+                                })
+                break
+    except Exception:
+        pass
+
+    # 5. Build fresh DMS
+    today_str = dt.date.today().isoformat()
+    dms_dict = None
+    try:
+        dms_dict = _build_live_dms(today_str, store)
+        _dms_cache[f"dms:{today_str}"] = dms_dict
+        status["DMS"] = "ok"
+    except Exception as exc:
+        LOG.warning("RTv2 refresh: DMS build failed: %s", exc)
+        status["DMS"] = "error"
+
+    # E1 earnings from DMS
+    if dms_dict:
+        e1_data = dms_dict.get("earnings_candidates")
+        if isinstance(e1_data, list) and e1_data:
+            for ec in e1_data:
+                if isinstance(ec, dict):
+                    ideas.append({
+                        "ticker": ec.get("ticker", ""),
+                        "engine": "E1",
+                        "setupType": "Earnings Breach",
+                        "direction": ec.get("direction", "neutral"),
+                        "score": ec.get("score", ec.get("expected_move_ratio", 0) * 100),
+                    })
+
+    ideas.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    return {
+        "status": status,
+        "ideas": ideas,
+        "ideas_count": len(ideas),
+        "dms": dms_dict,
+        "engines_scanned": [k for k, v in status.items() if v == "ok"],
+    }
+
+
 @app.get("/api/command-center/flow-pressure")
 def api_flow_pressure():
     """Flow Pressure snapshot across SPX, QQQ, and sector ETFs."""
