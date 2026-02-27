@@ -90,7 +90,7 @@ async function rv2Load() {
 async function rv2Refresh() {
   showOverlay('Clearing caches and scanning engines…');
   setProgress(3);
-  const btn = $('rv2Refresh');
+  const btn = $('rv2RefreshBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Scanning engines…'; }
 
   const refreshStatus = {};
