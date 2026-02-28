@@ -421,6 +421,12 @@
         setProgress(50, "Generating Morning Brief...");
         return fetchJSON("/api/front-layer/morning-brief").then(function (brief) {
           renderBrief(brief);
+          setProgress(70, "Loading pattern library...");
+          return fetchJSON("/api/front-layer/patterns");
+        }).then(function (patternData) {
+          _lastPatterns = patternData.templates || {};
+          _lastPatternMatch = patternData.matched || {};
+          renderPatterns(_lastPatterns, _lastPatternMatch);
           setProgress(85, "Checking day-over-day changes...");
           return fetchJSON("/api/front-layer/diff");
         }).then(function (diffData) {
@@ -488,6 +494,11 @@
           return fetchJSON("/api/front-layer/morning-brief");
         }).then(function (brief) {
           renderBrief(brief);
+          return fetchJSON("/api/front-layer/patterns");
+        }).then(function (patternData) {
+          _lastPatterns = patternData.templates || {};
+          _lastPatternMatch = patternData.matched || {};
+          renderPatterns(_lastPatterns, _lastPatternMatch);
         });
       })
       .catch(function (err) {

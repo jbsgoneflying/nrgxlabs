@@ -2707,12 +2707,13 @@ def _build_live_dms(today_str: str, store) -> dict:
     # --- Sequencer ---
     seq_summary = {}
     try:
-        from backend.sequencer import current_week_id, build_weekly_sequence
+        from backend.sequencer import current_week_id, build_weekly_sequence, SequencerEvent
         wk = current_week_id()
         events_raw = []
         if store:
             events_raw = store.get_json(f"sequencer:week:{wk}") or []
-        seq = build_weekly_sequence(events_raw, week_id=wk)
+        events = [SequencerEvent.from_dict(e) for e in events_raw] if events_raw else []
+        seq = build_weekly_sequence(week_id=wk, events=events)
         seq_summary = seq.to_dict()
     except Exception as e:
         LOG.warning("Front Layer: Sequencer data unavailable: %s", e)
@@ -3035,6 +3036,43 @@ def api_front_layer_diff():
         return {"has_changes": False, "changes": {}, "error": "Insufficient history for diff"}
 
     return compute_dms_diff(today_dms, yesterday_dms)
+
+
+@app.get("/api/front-layer/patterns")
+def api_front_layer_patterns():
+    """Return pattern templates and current week's match for the Pattern Library UI."""
+    flags = get_flags()
+    if not flags.ENABLE_FRONT_LAYER:
+        raise HTTPException(status_code=503, detail="Front Layer is disabled.")
+
+    from backend.sequencer import PATTERN_TEMPLATES, current_week_id, build_weekly_sequence, SequencerEvent
+
+    store = get_store_optional()
+    wk = current_week_id()
+    events_raw = []
+    if store:
+        events_raw = store.get_json(f"sequencer:week:{wk}") or []
+
+    events = [SequencerEvent.from_dict(e) for e in events_raw] if events_raw else []
+    seq = build_weekly_sequence(week_id=wk, events=events)
+
+    matched = {}
+    if seq.pattern_match:
+        tmpl = PATTERN_TEMPLATES.get(seq.pattern_match, {})
+        matched = {
+            "key": seq.pattern_match,
+            "label": tmpl.get("label", seq.pattern_match),
+            "confidence": int(seq.pattern_confidence * 100),
+            "favored_play_types": seq.favored_play_types,
+            "primary_risk": seq.primary_risk,
+        }
+
+    return {
+        "templates": {k: {"label": v["label"], "description": v["description"]} for k, v in PATTERN_TEMPLATES.items()},
+        "matched": matched,
+        "week_id": wk,
+        "event_count": len(events_raw),
+    }
 
 
 @app.get("/api/front-layer/backfill-status")
