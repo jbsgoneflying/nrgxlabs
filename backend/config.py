@@ -274,26 +274,17 @@ class FeatureFlags:
     ENGINE8_LOOKBACK_EVENTS: int = 40                  # Historical events to consider
     ENGINE8_MAX_CONTROLLED_LOSS_PCT: float = 50.0      # Max % of entry credit loss for "controlled_loss"
 
-    # --- Raven-Tech 2.0: Command Center & Flow Pressure ---
-    ENABLE_COMMAND_CENTER: bool = True
-    FLOW_PRESSURE_CACHE_TTL_S: int = 60           # in-memory TTL for flow pressure
-    FLOW_PRESSURE_SNAPSHOT_TTL_S: int = 7 * 86400 # Redis TTL for snapshots
-
-    # --- Raven-Tech 2.0: Gating (Engine 3 & 4) ---
+    # --- Gating (Engine 3 & 4) ---
     ENABLE_GATING: bool = True
     GATE_RD_REGIME_ALLOW: str = "Transitional,Stressed"
     GATE_RD_VOL_STATE_ALLOW: str = "expanding,unstable,RISING,rising"
-    GATE_RD_FLOW_PRESSURE_MAX: float = 70.0
     GATE_RD_MACRO_PROXIMITY_DAYS: int = 1
     GATE_ICH_REGIME_ALLOW: str = "Risk-On,Transitional"
     GATE_ICH_VOL_STATE_ALLOW: str = "compressing,stable,NORMAL,FALLING,falling,flat"
-    GATE_ICH_FLOW_PRESSURE_MIN: float = 30.0
-    GATE_ICH_CHECK_FP_ALIGNMENT: bool = True
     GATE_ICH_MACRO_PROXIMITY_DAYS: int = 1
 
-    # --- Raven-Tech 2.0: LLM Integration ---
+    # --- LLM Integration ---
     ENABLE_LLM_NARRATIVE: bool = True
-    ENABLE_LLM_DISCOVERY: bool = False
     LLM_NARRATIVE_CACHE_TTL_S: int = 1800         # 30 minutes
     LLM_MAX_CALLS_PER_MINUTE: int = 2
 
@@ -503,24 +494,16 @@ class FeatureFlags:
             ENGINE8_LOOKBACK_EVENTS=_get_int("ENGINE8_LOOKBACK_EVENTS", 40),
             ENGINE8_MAX_CONTROLLED_LOSS_PCT=_get_float("ENGINE8_MAX_CONTROLLED_LOSS_PCT", 50.0),
 
-            # --- Raven-Tech 2.0 ---
-            ENABLE_COMMAND_CENTER=_get_bool("ENABLE_COMMAND_CENTER", True),
-            FLOW_PRESSURE_CACHE_TTL_S=_get_int("FLOW_PRESSURE_CACHE_TTL_S", 60),
-            FLOW_PRESSURE_SNAPSHOT_TTL_S=_get_int("FLOW_PRESSURE_SNAPSHOT_TTL_S", 7 * 86400),
-
+            # --- Gating (Engine 3 & 4) ---
             ENABLE_GATING=_get_bool("ENABLE_GATING", True),
             GATE_RD_REGIME_ALLOW=os.getenv("GATE_RD_REGIME_ALLOW", "Transitional,Stressed"),
             GATE_RD_VOL_STATE_ALLOW=os.getenv("GATE_RD_VOL_STATE_ALLOW", "expanding,unstable,RISING,rising"),
-            GATE_RD_FLOW_PRESSURE_MAX=_get_float("GATE_RD_FLOW_PRESSURE_MAX", 70.0),
             GATE_RD_MACRO_PROXIMITY_DAYS=_get_int("GATE_RD_MACRO_PROXIMITY_DAYS", 1),
             GATE_ICH_REGIME_ALLOW=os.getenv("GATE_ICH_REGIME_ALLOW", "Risk-On,Transitional"),
             GATE_ICH_VOL_STATE_ALLOW=os.getenv("GATE_ICH_VOL_STATE_ALLOW", "compressing,stable,NORMAL,FALLING,falling,flat"),
-            GATE_ICH_FLOW_PRESSURE_MIN=_get_float("GATE_ICH_FLOW_PRESSURE_MIN", 30.0),
-            GATE_ICH_CHECK_FP_ALIGNMENT=_get_bool("GATE_ICH_CHECK_FP_ALIGNMENT", True),
             GATE_ICH_MACRO_PROXIMITY_DAYS=_get_int("GATE_ICH_MACRO_PROXIMITY_DAYS", 1),
 
             ENABLE_LLM_NARRATIVE=_get_bool("ENABLE_LLM_NARRATIVE", False),
-            ENABLE_LLM_DISCOVERY=_get_bool("ENABLE_LLM_DISCOVERY", False),
             LLM_NARRATIVE_CACHE_TTL_S=_get_int("LLM_NARRATIVE_CACHE_TTL_S", 1800),
             LLM_MAX_CALLS_PER_MINUTE=_get_int("LLM_MAX_CALLS_PER_MINUTE", 2),
 

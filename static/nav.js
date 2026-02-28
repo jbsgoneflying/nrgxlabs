@@ -5,26 +5,24 @@
   "use strict";
 
   var NAV_ITEMS = [
-    { href: "/",                label: "Home",            desc: "Platform overview and engine directory" },
-    { href: "/market-intelligence", label: "Market Intelligence", desc: "Pre-open roadmap and cross-asset stress" },
+    { href: "/",                label: "Market Intelligence", desc: "Pre-open roadmap and cross-asset stress" },
     { href: "/breach",          label: "Engine 1",        desc: "Earnings hold risk with Monte Carlo" },
     { href: "/spx",             label: "Engine 2",        desc: "SPX/SPY iron condor scanner" },
-    { href: "/lead-lag",        label: "Engine 5",        desc: "Global lead-lag regime intelligence" },
-    { href: "/red-dog",         label: "Red Dog",         desc: "Mean-reversion scanner (SP500 + NDX)" },
-    { href: "/ichimoku",        label: "Ichimoku",        desc: "Trend-continuation scanner" },
-    { href: "/pairs",           label: "Engine 7",        desc: "Thematic relative value pairs scanner" },
-    { href: "/post-event",      label: "Engine 8",        desc: "Post-event trade extension evaluator" },
-    { href: "/credit-stress",   label: "Engine 9",        desc: "Credit stress drift detection" },
-    { href: "/calendar",        label: "Earnings Calendar", desc: "Mega-cap earnings dates and compare workflow" },
-    { href: "/compare",         label: "Compare",         desc: "Multi-ticker side-by-side" },
-    { href: "/news-risk",       label: "News Risk",       desc: "Macro events and headline risk" },
-    { href: "/flow-monitor",    label: "Flow Monitor",    desc: "Prediction market unusual activity detection" },
+    { href: "/lead-lag",        label: "Engine 3",        desc: "Global lead-lag regime intelligence" },
+    { href: "/red-dog",         label: "Engine 4",        desc: "Mean-reversion scanner (SP500 + NDX)" },
+    { href: "/ichimoku",        label: "Engine 5",        desc: "Trend-continuation scanner" },
+    { href: "/pairs",           label: "Engine 6",        desc: "Thematic relative value pairs scanner" },
+    { href: "/post-event",      label: "Engine 7",        desc: "Post-event trade extension evaluator" },
+    { href: "/credit-stress",   label: "Engine 8",        desc: "Credit stress drift detection" },
+    { href: "/calendar",        label: "Engine 9",        desc: "Mega-cap earnings dates and compare workflow" },
+    { href: "/compare",         label: "Engine 10",       desc: "Multi-ticker side-by-side" },
+    { href: "/news-risk",       label: "Engine 11",       desc: "Macro events and headline risk" },
   ];
 
   /* Which nav item matches the current URL? */
   function isActive(href) {
     var p = window.location.pathname;
-    if (href === "/") return p === "/" || p === "";
+    if (href === "/") return p === "/" || p === "" || p === "/market-intelligence";
     return p === href || p.startsWith(href + "/");
   }
 

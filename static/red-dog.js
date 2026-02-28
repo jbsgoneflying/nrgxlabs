@@ -466,7 +466,6 @@ function renderGateBanner(payload) {
     const parts = [];
     if (ctx.regime_label) parts.push(`Regime: ${ctx.regime_label}`);
     if (ctx.vol_direction) parts.push(`Vol: ${ctx.vol_direction}`);
-    if (ctx.fp_label) parts.push(`Flow Pressure: ${ctx.fp_label}`);
     reasonsEl.textContent = parts.join(" · ") || "";
   }
 }

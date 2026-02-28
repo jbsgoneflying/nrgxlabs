@@ -4,11 +4,9 @@ services:
     build: .
     env_file:
       - .env
-    # Bind only to localhost on the droplet. Nginx on the host will proxy to this.
     ports:
       - "127.0.0.1:8000:8000"
     environment:
-      # Session-only state (latest engine payloads + chat image metadata)
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
     restart: unless-stopped
 
@@ -19,79 +17,5 @@ services:
     volumes:
       - redis_data:/data
 
-  # ─── Flow Monitor (Kalshi + Polymarket) ──────────────────────
-  kalshi-postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: kalshi_monitor
-      POSTGRES_USER: kalshi
-      POSTGRES_PASSWORD: kalshi_dev
-    ports:
-      - "127.0.0.1:5433:5432"
-    volumes:
-      - kalshi_pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U kalshi -d kalshi_monitor"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
-
-  kalshi-redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
-    ports:
-      - "127.0.0.1:6380:6379"
-    volumes:
-      - kalshi_redisdata:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
-
-  kalshi-api:
-    build:
-      context: ./kalshi
-      dockerfile: apps/api/Dockerfile
-    env_file:
-      - ./kalshi/.env
-    environment:
-      DATABASE_URL: postgresql://kalshi:kalshi_dev@kalshi-postgres:5432/kalshi_monitor
-      REDIS_URL: redis://kalshi-redis:6379
-    ports:
-      - "127.0.0.1:3100:3100"
-    volumes:
-      - ./kalshi/kalshi-key.pem:/app/kalshi-key.pem:ro
-    depends_on:
-      kalshi-postgres:
-        condition: service_healthy
-      kalshi-redis:
-        condition: service_healthy
-    mem_limit: 1536m
-    restart: unless-stopped
-
-  kalshi-web:
-    build:
-      context: ./kalshi
-      dockerfile: apps/web/Dockerfile
-      args:
-        # Server-only: used by Next.js rewrites to proxy API calls to the backend
-        API_URL: http://kalshi-api:3100
-    env_file:
-      - ./kalshi/.env
-    environment:
-      API_URL: http://kalshi-api:3100
-    ports:
-      - "127.0.0.1:3000:3000"
-    depends_on:
-      - kalshi-api
-    restart: unless-stopped
-
 volumes:
   redis_data:
-  kalshi_pgdata:
-  kalshi_redisdata:
-
-

@@ -35,7 +35,6 @@ class TestAsymmetryRadar:
     def test_no_signals_on_calm_market(self):
         dms = {
             "regime": {"state": "Risk-On", "score": 25.0},
-            "flow_pressure": {"score": 65.0, "state": "Risk-On"},
             "vol_state": {"level": 15.0, "skew": "neutral"},
             "cross_asset_stress": {"composite_score": 30.0, "readings": []},
             "news_themes": [],
@@ -47,7 +46,6 @@ class TestAsymmetryRadar:
         """Rising themes + low vol = vol underpricing alert."""
         dms = {
             "regime": {"state": "Transitional", "score": 45.0},
-            "flow_pressure": {"score": 50.0, "state": "Neutral"},
             "vol_state": {"level": 12.0, "skew": "low"},
             "cross_asset_stress": {"composite_score": 45.0, "readings": []},
             "news_themes": [
@@ -63,7 +61,6 @@ class TestAsymmetryRadar:
         """High FX stress + neutral equities = divergence."""
         dms = {
             "regime": {"state": "Transitional", "score": 45.0},
-            "flow_pressure": {"score": 55.0, "state": "Neutral"},
             "vol_state": {"level": 18.0, "skew": "neutral"},
             "cross_asset_stress": {
                 "composite_score": 55.0,
@@ -82,7 +79,6 @@ class TestAsymmetryRadar:
         """High commodity stress + low regime score = muted response."""
         dms = {
             "regime": {"state": "Transitional", "score": 40.0},
-            "flow_pressure": {"score": 50.0, "state": "Neutral"},
             "vol_state": {"level": 18.0, "skew": "neutral"},
             "cross_asset_stress": {
                 "composite_score": 60.0,
@@ -101,7 +97,6 @@ class TestAsymmetryRadar:
         """Risk-Off regime + Risk-On flow = divergence."""
         dms = {
             "regime": {"state": "Risk-Off", "score": 60.0},
-            "flow_pressure": {"score": 70.0, "state": "Risk-On"},
             "vol_state": {"level": 20.0, "skew": "neutral"},
             "cross_asset_stress": {"composite_score": 50.0, "readings": []},
             "news_themes": [],
@@ -114,7 +109,6 @@ class TestAsymmetryRadar:
         """Persistent themes + low vol skew = complacency."""
         dms = {
             "regime": {"state": "Transitional", "score": 45.0},
-            "flow_pressure": {"score": 50.0, "state": "Neutral"},
             "vol_state": {"level": 14.0, "skew": "low"},
             "cross_asset_stress": {"composite_score": 45.0, "readings": []},
             "news_themes": [
@@ -128,7 +122,6 @@ class TestAsymmetryRadar:
     def test_all_signals_have_required_fields(self):
         dms = {
             "regime": {"state": "Risk-Off", "score": 60.0},
-            "flow_pressure": {"score": 70.0, "state": "Risk-On"},
             "vol_state": {"level": 12.0, "skew": "low"},
             "cross_asset_stress": {
                 "composite_score": 60.0,
@@ -166,11 +159,9 @@ class TestSanitization:
         dms = {
             "date": "2026-02-13",
             "regime": {"state": "Risk-On", "price": 4500.0},
-            "flow_pressure": {"score": 50.0, "close": 100.0},
         }
         sanitized = _sanitize_dms(dms)
         assert "price" not in sanitized.get("regime", {})
-        assert "close" not in sanitized.get("flow_pressure", {})
 
     def test_allows_valid_keys(self):
         dms = {

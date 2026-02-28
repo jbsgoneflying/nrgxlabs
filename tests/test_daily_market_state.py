@@ -17,7 +17,6 @@ import pytest
 from backend.daily_market_state import (
     DailyMarketState,
     EngineGates,
-    FlowPressureState,
     NewsRiskState,
     RegimeState,
     VolState,
@@ -49,7 +48,6 @@ class TestDataclasses:
             date="2026-02-13",
             generated_at="2026-02-13T08:55:00Z",
             regime={"state": "Transitional", "score": 45.0, "drivers": []},
-            flow_pressure={"score": 55.0, "state": "Neutral"},
         )
         d = dms.to_dict()
         assert d["date"] == "2026-02-13"
@@ -85,31 +83,29 @@ class TestDataclasses:
 
 class TestEngineGates:
     def test_stressed_regime_suppresses_most(self):
-        gates = _derive_engine_gates("Stressed", 50.0, "")
+        gates = _derive_engine_gates("Stressed", "")
         assert gates.earnings == "suppressed"
         assert gates.red_dog == "allowed"  # Red Dog thrives in stress
         assert gates.ichimoku == "suppressed"
         assert gates.index_income == "suppressed"
 
     def test_risk_on_allows_most(self):
-        gates = _derive_engine_gates("Risk-On", 60.0, "")
+        gates = _derive_engine_gates("Risk-On", "")
         assert gates.earnings == "allowed"
         assert gates.ichimoku == "allowed"
         assert gates.index_income == "allowed"
         assert gates.red_dog == "watch"
 
     def test_risk_off_selective(self):
-        gates = _derive_engine_gates("Risk-Off", 40.0, "")
+        gates = _derive_engine_gates("Risk-Off", "")
         assert gates.earnings == "selective"
         assert gates.red_dog == "allowed"
         assert gates.ichimoku == "suppressed"
 
-    def test_transitional_flow_dependent(self):
-        gates_high = _derive_engine_gates("Transitional", 70.0, "")
-        assert gates_high.red_dog == "watch"
-
-        gates_low = _derive_engine_gates("Transitional", 30.0, "")
-        assert gates_low.red_dog == "allowed"
+    def test_transitional_defaults(self):
+        gates = _derive_engine_gates("Transitional", "")
+        assert gates.red_dog == "allowed"
+        assert gates.index_income == "allowed"
 
 
 # ---------------------------------------------------------------------------
@@ -168,13 +164,11 @@ class TestBuildDMS:
         dms = build_daily_market_state(
             date_str="2026-02-13",
             regime={"label": "Risk-On", "score": 25.0, "components": {"fx_stress": 20}},
-            flow_pressure_snapshot={"composite_score": 70.0, "composite_label": "Risk-On"},
             vol_direction="NORMAL",
             iv_stress=30.0,
         )
         assert dms.date == "2026-02-13"
         assert dms.regime["state"] == "Risk-On"
-        assert dms.flow_pressure["score"] == 70.0
         assert dms.engine_gates["earnings"] == "allowed"
 
     def test_build_with_defaults(self):
@@ -201,12 +195,10 @@ class TestDiff:
         yesterday = DailyMarketState(
             date="2026-02-12",
             regime={"state": "Transitional", "score": 45.0},
-            flow_pressure={"score": 50.0, "state": "Neutral"},
         )
         today = DailyMarketState(
             date="2026-02-13",
             regime={"state": "Risk-On", "score": 25.0},
-            flow_pressure={"score": 70.0, "state": "Risk-On"},
         )
         diff = compute_dms_diff(today, yesterday)
         assert diff["has_changes"] is True

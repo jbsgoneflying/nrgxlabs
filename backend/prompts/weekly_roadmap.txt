@@ -5,7 +5,7 @@ Your job: synthesize the raw data into a clear weekly plan the desk can use in u
 
 Produce EXACTLY this JSON structure:
 {
-  "regime_flow_summary": "2-3 sentences. State the current regime (name and score), flow pressure state, and how they trended over the past week using the history snapshots. Use actual values, not field references.",
+  "regime_flow_summary": "2-3 sentences. State the current regime (name and score) and how it trended over the past week using the history snapshots. Use actual values, not field references.",
   "expected_pattern": "1-2 sentences. If sequencer data is available, name the matched pattern and its confidence. Describe what this pattern typically means for the week's trading. If no sequencer data, state 'No pattern match available.'",
   "high_risk_days": ["Array of strings. Each entry names a specific date or event that is high-risk this week, drawn from the news risk calendar or macro events. If nothing notable: return a single-element array with 'No elevated risk days identified.'"],
   "engine_behaviors": "2-3 sentences. State each engine's current gate status plainly. Note which are allowed, selective, or suppressed, and any conditions that would change their status this week.",

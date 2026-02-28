@@ -1,14 +1,10 @@
-"""Raven-Tech 2.0 – LLM Client for narrative compression and feature discovery.
+"""Raven-Tech 2.0 – LLM Client for narrative compression.
 
 Thin wrapper around OpenAI API with:
   - Retry and timeout handling
   - Structured output parsing
   - Rate limiting
   - Graceful fallback when API is unavailable
-
-Two modes:
-  1. Narrative compression (Desk Brief) – fast model, 10s timeout
-  2. Feature discovery (Research Lab)   – full model, 60s timeout
 
 Critical rule: NO LLM output can influence production signals without
 passing through the backtest approval gate.
@@ -141,9 +137,8 @@ def _parse_desk_brief_json(content: str) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 
 _DESK_BRIEF_SYSTEM_PROMPT = """You are a senior quant desk analyst at a systematic options trading firm.
-You will receive a JSON payload containing: regime state, flow pressure,
-vol state, dealer gamma context, sequencer events this week, gate summary,
-and macro event calendar.
+You will receive a JSON payload containing: regime state,
+vol state, sequencer events this week, gate summary, and macro event calendar.
 
 Produce EXACTLY this JSON structure:
 {
@@ -161,7 +156,7 @@ Rules:
 
 _DESK_BRIEF_FALLBACK = {
     "market_state": "Market data is being processed; review the metrics cards directly.",
-    "weekly_bias": "Consult Flow Pressure and Regime cards for current bias.",
+    "weekly_bias": "Consult Regime cards for current bias.",
     "top_risks": "Check the Macro Event Density panel for upcoming catalysts.",
 }
 
@@ -170,7 +165,7 @@ def generate_desk_brief(context: Dict[str, Any]) -> Dict[str, str]:
     """Generate the Desk Brief narrative from system context.
 
     Args:
-        context: Dict with keys like regime, flow_pressure, vol_state,
+        context: Dict with keys like regime, vol_state,
                  sequencer_events, gate_summary, macro_events
 
     Returns:
@@ -229,90 +224,3 @@ def generate_desk_brief(context: Dict[str, Any]) -> Dict[str, str]:
     except Exception as e:
         LOG.warning(f"LLM desk brief failed: {e}")
         return dict(_DESK_BRIEF_FALLBACK)
-
-
-# ---------------------------------------------------------------------------
-# Feature Discovery (Research Lab)
-# ---------------------------------------------------------------------------
-
-
-_FEATURE_DISCOVERY_SYSTEM_PROMPT = """You are a quantitative researcher at a systematic options trading firm.
-You will receive a JSON payload describing existing composite features and recent data distributions.
-
-Propose 3-5 candidate composite features that could improve signal quality.
-
-For each feature, output a JSON object in this array:
-[
-  {
-    "name": "Feature name",
-    "formula": "Combination of existing fields",
-    "hypothesis": "Why this feature might be predictive",
-    "backtest_params": {"lookback_days": 252, "min_sharpe": 0.5}
-  }
-]
-
-Rules:
-- Use ONLY existing data fields described in the payload.
-- Do not propose features requiring external data.
-- Each hypothesis must be falsifiable via backtest.
-- Output valid JSON array only."""
-
-
-def suggest_features(context: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Use LLM to suggest candidate composite features.
-
-    Returns a list of feature proposals, each with name, formula,
-    hypothesis, and backtest_params.
-    """
-    if not _rate_limiter.acquire():
-        LOG.info("Feature discovery rate-limited")
-        return []
-
-    client = _get_openai_client()
-    if client is None:
-        return []
-
-    payload_str = json.dumps(context, default=str)
-    if len(payload_str) > 8000:
-        payload_str = payload_str[:8000] + "..."
-
-    model = os.getenv("LLM_MODEL_DISCOVERY", "gpt-4o").strip()
-
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _FEATURE_DISCOVERY_SYSTEM_PROMPT},
-                {"role": "user", "content": payload_str},
-            ],
-            temperature=0.5,
-            max_tokens=1500,
-            timeout=60,
-        )
-
-        content = response.choices[0].message.content.strip()
-
-        if content.startswith("```"):
-            lines = content.split("\n")
-            content = "\n".join(lines[1:-1])
-
-        features = json.loads(content)
-        if not isinstance(features, list):
-            return []
-
-        # Validate each feature has required fields
-        valid = []
-        for f in features:
-            if isinstance(f, dict) and all(k in f for k in ("name", "formula", "hypothesis")):
-                valid.append({
-                    "name": str(f["name"])[:100],
-                    "formula": str(f["formula"])[:500],
-                    "hypothesis": str(f["hypothesis"])[:500],
-                    "backtest_params": f.get("backtest_params", {}),
-                    "status": "proposed",
-                })
-        return valid[:5]
-
-    except Exception as e:
-        LOG.warning(f"LLM feature discovery failed: {e}")
-        return []

@@ -105,78 +105,6 @@ def _check_vol_state(
     return None
 
 
-def _check_flow_pressure_max(
-    fp_score: Optional[float],
-    max_score: float,
-) -> Optional[GateReason]:
-    """WATCH if flow pressure score exceeds max (too risk-on for mean reversion)."""
-    if fp_score is None:
-        return None
-    if fp_score > max_score:
-        return GateReason(
-            code="FLOW_PRESSURE_TOO_HIGH",
-            label="Flow Pressure conflict",
-            severity="SOFT",
-            detail=f"Flow Pressure {fp_score:.0f} > max {max_score:.0f} for this strategy",
-            source_value=fp_score,
-            threshold_value=max_score,
-        )
-    return None
-
-
-def _check_flow_pressure_min(
-    fp_score: Optional[float],
-    min_score: float,
-) -> Optional[GateReason]:
-    """WATCH if flow pressure score is below min (too risk-off for trend continuation)."""
-    if fp_score is None:
-        return None
-    if fp_score < min_score:
-        return GateReason(
-            code="FLOW_PRESSURE_TOO_LOW",
-            label="Flow Pressure conflict",
-            severity="SOFT",
-            detail=f"Flow Pressure {fp_score:.0f} < min {min_score:.0f} for this strategy",
-            source_value=fp_score,
-            threshold_value=min_score,
-        )
-    return None
-
-
-def _check_flow_pressure_alignment(
-    fp_label: Optional[str],
-    setup_direction: Optional[str],
-) -> Optional[GateReason]:
-    """SUPPRESS if flow pressure direction opposes setup direction."""
-    if not fp_label or not setup_direction:
-        return None
-
-    fp = fp_label.lower().replace("-", "").replace("_", "")
-    direction = setup_direction.lower()
-
-    # Risk-Off + bullish setup = conflict
-    if fp in ("riskoff",) and direction in ("bullish", "bull", "long"):
-        return GateReason(
-            code="FLOW_PRESSURE_OPPOSED",
-            label="Flow Pressure opposed to direction",
-            severity="HARD",
-            detail=f"Flow Pressure is {fp_label} but setup is {setup_direction}",
-            source_value=fp_label,
-            threshold_value=setup_direction,
-        )
-    # Risk-On + bearish setup = conflict
-    if fp in ("riskon",) and direction in ("bearish", "bear", "short"):
-        return GateReason(
-            code="FLOW_PRESSURE_OPPOSED",
-            label="Flow Pressure opposed to direction",
-            severity="HARD",
-            detail=f"Flow Pressure is {fp_label} but setup is {setup_direction}",
-            source_value=fp_label,
-            threshold_value=setup_direction,
-        )
-    return None
-
-
 def _check_macro_proximity(
     high_events_within_days: int,
     max_days: int,
@@ -245,14 +173,11 @@ def gate_red_dog(
     setup_direction: Optional[str] = None,
     regime_label: str = "",
     vol_direction: str = "",
-    fp_score: Optional[float] = None,
-    fp_label: Optional[str] = None,
     gamma_ctx: Optional[dict] = None,
     high_events_within_days: int = 0,
     # Config overrides
     regime_allow: Optional[List[str]] = None,
     vol_state_allow: Optional[List[str]] = None,
-    fp_max: float = 70.0,
     macro_proximity_days: int = 1,
 ) -> GateDecision:
     """Gate a Red Dog Reversal setup.
@@ -271,10 +196,6 @@ def gate_red_dog(
         reasons.append(r)
 
     r = _check_vol_state(vol_direction, allowed_vol, severity="SOFT")
-    if r:
-        reasons.append(r)
-
-    r = _check_flow_pressure_max(fp_score, fp_max)
     if r:
         reasons.append(r)
 
@@ -298,8 +219,6 @@ def gate_red_dog(
         inputs={
             "regime_label": regime_label,
             "vol_direction": vol_direction,
-            "fp_score": fp_score,
-            "fp_label": fp_label,
             "high_events_within_days": high_events_within_days,
         },
     )
@@ -311,15 +230,11 @@ def gate_ichimoku(
     setup_direction: Optional[str] = None,
     regime_label: str = "",
     vol_direction: str = "",
-    fp_score: Optional[float] = None,
-    fp_label: Optional[str] = None,
     gamma_ctx: Optional[dict] = None,
     high_events_within_days: int = 0,
     # Config overrides
     regime_allow: Optional[List[str]] = None,
     vol_state_allow: Optional[List[str]] = None,
-    fp_min: float = 30.0,
-    check_fp_alignment: bool = True,
     macro_proximity_days: int = 1,
 ) -> GateDecision:
     """Gate an Ichimoku Cloud Continuation setup.
@@ -327,7 +242,6 @@ def gate_ichimoku(
     Ichimoku thrives when:
       - Regime is Risk-On or stable Transitional
       - Vol state is compressing or stable
-      - Flow Pressure is aligned with direction
     """
     reasons: List[GateReason] = []
     allowed_regimes = regime_allow or ["Risk-On", "Transitional"]
@@ -340,15 +254,6 @@ def gate_ichimoku(
     r = _check_vol_state(vol_direction, allowed_vol, severity="SOFT")
     if r:
         reasons.append(r)
-
-    r = _check_flow_pressure_min(fp_score, fp_min)
-    if r:
-        reasons.append(r)
-
-    if check_fp_alignment:
-        r = _check_flow_pressure_alignment(fp_label, setup_direction)
-        if r:
-            reasons.append(r)
 
     r = _check_macro_proximity(high_events_within_days, macro_proximity_days, severity="SOFT")
     if r:
@@ -366,9 +271,6 @@ def gate_ichimoku(
         inputs={
             "regime_label": regime_label,
             "vol_direction": vol_direction,
-            "fp_score": fp_score,
-            "fp_label": fp_label,
-            "setup_direction": setup_direction,
             "high_events_within_days": high_events_within_days,
         },
     )
@@ -381,7 +283,6 @@ def gate_ichimoku(
 # All inputs are optional with safe defaults.  No gating on fake data.
 #
 # - regime_label / vol_direction: SOFT if missing (warn, don't suppress)
-# - fp_score: skipped entirely when None (pairs are spread trades)
 # - macro_proximity: omitted in v1 (hardcoded 0 in platform; not reliable)
 
 
@@ -389,7 +290,6 @@ def gate_engine7_pair(
     signal: Any,
     regime_label: str = "",
     vol_direction: str = "",
-    fp_score: Optional[float] = None,
     *,
     regime_allow: str = "",
     vol_state_allow: str = "",
@@ -445,7 +345,6 @@ def gate_engine7_pair(
             threshold_value=None,
         ))
 
-    # Flow pressure – skip entirely when None (INV-4)
     # Macro proximity – omitted in v1 (INV-4)
 
     # Resolve
@@ -468,7 +367,6 @@ def gate_engine7_pair(
         inputs={
             "regime_label": regime_label,
             "vol_direction": vol_direction,
-            "fp_score": fp_score,
             "regime_allow": regime_allow,
             "vol_state_allow": vol_state_allow,
         },
@@ -486,8 +384,6 @@ def gate_scan_results(
     engine: str,
     regime_label: str = "",
     vol_direction: str = "",
-    fp_score: Optional[float] = None,
-    fp_label: Optional[str] = None,
     gamma_ctx: Optional[dict] = None,
     high_events_within_days: int = 0,
 ) -> List[dict]:
@@ -506,8 +402,6 @@ def gate_scan_results(
             setup_direction=direction or None,
             regime_label=regime_label,
             vol_direction=vol_direction,
-            fp_score=fp_score,
-            fp_label=fp_label,
             gamma_ctx=gamma_ctx,
             high_events_within_days=high_events_within_days,
         )

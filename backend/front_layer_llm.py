@@ -142,7 +142,7 @@ def _parse_llm_json(content: str) -> Optional[dict]:
 
 _MORNING_BRIEF_FALLBACK: Dict[str, Any] = {
     "market_posture": "Market data is being processed. Review DailyMarketState cards directly.",
-    "changes_vs_yesterday": "Diff data unavailable. Check regime and flow pressure cards.",
+    "changes_vs_yesterday": "Diff data unavailable. Check regime cards.",
     "active_themes": "Theme scoring in progress. See Active Themes panel.",
     "cross_asset_signals": "Cross-asset data loading. Check stress grid.",
     "engine_alignment": "Engine gate status available in the engine gates panel.",
@@ -255,10 +255,10 @@ def generate_morning_brief(
 # ---------------------------------------------------------------------------
 
 _WEEKLY_ROADMAP_FALLBACK: Dict[str, Any] = {
-    "regime_flow_summary": "Weekly analysis pending. Review regime and flow pressure trend.",
+    "regime_flow_summary": "Weekly analysis pending. Review regime trend.",
     "expected_pattern": "Pattern detection in progress. Check sequencer panel.",
     "high_risk_days": [],
-    "engine_behaviors": "Engine gate summary available in Command Center.",
+    "engine_behaviors": "Engine gate summary available on the Market Intelligence page.",
     "earnings_focus": [],
     "asymmetry_radar": "No asymmetries detected.",
     "break_the_plan": "Check regime transition triggers for invalidation conditions.",
@@ -383,7 +383,7 @@ Rules:
 - Never recommend specific trades or positions
 - Never mention prices, P&L, or dollar amounts
 - Always cite the stress score, direction, and equity relationship in your reasoning
-- Use the regime, flow pressure, and theme context to add depth
+- Use the regime and theme context to add depth
 - Keep total response under 200 words
 - Be direct and actionable in tone — this is for professional traders
 
@@ -406,7 +406,7 @@ def generate_asset_insight(
 
     Args:
         asset_reading: Single AssetStressReading dict (symbol, name, stress_score, etc.)
-        dms_summary: Condensed DailyMarketState context (regime, flow, vol, themes).
+        dms_summary: Condensed DailyMarketState context (regime, vol, themes).
 
     Returns:
         Dict with insight sections + _source tag.
@@ -434,7 +434,6 @@ def generate_asset_insight(
         "asset": asset_reading,
         "market": {
             "regime": dms_summary.get("regime", {}),
-            "flow_pressure": dms_summary.get("flow_pressure", {}),
             "vol_state": dms_summary.get("vol_state", {}),
             "composite_stress": dms_summary.get("cross_asset_stress", {}).get("composite_score"),
             "composite_label": dms_summary.get("cross_asset_stress", {}).get("composite_label"),
@@ -534,21 +533,6 @@ Rules: Never recommend specific trades. Cite the regime score and gate states. U
 
 Return valid JSON:
 { "what_regime_tells_us": "...", "engine_implications": "...", "regime_context": "...", "desk_takeaway": "..." }""",
-
-    "flow": """You are a senior flow and positioning analyst at a proprietary trading firm.
-
-Given the current flow pressure reading (score, state) and the broader DailyMarketState context,
-produce a desk-ready insight:
-
-1. WHAT FLOW IS TELLING US — What does this flow pressure score and state mean? Is money moving in or out?
-2. FLOW VS REGIME — Is flow confirming or diverging from the regime? What does that divergence imply?
-3. CONTEXT — Is today's flow reading unusual vs recent history? Any inflection signals?
-4. DESK TAKEAWAY — One sentence: what does flow pressure tell the desk about near-term positioning sentiment?
-
-Rules: Never recommend trades. Cite the flow score and regime. Under 200 words.
-
-Return valid JSON:
-{ "what_flow_tells_us": "...", "flow_vs_regime": "...", "context": "...", "desk_takeaway": "..." }""",
 
     "asymmetry": """You are a senior risk intelligence analyst at a proprietary trading firm.
 
@@ -1167,17 +1151,17 @@ Return valid JSON:
     "rd_gate": """You are a senior risk manager at a proprietary mean-reversion desk.
 
 Given the Red Dog gate context — gate summary (TRADABLE/WATCH/SUPPRESS counts), regime label,
-vol direction, flow pressure — explain:
+vol direction — explain:
 
 1. GATE STATUS — What is the gate telling the desk? How many signals are tradable vs suppressed?
 2. REGIME IMPACT — How does the current regime affect mean-reversion setups? Risk-On vs Risk-Off implications?
-3. VOL AND FLOW — What do vol direction and flow pressure mean for reversal probability?
+3. VOL DIRECTION — What does vol direction mean for reversal probability?
 4. DESK TAKEAWAY — One sentence: should the desk trade freely or apply extra caution today?
 
 Rules: Cite the gate counts, regime label, and vol direction. Under 200 words.
 
 Return valid JSON:
-{ "gate_status": "...", "regime_impact": "...", "vol_and_flow": "...", "desk_takeaway": "..." }""",
+{ "gate_status": "...", "regime_impact": "...", "vol_direction": "...", "desk_takeaway": "..." }""",
 
     # ── Ichimoku (Engine 4): Trend-Continuation Scanner ────────────────
 
@@ -1234,7 +1218,7 @@ Return valid JSON:
     "ik_gate": """You are a senior risk manager at a proprietary trend-continuation desk.
 
 Given the Ichimoku gate context — gate summary (TRADABLE/WATCH/SUPPRESS counts), regime label,
-vol direction, flow pressure — explain:
+vol direction — explain:
 
 1. GATE STATUS — How many signals are tradable vs suppressed? Is the gate broadly open or restrictive?
 2. REGIME FOR CONTINUATION — Does the current regime favor trend-continuation? Which regimes are best/worst?
@@ -1251,7 +1235,6 @@ _CARD_INSIGHT_KEYS: Dict[str, set] = {
     "composite": {"what_its_telling_us", "key_drivers", "historical_context", "desk_takeaway"},
     "theme": {"what_this_theme_means", "market_impact", "momentum_read", "desk_takeaway"},
     "regime": {"what_regime_tells_us", "engine_implications", "regime_context", "desk_takeaway"},
-    "flow": {"what_flow_tells_us", "flow_vs_regime", "context", "desk_takeaway"},
     "asymmetry": {"what_this_means", "why_it_matters", "what_to_watch", "desk_takeaway"},
     "diff": {"what_changed", "significance", "cascading_effects", "desk_takeaway"},
     # Engine 5 card types
@@ -1295,7 +1278,7 @@ _CARD_INSIGHT_KEYS: Dict[str, set] = {
     "rd_gamma": {"gamma_environment", "directional_bias", "mean_reversion_impact", "desk_takeaway"},
     "rd_trend": {"trend_read", "alignment_value", "distance_context", "desk_takeaway"},
     "rd_scan_summary": {"scan_read", "aplus_concentration", "directional_skew", "desk_takeaway"},
-    "rd_gate": {"gate_status", "regime_impact", "vol_and_flow", "desk_takeaway"},
+    "rd_gate": {"gate_status", "regime_impact", "vol_direction", "desk_takeaway"},
     # Ichimoku (Engine 4) card types
     "ik_signal": {"ichimoku_structure", "entry_quality", "freshness_read", "risk_framework", "component_analysis", "desk_takeaway"},
     "ik_gamma": {"dual_index_read", "continuation_impact", "index_membership", "desk_takeaway"},
@@ -1311,7 +1294,7 @@ def generate_card_insight(
 ) -> Dict[str, Any]:
     """Generate a desk-level LLM insight for any card type.
 
-    Supports Market Intelligence cards (composite, theme, regime, flow, asymmetry,
+    Supports Market Intelligence cards (composite, theme, regime, asymmetry,
     diff) and Engine 5 Lead-Lag cards (e5_regime, e5_vol, e5_narrative,
     e5_index_bias, e5_sector_bias, e5_trade_idea, e5_triggers, e5_component).
 
@@ -1349,7 +1332,6 @@ def generate_card_insight(
         "card": card_data,
         "market": {
             "regime": dms_summary.get("regime", {}),
-            "flow_pressure": dms_summary.get("flow_pressure", {}),
             "vol_state": dms_summary.get("vol_state", {}),
             "composite_stress": dms_summary.get("cross_asset_stress", {}).get("composite_score"),
             "composite_label": dms_summary.get("cross_asset_stress", {}).get("composite_label"),
@@ -1417,10 +1399,8 @@ def detect_asymmetries(
 
     Conditions checked:
       1. Vol underpricing vs narrative acceleration
-      2. FX stress without equity reaction
-      3. Commodity spike with muted index response
-      4. Regime-flow divergence
-      5. Theme persistence without vol reaction
+      2. Commodity spike with muted index response
+      3. Theme persistence without vol reaction
     """
     signals: List[Dict[str, Any]] = []
 
@@ -1428,12 +1408,10 @@ def detect_asymmetries(
         return signals
 
     regime = dms_today.get("regime", {})
-    flow = dms_today.get("flow_pressure", {})
     vol = dms_today.get("vol_state", {})
     xstress = dms_today.get("cross_asset_stress", {})
     themes = dms_today.get("news_themes", [])
     regime_score = float(regime.get("score", 50))
-    fp_score = float(flow.get("score", 50))
     vol_level = float(vol.get("level", 0))
     vol_skew = str(vol.get("skew", "neutral"))
 
@@ -1459,26 +1437,7 @@ def detect_asymmetries(
             "sources": ["news_themes", "vol_state.skew", "vol_state.level"],
         })
 
-    # --- 2. FX stress without equity reaction ---
-    fx_readings = [r for r in xstress_readings if r.get("asset_class") == "fx"]
-    fx_stress_avg = 0.0
-    if fx_readings:
-        fx_stress_avg = sum(float(r.get("stress_score", 50)) for r in fx_readings) / len(fx_readings)
-
-    if fx_stress_avg > 65 and fp_score > 45:
-        signals.append({
-            "type": "fx_stress_no_equity_reaction",
-            "description": (
-                f"FX stress elevated ({fx_stress_avg:.0f}) but flow pressure remains "
-                f"neutral-to-positive ({fp_score:.0f}). Equities may be ignoring "
-                "funding currency stress."
-            ),
-            "severity": "watch",
-            "action": "Monitor only. FX stress may lead equities by 1-2 sessions.",
-            "sources": ["cross_asset_stress.fx", "flow_pressure.score"],
-        })
-
-    # --- 3. Commodity spike with muted index response ---
+    # --- 2. Commodity spike with muted index response ---
     commodity_readings = [r for r in xstress_readings if r.get("asset_class") == "commodity"]
     commodity_stress_avg = 0.0
     if commodity_readings:
@@ -1499,24 +1458,7 @@ def detect_asymmetries(
             "sources": ["cross_asset_stress.commodity", "regime.score"],
         })
 
-    # --- 4. Regime-flow divergence ---
-    regime_label = str(regime.get("state", ""))
-    fp_label = str(flow.get("state", ""))
-
-    if regime_label in ("Risk-Off", "Stressed") and fp_label == "Risk-On":
-        signals.append({
-            "type": "regime_flow_divergence",
-            "description": (
-                f"Regime is {regime_label} (score {regime_score:.0f}) but flow pressure "
-                f"reads {fp_label} ({fp_score:.0f}). Internal divergence may resolve "
-                "sharply in either direction."
-            ),
-            "severity": "elevated",
-            "action": "Monitor only. Divergence typically resolves within 1-3 sessions.",
-            "sources": ["regime.state", "flow_pressure.state"],
-        })
-
-    # --- 5. Theme persistence without vol reaction ---
+    # --- 3. Theme persistence without vol reaction ---
     persistent_themes = [
         t for t in themes
         if int(t.get("persistence_days", 0)) >= 5
@@ -1552,7 +1494,7 @@ def _sanitize_dms(dms: dict) -> dict:
 
     # Whitelist of allowed top-level fields
     allowed = {
-        "date", "generated_at", "regime", "flow_pressure", "vol_state",
+        "date", "generated_at", "regime", "vol_state",
         "engine_gates", "earnings_candidates", "index_state", "news_risk",
         "cross_asset_stress", "news_themes", "sequencer_summary",
         "asymmetry_signals",

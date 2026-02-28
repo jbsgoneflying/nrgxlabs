@@ -26,8 +26,6 @@
   var regimeLabel      = document.getElementById("miRegimeLabel");
   // regimeTs removed — timestamp no longer shown in hero card
   var engineGates      = document.getElementById("miEngineGates");
-  var fpScore          = document.getElementById("miFpScore");
-  var fpLabel          = document.getElementById("miFpLabel");
   var volState         = document.getElementById("miVolState");
   var briefCard        = document.getElementById("miBriefCard");
   var briefTs          = document.getElementById("miBriefTs");
@@ -100,7 +98,7 @@
   }
 
   /* ═══════════════════════════════════════════════════════════════════
-     Render: Regime + Flow Pressure
+     Render: Regime
      ═══════════════════════════════════════════════════════════════════ */
   function _heroLabelClass(state) {
     var s = (state || "").toLowerCase().replace(/[^a-z]/g, "");
@@ -156,20 +154,6 @@
       }
     }
     engineGates.innerHTML = gatesHtml;
-
-    // ── Flow Pressure card ──
-    var fp = dms.flow_pressure || {};
-    var fScore = Number(fp.score || 0);
-    fpScore.textContent = fScore.toFixed(0);
-
-    fpLabel.textContent = fp.state || "--";
-    fpLabel.className = "miHeroLabel " + _heroLabelClass(fp.state);
-
-    var fpBar = document.getElementById("miFpBar");
-    if (fpBar) {
-      fpBar.style.width = Math.min(fScore, 100) + "%";
-      fpBar.style.background = _barColor(fScore);
-    }
 
     // Vol state as clean chips
     var vs = dms.vol_state || {};
@@ -242,21 +226,6 @@
      ═══════════════════════════════════════════════════════════════════ */
   var _lastPatterns = {};
   var _lastPatternMatch = {};
-
-  function loadPatterns() {
-    fetchJSON("/api/command-center/sequencer")
-      .then(function (data) {
-        var patterns = data.patterns || {};
-        var seq = data.sequence || {};
-        var pm = seq.matched_pattern || {};
-        _lastPatterns = patterns;
-        _lastPatternMatch = pm;
-        renderPatterns(patterns, pm);
-      })
-      .catch(function () {
-        if (patternList) patternList.innerHTML = '<div class="miEmpty" style="padding:16px;">Pattern data unavailable.</div>';
-      });
-  }
 
   function renderPatterns(patterns, matched) {
     if (!patternList) return;
@@ -440,9 +409,6 @@
     showOverlay();
     setProgress(5, "Fetching DailyMarketState...");
 
-    // Load patterns in parallel
-    loadPatterns();
-
     fetchJSON("/api/front-layer/daily-market-state")
       .then(function (dms) {
         setProgress(30, "Rendering market state...");
@@ -486,9 +452,6 @@
       refreshBanner.textContent = "Pulling fresh data from all engines and data sources...";
     }
 
-    // Reload patterns too
-    loadPatterns();
-
     fetch("/api/front-layer/refresh", { method: "POST" })
       .then(function (r) {
         if (!r.ok) throw new Error("HTTP " + r.status);
@@ -509,7 +472,6 @@
             '<b>Live data refreshed</b> at ' + ts +
             ' &middot; Regime: ' + ((result.regime || {}).state || "?") +
             ' (' + ((result.regime || {}).score || 0).toFixed(0) + ')' +
-            ' &middot; Flow: ' + ((result.flow_pressure || {}).state || "?") +
             ' &middot; Cross-asset: ' + (result.cross_asset_readings || 0) + ' readings' +
             ' &middot; ' + (result.theme_count || 0) + ' themes' +
             ' &middot; ' + briefStatus;
@@ -777,28 +739,7 @@
     });
   }
 
-  /* ── 4. Flow card ──────────────────────────────────── */
-  var flowCard = document.getElementById("miFlowCard");
-  if (flowCard) {
-    flowCard.addEventListener("click", function (e) {
-      if (e.target.closest("button")) return;
-      var fp = _lastDms.flow_pressure || {};
-      openPopup("Flow Pressure — Desk Insight", e);
-      var metaHtml = '<div class="miInsightMeta">' +
-        '<div class="miInsightMetaItem">Flow Score<br><span class="miInsightMetaValue">' + (fp.score || 0).toFixed(0) + '</span></div>' +
-        '<div class="miInsightMetaItem">State<br><span class="miInsightMetaValue">' + (fp.state || "--") + '</span></div>' +
-        '<div class="miInsightMetaItem">Regime<br><span class="miInsightMetaValue">' + ((_lastDms.regime || {}).state || "--") + '</span></div>' +
-        '<div class="miInsightMetaItem">Regime Score<br><span class="miInsightMetaValue">' + ((_lastDms.regime || {}).score || 0).toFixed(0) + '</span></div></div>';
-      fetchCardInsight("flow", { flow_pressure: fp, regime: _lastDms.regime || {} }, "flow", [
-        { key: "what_flow_tells_us", title: "What Flow Is Telling Us" },
-        { key: "flow_vs_regime",     title: "Flow vs Regime" },
-        { key: "context",            title: "Context" },
-        { key: "desk_takeaway",      title: "Desk Takeaway" },
-      ], metaHtml);
-    });
-  }
-
-  /* ── 5. Asymmetry cards ────────────────────────────── */
+  /* ── 4. Asymmetry cards ────────────────────────────── */
   if (asymContent) {
     asymContent.addEventListener("click", function (e) {
       var card = e.target.closest(".miAsymCard");
@@ -823,7 +764,7 @@
     });
   }
 
-  /* ── 6. Diff panel ─────────────────────────────────── */
+  /* ── 5. Diff panel ─────────────────────────────────── */
   if (diffContent) {
     diffContent.addEventListener("click", function (e) {
       if (!_lastDiff || !_lastDiff.has_changes) return;
@@ -842,7 +783,7 @@
     });
   }
 
-  /* ── 7. Pattern Library cards ──────────────────────── */
+  /* ── 6. Pattern Library cards ──────────────────────── */
   if (patternList) {
     patternList.addEventListener("click", function (e) {
       var item = e.target.closest(".miPatternItem");
@@ -855,8 +796,7 @@
       var metaHtml = '<div class="miInsightMeta">' +
         '<div class="miInsightMetaItem">Pattern<br><span class="miInsightMetaValue">' + (p.label || key) + '</span></div>' +
         '<div class="miInsightMetaItem">Status<br><span class="miInsightMetaValue" style="color:' + (isMatch ? 'var(--green)' : 'var(--muted)') + ';">' + (isMatch ? 'ACTIVE MATCH' : 'Not Matched') + '</span></div>' +
-        '<div class="miInsightMetaItem">Regime<br><span class="miInsightMetaValue">' + ((_lastDms.regime || {}).state || "--") + '</span></div>' +
-        '<div class="miInsightMetaItem">Flow<br><span class="miInsightMetaValue">' + ((_lastDms.flow_pressure || {}).state || "--") + '</span></div></div>';
+        '<div class="miInsightMetaItem">Regime<br><span class="miInsightMetaValue">' + ((_lastDms.regime || {}).state || "--") + '</span></div></div>';
       var cardData = {
         pattern_key: key, label: p.label, description: p.description,
         is_match: isMatch, confidence: _lastPatternMatch.confidence || 0,

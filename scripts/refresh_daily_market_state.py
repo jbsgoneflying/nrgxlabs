@@ -98,20 +98,6 @@ def main() -> int:
         LOG.warning("Engine 5 data unavailable: %s", e)
         partial = True
 
-    # Flow Pressure
-    fp_snapshot = {}
-    try:
-        fp_data = store.get_json("flow_pressure:latest_snapshot")
-        if fp_data:
-            fp_snapshot = fp_data
-            LOG.info("Flow Pressure loaded: composite=%.1f", fp_data.get("composite_score", 0))
-        else:
-            LOG.warning("Flow Pressure snapshot not available")
-            partial = True
-    except Exception as e:
-        LOG.warning("Flow Pressure unavailable: %s", e)
-        partial = True
-
     # Sequencer
     seq_summary = {}
     try:
@@ -233,7 +219,6 @@ def main() -> int:
     dms = build_daily_market_state(
         date_str=today_str,
         regime=regime_data,
-        flow_pressure_snapshot=fp_snapshot,
         vol_direction=vol_direction,
         iv_stress=iv_stress,
         event_count_5d=event_count,

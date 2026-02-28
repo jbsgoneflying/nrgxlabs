@@ -425,7 +425,6 @@ def main() -> int:
         dms = build_daily_market_state(
             date_str=day_str,
             regime=None,            # not available historically
-            flow_pressure_snapshot=None,  # not available historically
             vol_direction="",
             iv_stress=50.0,
             event_count_5d=event_count,

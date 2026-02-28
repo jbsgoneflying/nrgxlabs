@@ -52,21 +52,6 @@ class RegimeState:
 
 
 @dataclass
-class FlowPressureState:
-    score: float = 50.0
-    state: str = "Neutral"               # Risk-On | Neutral | Risk-Off
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "FlowPressureState":
-        if not isinstance(d, dict):
-            return cls()
-        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
-
-
-@dataclass
 class VolState:
     level: float = 0.0
     term_structure: str = "flat"         # contango | flat | backwardation
@@ -140,7 +125,6 @@ class DailyMarketState:
     date: str = ""
     generated_at: str = ""
     regime: dict = field(default_factory=dict)
-    flow_pressure: dict = field(default_factory=dict)
     vol_state: dict = field(default_factory=dict)
     engine_gates: dict = field(default_factory=dict)
     earnings_candidates: List[dict] = field(default_factory=list)
@@ -169,10 +153,9 @@ class DailyMarketState:
 
 def _derive_engine_gates(
     regime_label: str,
-    flow_pressure_score: float,
     vol_direction: str,
 ) -> EngineGates:
-    """Derive engine gate statuses from regime, flow pressure, and vol state.
+    """Derive engine gate statuses from regime and vol state.
 
     Rules:
       - Stressed regime suppresses everything.
@@ -195,10 +178,10 @@ def _derive_engine_gates(
         index_income = "reduced"
         post_event_ext = "suppressed"
     elif regime_label == "Transitional":
-        red_dog = "watch" if flow_pressure_score > 65 else "allowed"
+        red_dog = "allowed"
         ichimoku = "selective"
         earnings = "selective"
-        index_income = "allowed" if flow_pressure_score > 40 else "reduced"
+        index_income = "allowed"
         post_event_ext = "selective"
     else:  # Risk-On
         red_dog = "watch"  # Red Dog is contrarian, less useful in risk-on
@@ -273,7 +256,6 @@ def build_daily_market_state(
     *,
     date_str: Optional[str] = None,
     regime: Optional[dict] = None,
-    flow_pressure_snapshot: Optional[dict] = None,
     vol_direction: str = "",
     iv_stress: float = 50.0,
     vix_level: Optional[float] = None,
@@ -311,17 +293,11 @@ def build_daily_market_state(
         drivers=drivers,
     )
 
-    # --- Flow Pressure ---
-    fp = flow_pressure_snapshot or {}
-    fp_score = float(fp.get("composite_score", 50.0))
-    fp_label = str(fp.get("composite_label", "Neutral"))
-    fp_state = FlowPressureState(score=fp_score, state=fp_label)
-
     # --- Vol State ---
     vol_state = _derive_vol_state(vol_direction, iv_stress, vix_level)
 
     # --- Engine Gates ---
-    engine_gates = _derive_engine_gates(regime_label, fp_score, vol_direction)
+    engine_gates = _derive_engine_gates(regime_label, vol_direction)
 
     # --- News Risk ---
     news_risk = _derive_news_risk(event_count_5d, high_severity_count, upcoming_events)
@@ -330,7 +306,6 @@ def build_daily_market_state(
         date=date_str,
         generated_at=now.isoformat() + "Z",
         regime=regime_state.to_dict(),
-        flow_pressure=fp_state.to_dict(),
         vol_state=vol_state.to_dict(),
         engine_gates=engine_gates.to_dict(),
         earnings_candidates=earnings_candidates or [],
@@ -428,7 +403,7 @@ def compute_dms_diff(today: DailyMarketState, yesterday: DailyMarketState) -> di
     yesterday_d = yesterday.to_dict()
 
     # Top-level scalar-like fields to diff
-    diff_fields = ["regime", "flow_pressure", "vol_state", "engine_gates", "news_risk"]
+    diff_fields = ["regime", "vol_state", "engine_gates", "news_risk"]
 
     for field_name in diff_fields:
         t_val = today_d.get(field_name, {})

@@ -4,8 +4,8 @@ Tracks when key signals flip throughout the week and matches the
 resulting sequence to named historical patterns.
 
 Event types:
-  REGIME_FLIP, FLOW_PRESSURE_FLIP, DEALER_GAMMA_SHIFT,
-  VOL_LEADLAG_FLIP, EARNINGS_DISPERSION_SPIKE,
+  REGIME_FLIP, DEALER_GAMMA_SHIFT, VOL_LEADLAG_FLIP,
+  EARNINGS_DISPERSION_SPIKE,
   RED_DOG_BREADTH_CHANGE, ICHIMOKU_BREADTH_CHANGE
 
 Patterns (Phase 1 – simple template matching):
@@ -71,7 +71,6 @@ class WeeklySequence:
 
 EVENT_TYPES = [
     "REGIME_FLIP",
-    "FLOW_PRESSURE_FLIP",
     "DEALER_GAMMA_SHIFT",
     "VOL_LEADLAG_FLIP",
     "EARNINGS_DISPERSION_SPIKE",
@@ -149,7 +148,6 @@ def detect_state_changes(
     Keys should be like:
       {
         "regime": "Risk-On",
-        "flow_pressure": "Neutral",
         "dealer_gamma": "positive",
         "vol_leadlag": "NORMAL",
       }
@@ -157,7 +155,6 @@ def detect_state_changes(
     events = []
     type_map = {
         "regime": ("REGIME_FLIP", "engine5"),
-        "flow_pressure": ("FLOW_PRESSURE_FLIP", "flow_pressure"),
         "dealer_gamma": ("DEALER_GAMMA_SHIFT", "dealer_gamma"),
         "vol_leadlag": ("VOL_LEADLAG_FLIP", "engine5"),
         "earnings_dispersion": ("EARNINGS_DISPERSION_SPIKE", "engine1"),
@@ -188,7 +185,7 @@ def detect_state_changes(
 PATTERN_TEMPLATES = {
     "pin_and_grind": {
         "label": "Pin and Grind",
-        "description": "Regime stable, flow pressure neutral, vol compressing, dealer gamma positive. No major flips.",
+        "description": "Regime stable, vol compressing, dealer gamma positive. No major flips.",
         "expected_events": [],  # zero or few events = match
         "max_events": 1,
         "required_states": {
@@ -199,15 +196,15 @@ PATTERN_TEMPLATES = {
     },
     "break_and_trend": {
         "label": "Break and Trend",
-        "description": "Regime flips to Risk-On or Risk-Off mid-week. Flow pressure follows. Vol expands.",
-        "expected_events": ["REGIME_FLIP", "FLOW_PRESSURE_FLIP"],
+        "description": "Regime flips to Risk-On or Risk-Off mid-week. Vol expands.",
+        "expected_events": ["REGIME_FLIP"],
         "min_events": 2,
         "favored_play_types": ["directional_spread", "calendar", "defined_risk"],
         "primary_risk": "False breakout if regime flip reverses",
     },
     "chop_and_mean_revert": {
         "label": "Chop and Mean Revert",
-        "description": "Regime oscillates with multiple small flips. Flow pressure neutral-to-risk-off. Vol stable.",
+        "description": "Regime oscillates with multiple small flips. Vol stable.",
         "expected_events": ["REGIME_FLIP"],
         "min_events": 2,
         "favored_play_types": ["mean_reversion", "iron_condor", "butterfly"],
@@ -215,8 +212,8 @@ PATTERN_TEMPLATES = {
     },
     "vol_expansion_accel": {
         "label": "Vol Expansion Acceleration",
-        "description": "Vol lead-lag flips to rising. Dealer gamma turns negative. Flow pressure drops sharply.",
-        "expected_events": ["VOL_LEADLAG_FLIP", "DEALER_GAMMA_SHIFT", "FLOW_PRESSURE_FLIP"],
+        "description": "Vol lead-lag flips to rising. Dealer gamma turns negative.",
+        "expected_events": ["VOL_LEADLAG_FLIP", "DEALER_GAMMA_SHIFT"],
         "min_events": 2,
         "favored_play_types": ["defined_risk", "debit_spread", "hedge"],
         "primary_risk": "Acceleration continues beyond expected magnitude",
