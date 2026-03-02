@@ -5,15 +5,18 @@ shock-induced IV overshoot and systematically fades mean-reverting
 vol clusters while respecting fat-tail escalation risk.
 
 Endpoints:
-  GET /api/engine12/scan       — Full analysis dashboard
-  GET /api/engine12/historical — Historical shock comparison table
-  GET /api/engine12/simulate   — Custom Monte Carlo with user scenario weights
+  GET  /api/engine12/scan       — Full analysis dashboard
+  GET  /api/engine12/historical — Historical shock comparison table
+  GET  /api/engine12/simulate   — Custom Monte Carlo with user scenario weights
+  POST /api/engine12/explain    — GPT-5.3 contextual desk notes for any card/section
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
@@ -235,15 +238,7 @@ def engine12_scan(
         dealer_gamma_bucket=dealer_gamma["magnitudeBucket"],
     )
 
-    # ── Scenario probabilities ──
-    scenarios = estimate_scenario_probabilities(
-        severity.score,
-        dealer_gamma_sign=dealer_gamma["netGammaSign"],
-        dealer_gamma_bucket=dealer_gamma["magnitudeBucket"],
-        cross_asset_stress=geo_stress.score,
-    )
-
-    # ── OU calibration ──
+    # ── OU calibration (before edges, needed for persistence mispricing) ──
     ou_params = calibrate_ou(vix_closes)
     ou_dict: Dict[str, Any] = {}
     forward_curve: List[Dict[str, Any]] = []
@@ -256,7 +251,7 @@ def engine12_scan(
     # ── ORATS term structure ──
     term_struct = _fetch_orats_vix_term_structure(orats)
 
-    # ── Edge decomposition ──
+    # ── Edge decomposition (before scenarios, edge score feeds probability model) ──
     shock_db = load_shock_db()
     historical_rvs = [evt.get("rv_5d_after", 0) for evt in shock_db if evt.get("rv_5d_after")]
 
@@ -267,6 +262,20 @@ def engine12_scan(
         iv_90d=term_struct.get("iv_90d"),
         ou_params=ou_params,
         historical_rv_post_events=historical_rvs,
+    )
+
+    # ── Scenario probabilities (uses ALL signals: severity, gamma, stress, edges, history) ──
+    scenarios = estimate_scenario_probabilities(
+        severity.score,
+        dealer_gamma_sign=dealer_gamma["netGammaSign"],
+        dealer_gamma_bucket=dealer_gamma["magnitudeBucket"],
+        cross_asset_stress=geo_stress.score,
+        vix_spike_pct=spike.spike_pct_above_ma,
+        spx_gap_pct=spx_gap,
+        oil_gap_pct=oil_gap,
+        edge_score=edge_composite.score,
+        pre_event_regime=spike.pre_event_regime,
+        shock_db=shock_db,
     )
 
     # ── Monte Carlo ──
@@ -462,3 +471,91 @@ def engine12_simulate(
         "monteCarlo": mc_result.to_dict(),
         "recommendation": recommendation.to_dict(),
     }
+
+
+# ---------------------------------------------------------------------------
+# GPT-5.3 Contextual Desk Notes
+# ---------------------------------------------------------------------------
+
+_E12_SYSTEM_PROMPT = """You are a senior volatility trader and quant strategist running the VIX options desk at a top quantitative family office. You have 20+ years of experience fading geopolitical VIX spikes.
+
+A desk agent is looking at Raven-Tech Engine 12 — the VIX Spike Fade / Volatility Dislocation Engine — and needs your expert interpretation of a specific dashboard element. This engine detects geopolitical shock-induced IV overshoot and helps the desk systematically fade mean-reverting vol clusters while respecting fat-tail escalation risk.
+
+Context types you may receive:
+- "regime": The regime dashboard — spike detection, severity, dealer gamma state, cross-asset stress. Explain what the current regime means for trading, whether conditions favor fading the spike, and what would change your mind.
+- "edge": An individual edge or the composite edge score. Explain what this edge measures, how strong the signal is, and how the desk should think about it for structure selection.
+- "ou_model": The Ornstein-Uhlenbeck mean-reversion model — calibrated half-life, theta, forward curve. Explain what the calibration tells us about VIX dynamics, how fast the spike should decay, and what the forward curve implies for entry timing.
+- "scenarios": The scenario probabilities (contained/disruption/escalation) and their adjustments. Explain what's driving the probabilities, how dealer gamma and cross-asset stress are shifting them, and how the desk should use the re-simulate sliders to stress-test alternative scenarios.
+- "recommendation": The structure recommendation and position sizing. Explain WHY this structure was chosen over alternatives, how to think about the trade, entry timing, what to watch for, and when to cut.
+- "mc_results": The Monte Carlo P&L table across all structures. Explain how to read the Sharpe ratios, CVaR, and probability of profit — what the numbers are actually telling the desk about risk/reward.
+- "historical": The historical geopolitical shock comparison table. Explain which past events are most analogous to current conditions, what the jump ratios and decay patterns tell us, and what lessons from history apply now.
+- "persistence": The persistence mispricing metric (implied half-life vs modeled half-life). This is the most quantitative edge — explain it clearly, what the number means in practical terms, and how it translates to dollars.
+
+Your response must be valid JSON with these keys:
+{
+  "headline": "1-line bold summary of the key takeaway",
+  "what_it_is": "2-3 sentences: what this dashboard element actually measures and why it matters for a VIX fade trade",
+  "current_read": "3-4 sentences: interpret the CURRENT values — what do these specific numbers tell us right now? Be precise with the data.",
+  "how_to_trade": "3-4 sentences: specific, actionable trading guidance. What structure, what strikes relative to current VIX, what DTE, when to enter. Speak like you're giving instructions to the execution desk.",
+  "what_to_watch": "3-4 bullet points: specific things that would change the thesis. Include concrete levels (e.g., 'if VIX reclaims 28 intraday') not vague statements.",
+  "re_simulate_hint": "2-3 sentences: how the desk should use the scenario sliders to stress-test this. What scenario weight adjustments would stress the current recommendation?",
+  "desk_note": "2-3 sentences in the voice of a desk head at the morning meeting — direct, no hedging, tell the PM what matters."
+}
+
+Rules:
+- Be direct, specific, and quantitative. No hedge-fund-letter prose.
+- Reference actual numbers from the data — don't generalize.
+- When discussing structures, be specific about the trade: 'sell the 28/33 call spread in May VIX, 14 DTE' not 'consider a call spread'.
+- When discussing risk, quantify it: '$X max loss per contract' not 'limited risk'.
+- Speak like money is on the line because it is."""
+
+
+@router.post("/api/engine12/explain")
+def engine12_explain(body: dict):
+    """Engine 12: GPT-5.3 contextual desk notes for any card or section."""
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE12_VIX_FADE:
+        raise HTTPException(status_code=503, detail="Engine 12 disabled.")
+
+    import openai
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured.")
+
+    context_type = body.get("type", "")
+    context_key = body.get("key", "")
+    context_data = body.get("data", {})
+    scan_summary = body.get("scan_summary", {})
+
+    user_msg = (
+        f"Context type: {context_type}\n"
+        f"Context key: {context_key}\n\n"
+        f"Data:\n{json.dumps(context_data, default=str)[:8000]}\n\n"
+        f"Full scan summary:\n{json.dumps(scan_summary, default=str)[:4000]}"
+    )
+
+    try:
+        client = openai.OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model="gpt-5.3",
+            messages=[
+                {"role": "system", "content": _E12_SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.3,
+            max_tokens=1500,
+            response_format={"type": "json_object"},
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[:-3].strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {"raw_text": text}
+    except Exception as e:
+        LOG.exception("Engine 12 explain failed")
+        raise HTTPException(status_code=500, detail=f"LLM call failed: {type(e).__name__}: {e}")

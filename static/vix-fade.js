@@ -10,6 +10,169 @@
   var fmtPct = function (v) { return v == null ? "\u2014" : (Number(v) * 100).toFixed(1) + "%"; };
 
   var lastPayload = null;
+  var _insightCache = {};
+  var _insightRegistry = [];
+
+  /* ════════════════════════════════════════════════════════════════════
+     GPT-5.3 Contextual Desk Insight System
+     ════════════════════════════════════════════════════════════════════ */
+
+  function requestInsight(type, key, data, title) {
+    var cacheKey = type + ":" + key;
+    var popup = $("e12Popup");
+    var body = $("e12PopupBody");
+    $("e12PopupTitle").textContent = title || "Desk Insight \u2014 GPT-5.3";
+    popup.classList.add("visible");
+
+    if (_insightCache[cacheKey]) {
+      renderInsight(_insightCache[cacheKey]);
+      return;
+    }
+
+    body.innerHTML = '<div class="e12PopupLoading"><div class="e12PopupSpinner"></div><div>Analyzing ' + esc(key) + '\u2026</div></div>';
+
+    var summary = {};
+    if (lastPayload) {
+      summary = {
+        spike: lastPayload.spike,
+        severity: lastPayload.severity,
+        scenarios: lastPayload.scenarios,
+        edgeComposite: lastPayload.edgeComposite,
+        ouModel: lastPayload.ouModel,
+        dealerGamma: lastPayload.dealerGamma,
+        crossAssetStress: lastPayload.crossAssetStress,
+      };
+    }
+
+    fetch("/api/engine12/explain", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: type, key: key, data: data, scan_summary: summary }),
+    })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (e) { throw new Error(e.detail || "Failed"); });
+        return r.json();
+      })
+      .then(function (result) {
+        _insightCache[cacheKey] = result;
+        renderInsight(result);
+      })
+      .catch(function (err) {
+        body.innerHTML = '<div style="color:rgba(255,59,48,.8);padding:20px;">Error: ' + esc(err.message) + '</div>';
+      });
+  }
+
+  function renderInsight(data) {
+    var body = $("e12PopupBody");
+    var h = "";
+
+    if (data.headline) {
+      h += '<div style="font-size:15px;font-weight:800;margin-bottom:14px;color:#fff;line-height:1.3;">' + esc(data.headline) + '</div>';
+    }
+
+    var fields = [
+      ["what_it_is", "What This Measures"],
+      ["current_read", "Current Read"],
+      ["how_to_trade", "How to Trade This"],
+      ["what_to_watch", "What to Watch"],
+      ["re_simulate_hint", "Re-Simulate Guide"],
+      ["desk_note", "Desk Note"],
+    ];
+
+    for (var i = 0; i < fields.length; i++) {
+      var val = data[fields[i][0]];
+      if (!val) continue;
+      h += '<div class="e12Field"><div class="e12FieldLabel">' + fields[i][1] + '</div><div class="e12FieldValue">' + esc(val) + '</div></div>';
+    }
+
+    if (data.raw_text) {
+      h += '<pre style="white-space:pre-wrap;font-size:11px;color:rgba(255,255,255,.7);">' + esc(data.raw_text) + '</pre>';
+    }
+
+    body.innerHTML = h || "<div>No insight generated.</div>";
+  }
+
+  function inlineInsightBtn(type, key, data, title) {
+    var idx = _insightRegistry.length;
+    _insightRegistry.push({ type: type, key: key, data: data, title: title });
+    return '<button class="e12InsightBtn" data-insight-idx="' + idx + '" style="margin-top:8px;"><span class="ico">&#9432;</span> Explain</button>';
+  }
+
+  /* Section-level insight buttons (data-section attr in HTML) */
+  document.addEventListener("click", function (e) {
+    var sectionBtn = e.target.closest(".e12InsightBtn[data-section]");
+    if (sectionBtn && lastPayload) {
+      var section = sectionBtn.getAttribute("data-section");
+      var sectionData = {};
+      var title = "Desk Insight";
+      if (section === "regime") {
+        sectionData = { spike: lastPayload.spike, severity: lastPayload.severity, dealerGamma: lastPayload.dealerGamma, crossAssetStress: lastPayload.crossAssetStress };
+        title = "Regime Dashboard \u2014 GPT-5.3";
+      } else if (section === "edge") {
+        sectionData = lastPayload.edgeComposite;
+        title = "Edge Decomposition \u2014 GPT-5.3";
+      } else if (section === "ou_model") {
+        sectionData = { ouModel: lastPayload.ouModel, forwardCurve: lastPayload.forwardCurve, termStructure: lastPayload.termStructure };
+        title = "OU Model \u2014 GPT-5.3";
+      } else if (section === "scenarios") {
+        sectionData = { scenarios: lastPayload.scenarios, dealerGamma: lastPayload.dealerGamma, crossAssetStress: lastPayload.crossAssetStress };
+        title = "Scenario Analysis \u2014 GPT-5.3";
+      } else if (section === "recommendation") {
+        sectionData = { recommendation: lastPayload.recommendation, edgeComposite: lastPayload.edgeComposite, scenarios: lastPayload.scenarios };
+        title = "Structure Recommendation \u2014 GPT-5.3";
+      } else if (section === "mc_results") {
+        sectionData = lastPayload.monteCarlo;
+        title = "Monte Carlo Results \u2014 GPT-5.3";
+      } else if (section === "historical") {
+        sectionData = { historicalComparisons: lastPayload.historicalComparisons, spike: lastPayload.spike };
+        title = "Historical Shocks \u2014 GPT-5.3";
+      }
+      requestInsight(section, section, sectionData, title);
+      return;
+    }
+
+    /* Inline card-level insight buttons */
+    var cardBtn = e.target.closest(".e12InsightBtn[data-insight-idx]");
+    if (cardBtn) {
+      var idx = parseInt(cardBtn.getAttribute("data-insight-idx"), 10);
+      if (!isNaN(idx) && _insightRegistry[idx]) {
+        var entry = _insightRegistry[idx];
+        requestInsight(entry.type, entry.key, entry.data, entry.title);
+      }
+    }
+  });
+
+  /* Popup drag + close */
+  (function initDrag() {
+    var popup = $("e12Popup");
+    var header = $("e12PopupHeader");
+    var closeBtn = $("e12PopupClose");
+    var dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
+
+    closeBtn.addEventListener("click", function () { popup.classList.remove("visible"); });
+
+    header.addEventListener("mousedown", function (ev) {
+      if (ev.target === closeBtn) return;
+      dragging = true;
+      popup.classList.add("isDragging");
+      startX = ev.clientX; startY = ev.clientY;
+      var rect = popup.getBoundingClientRect();
+      origX = rect.left; origY = rect.top;
+      ev.preventDefault();
+    });
+    document.addEventListener("mousemove", function (ev) {
+      if (!dragging) return;
+      popup.style.left = (origX + ev.clientX - startX) + "px";
+      popup.style.top = (origY + ev.clientY - startY) + "px";
+      popup.style.right = "auto";
+    });
+    document.addEventListener("mouseup", function () {
+      if (dragging) { dragging = false; popup.classList.remove("isDragging"); }
+    });
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") popup.classList.remove("visible");
+    });
+  })();
 
   /* ── Badge helpers ── */
   function scoreBadge(score, label) {
@@ -72,12 +235,14 @@
   function renderEdges(d) {
     var ec = d.edgeComposite || {};
     var edges = ec.edges || [];
+    _insightRegistry = [];
     var h = "";
     for (var i = 0; i < edges.length; i++) {
       var e = edges[i];
+      var btn = inlineInsightBtn("edge", e.edgeId || e.label, e, e.label + " \u2014 GPT-5.3");
       h += card(e.label,
         '<span class="e12MonoVal">' + fmt1(e.score) + "</span> <span style='font-size:13px;color:var(--muted);font-weight:600'>/ 100</span>",
-        esc(e.interpretation), e.score);
+        esc(e.interpretation) + "<br>" + btn, e.score);
     }
     h += card("Composite Edge",
       '<span class="e12MonoVal">' + fmt1(ec.score) + "</span> <span style='font-size:13px;color:var(--muted);font-weight:600'>/ 100</span>",
@@ -151,7 +316,7 @@
     wrap.innerHTML = svg;
   }
 
-  /* ── Scenario Analysis ── */
+  /* ── Scenario Probabilities (algorithmically derived) ── */
   function renderScenarios(d) {
     var sc = d.scenarios || {};
     var g = "";
@@ -162,16 +327,14 @@
 
     var adj = "";
     if (sc.adjustments && sc.adjustments.length) {
+      adj += '<div style="padding:12px 16px;border-radius:var(--radius-card);border:1px solid var(--border);background:var(--surfaceSolid);">';
+      adj += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);margin-bottom:8px;">Model Reasoning (' + sc.adjustments.length + ' factors)</div>';
       for (var i = 0; i < sc.adjustments.length; i++) {
-        adj += '<div style="font-size:11px;color:var(--muted);margin-bottom:3px;">\u2022 ' + esc(sc.adjustments[i]) + "</div>";
+        adj += '<div style="font-size:11px;color:var(--text);margin-bottom:4px;line-height:1.4;padding-left:12px;text-indent:-12px;">\u2022 ' + esc(sc.adjustments[i]) + "</div>";
       }
+      adj += "</div>";
     }
     $("scenarioAdjustments").innerHTML = adj;
-
-    $("slContained").value = Math.round((sc.pContained || 0.55) * 100);
-    $("slDisruption").value = Math.round((sc.pDisruption || 0.28) * 100);
-    $("slEscalation").value = Math.round((sc.pEscalation || 0.17) * 100);
-    updateSliderLabels();
   }
 
   /* ── Recommendation ── */
@@ -256,52 +419,6 @@
     }
     $("histBody").innerHTML = h;
   }
-
-  /* ── Slider helpers ── */
-  function updateSliderLabels() {
-    $("valContained").textContent = $("slContained").value + "%";
-    $("valDisruption").textContent = $("slDisruption").value + "%";
-    $("valEscalation").textContent = $("slEscalation").value + "%";
-  }
-  $("slContained").addEventListener("input", updateSliderLabels);
-  $("slDisruption").addEventListener("input", updateSliderLabels);
-  $("slEscalation").addEventListener("input", updateSliderLabels);
-
-  /* ── Re-simulate ── */
-  $("reSimBtn").addEventListener("click", function () {
-    var c = parseInt($("slContained").value, 10);
-    var d = parseInt($("slDisruption").value, 10);
-    var e = parseInt($("slEscalation").value, 10);
-    var total = c + d + e;
-    if (total <= 0) return;
-
-    var url = "/api/engine12/simulate?p_contained=" + (c / total).toFixed(3) +
-      "&p_disruption=" + (d / total).toFixed(3) + "&p_escalation=" + (e / total).toFixed(3);
-    if (lastPayload && lastPayload.spike && lastPayload.spike.vixCurrent)
-      url += "&vix_current=" + lastPayload.spike.vixCurrent;
-
-    $("status").textContent = "Re-simulating\u2026";
-    if (typeof RavenLoading !== "undefined") RavenLoading.show();
-
-    fetch(url)
-      .then(function (r) {
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        return r.json();
-      })
-      .then(function (data) {
-        console.log("[Engine 12] simulate response:", data);
-        if (data.monteCarlo) renderMC({ monteCarlo: data.monteCarlo });
-        if (data.recommendation) renderRecommendation({ recommendation: data.recommendation });
-        $("status").textContent = "Re-simulation complete";
-      })
-      .catch(function (err) {
-        console.error("[Engine 12] simulate failed:", err);
-        $("status").textContent = "Re-simulation failed: " + err.message;
-      })
-      .finally(function () {
-        if (typeof RavenLoading !== "undefined") RavenLoading.hide();
-      });
-  });
 
   /* ── Main scan ── */
   function runScan() {

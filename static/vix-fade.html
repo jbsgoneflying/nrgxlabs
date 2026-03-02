@@ -89,12 +89,6 @@
         color: rgba(180,100,0,0.96); margin-bottom: 8px;
       }
 
-      /* Slider controls */
-      .e12SliderGroup { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-      .e12SliderGroup label { font-size: 12px; font-weight: 600; color: var(--muted); width: 90px; flex-shrink: 0; }
-      .e12SliderGroup input[type="range"] { flex: 1; accent-color: var(--blue); }
-      .e12SliderVal { font-size: 12px; font-weight: 700; width: 40px; text-align: right; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-
       /* Scenario cards */
       .e12ScenarioGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px; }
       .e12ScenarioCard {
@@ -106,17 +100,72 @@
       .e12ScenarioProb { font-size: 28px; font-weight: 900; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
       .e12ScenarioCaption { font-size: 10px; color: var(--muted); margin-top: 2px; }
 
-      .e12ReSimBtn {
-        display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px;
-        border-radius: var(--radius-control); border: 1px solid var(--border);
-        background: var(--surfaceSolid); font-size: 12px; font-weight: 600;
-        cursor: pointer; color: var(--text); transition: all .15s;
-      }
-      .e12ReSimBtn:hover { background: var(--hover); }
-
       .e12Negative { color: var(--red); }
       .e12Positive { color: var(--green); }
       .e12MonoVal { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 700; }
+
+      /* ── Insight Buttons (matches E9 pattern) ── */
+      .e12InsightBtn {
+        display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px;
+        border-radius: 6px; border: 1px solid var(--border); background: var(--surfaceSolid);
+        font-size: 9px; font-weight: 600; color: var(--muted); cursor: pointer;
+        transition: all .15s ease; letter-spacing: 0.02em; vertical-align: middle;
+      }
+      .e12InsightBtn:hover { background: var(--hover); color: var(--text); border-color: var(--text); }
+      .e12InsightBtn.loading { opacity: 0.5; cursor: wait; }
+      .e12InsightBtn .ico { font-size: 11px; }
+
+      /* ── Dark Glass Popup (matches E8/E9 pattern) ── */
+      .e12Popup {
+        position: fixed; z-index: 10000; width: 540px; max-height: 85vh;
+        overflow-y: auto; border-radius: 16px;
+        background: rgba(28,28,30,.98);
+        backdrop-filter: blur(40px) saturate(180%);
+        -webkit-backdrop-filter: blur(40px) saturate(180%);
+        box-shadow: 0 20px 60px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.08) inset;
+        user-select: none; color: #fff; display: none;
+      }
+      .e12Popup.visible { display: block; }
+      .e12Popup.isDragging { cursor: grabbing; transition: none; }
+      .e12PopupHeader {
+        display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        padding: 14px 16px; background: rgba(255,255,255,.06);
+        border-bottom: 1px solid rgba(255,255,255,.08); cursor: grab;
+      }
+      .e12PopupTitle { font-size: 14px; font-weight: 700; line-height: 1.3; color: #fff; flex: 1; }
+      .e12PopupClose {
+        width: 24px; height: 24px; border-radius: 6px; border: none;
+        background: rgba(255,255,255,.12); color: rgba(255,255,255,.7);
+        font-size: 16px; cursor: pointer; display: flex; align-items: center;
+        justify-content: center; transition: background .15s ease;
+      }
+      .e12PopupClose:hover { background: rgba(255,255,255,.22); }
+      .e12PopupBody {
+        padding: 16px; font-size: 12px; line-height: 1.6;
+        color: rgba(255,255,255,.88); white-space: normal; word-wrap: break-word;
+      }
+      .e12PopupBody h3 {
+        font-size: 11px; font-weight: 700; margin: 14px 0 6px;
+        text-transform: uppercase; letter-spacing: 0.05em;
+        color: rgba(255,255,255,.5); border-bottom: 1px solid rgba(255,255,255,.08);
+        padding-bottom: 4px;
+      }
+      .e12PopupBody h3:first-child { margin-top: 0; }
+      .e12PopupBody p { margin: 0 0 8px; }
+      .e12PopupBody strong { color: #fff; }
+      .e12Field { margin-bottom: 12px; }
+      .e12FieldLabel {
+        font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+        color: rgba(255,255,255,.4); margin-bottom: 3px;
+      }
+      .e12FieldValue { font-size: 12px; line-height: 1.6; color: rgba(255,255,255,.88); }
+      .e12PopupSpinner {
+        display: inline-block; width: 18px; height: 18px;
+        border: 2px solid rgba(255,255,255,.15); border-top-color: rgba(255,255,255,.7);
+        border-radius: 50%; animation: e12spin 0.8s linear infinite;
+      }
+      @keyframes e12spin { to { transform: rotate(360deg); } }
+      .e12PopupLoading { text-align: center; padding: 40px 20px; color: rgba(255,255,255,.5); font-size: 13px; }
 
       @media (max-width: 768px) {
         .e12ScenarioGrid { grid-template-columns: 1fr; }
@@ -145,42 +194,24 @@
 
       <div class="results hidden" id="results">
 
-        <div class="e12Divider"><span>Regime Dashboard</span></div>
+        <div class="e12Divider"><span>Regime Dashboard</span><button class="e12InsightBtn" data-section="regime"><span class="ico">&#9432;</span> Explain</button></div>
         <div class="e12Grid" id="regimeGrid"></div>
 
-        <div class="e12Divider"><span>Edge Decomposition</span></div>
+        <div class="e12Divider"><span>Edge Decomposition</span><button class="e12InsightBtn" data-section="edge"><span class="ico">&#9432;</span> Explain</button></div>
         <div class="e12Grid" id="edgeGrid"></div>
 
-        <div class="e12Divider"><span>OU Model — VIX Forward Curve</span></div>
+        <div class="e12Divider"><span>OU Model — VIX Forward Curve</span><button class="e12InsightBtn" data-section="ou_model"><span class="ico">&#9432;</span> Explain</button></div>
         <div class="e12Grid" id="ouGrid"></div>
         <div class="e12ChartWrap" id="forwardCurveChart"></div>
 
-        <div class="e12Divider"><span>Scenario Analysis</span></div>
+        <div class="e12Divider"><span>Scenario Probabilities</span><button class="e12InsightBtn" data-section="scenarios"><span class="ico">&#9432;</span> Explain</button></div>
         <div class="e12ScenarioGrid" id="scenarioGrid"></div>
-        <div id="scenarioAdjustments" style="margin-bottom:12px;"></div>
-        <div style="padding:14px 16px;border-radius:var(--radius-card);border:1px solid var(--border);background:var(--surfaceSolid);margin-bottom:18px;">
-          <div class="e12SliderGroup">
-            <label>Contained</label>
-            <input type="range" id="slContained" min="0" max="100" value="55" />
-            <span class="e12SliderVal" id="valContained">55%</span>
-          </div>
-          <div class="e12SliderGroup">
-            <label>Disruption</label>
-            <input type="range" id="slDisruption" min="0" max="100" value="28" />
-            <span class="e12SliderVal" id="valDisruption">28%</span>
-          </div>
-          <div class="e12SliderGroup">
-            <label>Escalation</label>
-            <input type="range" id="slEscalation" min="0" max="100" value="17" />
-            <span class="e12SliderVal" id="valEscalation">17%</span>
-          </div>
-          <button id="reSimBtn" class="e12ReSimBtn" style="margin-top:6px;">Re-Simulate</button>
-        </div>
+        <div id="scenarioAdjustments" style="margin-bottom:18px;"></div>
 
-        <div class="e12Divider"><span>Structure Recommendation</span></div>
+        <div class="e12Divider"><span>Structure Recommendation</span><button class="e12InsightBtn" data-section="recommendation"><span class="ico">&#9432;</span> Explain</button></div>
         <div id="recContent"></div>
 
-        <div class="e12Divider"><span>Monte Carlo P&amp;L — All Structures</span></div>
+        <div class="e12Divider"><span>Monte Carlo P&amp;L — All Structures</span><button class="e12InsightBtn" data-section="mc_results"><span class="ico">&#9432;</span> Explain</button></div>
         <table class="e12Table" id="mcTable">
           <thead><tr>
             <th>Structure</th><th>Expected P&amp;L</th><th>P(Profit)</th><th>Sharpe</th><th>CVaR95</th><th>Max Loss</th><th>Max Gain</th>
@@ -188,7 +219,7 @@
           <tbody id="mcBody"></tbody>
         </table>
 
-        <div class="e12Divider"><span>Historical Geopolitical Shocks</span></div>
+        <div class="e12Divider"><span>Historical Geopolitical Shocks</span><button class="e12InsightBtn" data-section="historical"><span class="ico">&#9432;</span> Explain</button></div>
         <table class="e12Table" id="histTable">
           <thead><tr>
             <th>Event</th><th>Date</th><th>VIX Pre</th><th>VIX Open</th><th>Peak</th><th>Jump</th><th>SPX Gap</th><th>Oil Gap</th><th>Outcome</th><th>5d Decay</th>
@@ -199,8 +230,19 @@
       </div>
     </main>
 
+    <!-- GPT-5.3 Desk Insight Popup (dark glass, draggable) -->
+    <div class="e12Popup" id="e12Popup" style="top:60px;right:20px;">
+      <div class="e12PopupHeader" id="e12PopupHeader">
+        <span class="e12PopupTitle" id="e12PopupTitle">Desk Insight — GPT-5.3</span>
+        <button class="e12PopupClose" id="e12PopupClose">&times;</button>
+      </div>
+      <div class="e12PopupBody" id="e12PopupBody">
+        <div class="e12PopupLoading"><div class="e12PopupSpinner"></div><div>Analyzing...</div></div>
+      </div>
+    </div>
+
     <script src="/static/ui_kit.js?v=4"></script>
-    <script src="/static/vix-fade.js?v=3"></script>
+    <script src="/static/vix-fade.js?v=4"></script>
     <script src="/static/nav.js"></script>
   </body>
 </html>
