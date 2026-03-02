@@ -296,15 +296,12 @@
 
   /* ── Main scan ── */
   function runScan() {
-    var dateVal = $("dateInput").value || "";
-    var url = "/api/engine12/scan";
-    if (dateVal) url += "?date=" + dateVal;
-
     $("status").textContent = "Running Engine 12 analysis\u2026";
     $("results").style.display = "none";
+    $("runBtn").disabled = true;
     if (typeof RavenLoading !== "undefined") RavenLoading.show();
 
-    fetch(url).then(function (r) { return r.json(); }).then(function (data) {
+    fetch("/api/engine12/scan").then(function (r) { return r.json(); }).then(function (data) {
       if (data.status === "error") {
         $("status").textContent = "Error: " + (data.message || "Unknown");
         return;
@@ -322,10 +319,10 @@
     }).catch(function (err) {
       $("status").textContent = "Failed: " + err.message;
     }).finally(function () {
+      $("runBtn").disabled = false;
       if (typeof RavenLoading !== "undefined") RavenLoading.hide();
     });
   }
 
-  $("scanForm").addEventListener("submit", function (e) { e.preventDefault(); runScan(); });
-  $("runBtn").addEventListener("click", function (e) { e.preventDefault(); runScan(); });
+  $("runBtn").addEventListener("click", runScan);
 })();

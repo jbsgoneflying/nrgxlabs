@@ -137,14 +137,10 @@
       </header>
 
       <section class="controlBar" aria-label="Engine 12 Controls">
-        <form id="scanForm" class="controlBarForm controlBarForm--engine2" onsubmit="return false;">
-          <div class="controlGroup">
-            <label class="controlLabel" for="dateInput">Date</label>
-            <input type="date" id="dateInput" class="controlInput" />
-          </div>
-          <button type="submit" id="runBtn" class="controlBtn">Run Analysis</button>
-        </form>
-        <div id="status" class="status">Ready</div>
+        <div class="controlBarForm controlBarForm--engine2">
+          <button id="runBtn" class="controlBtn">Run Analysis</button>
+          <span id="status" class="status">Ready</span>
+        </div>
       </section>
 
       <div id="results" style="display:none;">
