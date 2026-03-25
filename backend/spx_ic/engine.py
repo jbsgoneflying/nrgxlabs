@@ -1319,18 +1319,15 @@ def compute_engine2_spx_ic(
     candles = detect_candlestick_patterns(tech_bars) if ok_ohlc else {"enabled": False, "patterns": [], "notes": ["Insufficient OHLC for candle patterns."]}
     red_dog = detect_red_dog_reversal(tech_bars) if ok_ohlc else {"enabled": False, "bullish": False, "bearish": False, "notes": ["Insufficient OHLC for Red Dog."]}
     elliott = detect_elliott_pivot_structure(tech_bars, threshold_pct=0.04) if closes_tech else {"enabled": False, "structure": "unclear", "notes": ["Insufficient closes for pivots."]}
-    live_px = None
-    # Prefer liveContext spot if available, else try live summaries for the underlying/proxy
-    try:
-        live_px = _to_float((live_context.get("spot") if isinstance(live_context, dict) else None))
-    except Exception:
-        live_px = None
-    live_price_ctx: Dict[str, Any] = {"price": None, "source": "none", "mode": "none", "marketOpen": None}
+    live_price_ctx = fetch_live_price_context_optional(client, ticker=str(underlying).upper())
+    live_px = _to_float(live_price_ctx.get("price")) if live_price_ctx else None
     if live_px is None:
-        live_price_ctx = fetch_live_price_context_optional(client, ticker=str(underlying).upper())
-        live_px = _to_float(live_price_ctx.get("price"))
-    else:
-        live_price_ctx = {"price": float(live_px), "source": "live_context_spot", "mode": "open_live", "marketOpen": True}
+        try:
+            live_px = _to_float((live_context.get("spot") if isinstance(live_context, dict) else None))
+        except Exception:
+            live_px = None
+        if live_px is not None:
+            live_price_ctx = {"price": float(live_px), "source": "chain_spot_fallback", "mode": "fallback", "marketOpen": None}
     level_map: Dict[str, Optional[float]] = {}
     level_map.update(ema)
     if isinstance(boll, dict) and boll.get("enabled"):
