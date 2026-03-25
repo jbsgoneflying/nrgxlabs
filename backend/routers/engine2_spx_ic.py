@@ -348,30 +348,34 @@ def levels(
 
 @router.post("/api/spx-ic/advisor")
 def spx_ic_advisor(
+    body: Optional[Dict[str, Any]] = Body(default=None),
     underlying: str = Query("SPX", description="Underlying: SPX|SPY|QQQ"),
     entry_day: str = Query("mon", description="Entry day: mon|tue|wed"),
     seasonality_mode: str = Query("none", description="Seasonality conditioning"),
 ):
-    """Run Engine 2 scan + LLM trade advisor — produces a TRADE/LEAN_PASS/PASS verdict."""
+    """LLM trade advisor — accepts pre-computed Engine2 payload or re-runs scan."""
     f = get_flags()
     if not f.ENABLE_ENGINE2_SPX_IC:
         raise HTTPException(status_code=404, detail="Engine 2 disabled")
     if not f.ENGINE2_ADVISOR_ENABLED:
         raise HTTPException(status_code=404, detail="Engine 2 advisor disabled")
 
-    under = str(underlying or "SPX").strip().upper()
-    if under not in ("SPX", "SPY", "QQQ"):
-        raise HTTPException(status_code=400, detail="underlying must be SPX|SPY|QQQ")
-
     try:
-        payload = compute_engine2_spx_ic(
-            client=get_client(),
-            benzinga_client=get_benzinga_client_optional(),
-            flags=f,
-            underlying_preference=under,
-            entry_day=entry_day,
-            seasonality_mode=seasonality_mode,
-        )
+        payload: Dict[str, Any]
+        if body and isinstance(body, dict) and body.get("current"):
+            payload = body
+        else:
+            under = str(underlying or "SPX").strip().upper()
+            if under not in ("SPX", "SPY", "QQQ"):
+                raise HTTPException(status_code=400, detail="underlying must be SPX|SPY|QQQ")
+            payload = compute_engine2_spx_ic(
+                client=get_client(),
+                benzinga_client=get_benzinga_client_optional(),
+                flags=f,
+                underlying_preference=under,
+                entry_day=entry_day,
+                seasonality_mode=seasonality_mode,
+            )
 
         analysis = generate_trade_analysis(
             engine2_payload=payload,
@@ -394,7 +398,7 @@ def spx_ic_advisor(
         raise
     except Exception as e:
         LOG.exception("Engine2 advisor failure")
-        raise HTTPException(status_code=500, detail=f"Advisor error: {type(e).__name__}") from e
+        raise HTTPException(status_code=500, detail=f"Advisor error: {type(e).__name__}: {e}") from e
 
 
 @router.post("/api/spx-ic/trade")

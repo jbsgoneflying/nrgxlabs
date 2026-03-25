@@ -1572,16 +1572,16 @@ function renderEngine2DecisionPanel(payload) {
   // --- Expected Move (weekly Friday options only) ---
   const em = payload?.expectedMove || {};
   const emEnabled = !!em?.enabled;
-  const emPct = emEnabled ? Number(em?.expectedMovePct) : null; // straddle EM
-  const emDollars = emEnabled ? Number(em?.expectedMoveDollars) : null;
+  const emPct = (emEnabled && em?.expectedMovePct != null) ? Number(em.expectedMovePct) : NaN;
+  const emDollars = (emEnabled && em?.expectedMoveDollars != null) ? Number(em.expectedMoveDollars) : NaN;
   const emExpiry = String(em?.expiry || "").slice(0, 10);
   const emDte = (em?.dte !== null && em?.dte !== undefined) ? Number(em.dte) : null;
   const emSource = String(em?.source || "").toLowerCase();
   const emSourceLabel = emSource === "live" ? "Live" : emSource === "eod" ? "EOD" : emSource ? emSource : "—";
   const emSymbol = String(em?.symbolUsed || "").toUpperCase();
-  const oratsEodEmPct = Number(em?.eodImpliedMovePct);
+  const oratsEodEmPct = (em?.eodImpliedMovePct != null) ? Number(em.eodImpliedMovePct) : NaN;
   const oratsEodAsOf = String(em?.eodAsOfDate || "").slice(0, 10);
-  const delayedEmPct = Number(em?.delayedImpliedMovePct);
+  const delayedEmPct = (em?.delayedImpliedMovePct != null) ? Number(em.delayedImpliedMovePct) : NaN;
   const delayedUpdatedAt = String(em?.delayedUpdatedAt || "").trim();
   const delayedTradeDate = String(em?.delayedTradeDate || "").slice(0, 10);
 
@@ -2117,8 +2117,16 @@ async function _runAdvisor() {
     var seasonalityMode = $("seasonalityMode")?.value || "none";
     var underlying = String(window.engine2UnderlyingState?.symbol || "SPX");
     var qs = new URLSearchParams({ underlying: underlying, entry_day: entryDay, seasonality_mode: seasonalityMode });
-    var resp = await fetch("/api/spx-ic/advisor?" + qs.toString(), { method: "POST" });
-    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    var fetchOpts = { method: "POST", headers: { "Content-Type": "application/json" } };
+    if (lastPayload) {
+      fetchOpts.body = JSON.stringify(lastPayload);
+    }
+    var resp = await fetch("/api/spx-ic/advisor?" + qs.toString(), fetchOpts);
+    if (!resp.ok) {
+      var detail = "";
+      try { var errBody = await resp.json(); detail = errBody.detail || ""; } catch (_) {}
+      throw new Error(detail || ("HTTP " + resp.status));
+    }
     var data = await resp.json();
     _lastAdvisorResult = data;
     renderAdvisorPanel(data);
