@@ -125,8 +125,10 @@ def _extract_orats_live_summary_price(client: Any, ticker: str) -> Optional[floa
 def fetch_live_price_context_optional(client: Any = None, *, ticker: str) -> Dict[str, Any]:
     """Session-aware spot resolver for Engine2/technicals overlays.
 
-    - Market open: ORATS live_summaries -> EODHD live quote -> latest close.
-    - Market closed: latest close only.
+    Market open: fetches BOTH ORATS live_summaries and EODHD live quote,
+    then cross-checks. If they diverge by more than 0.3%, prefer EODHD
+    (ORATS delayed data is 15-20 min behind for index spot). If only one
+    is available, use it. Market closed: latest close only.
     """
     tk = str(ticker or "").strip().upper()
     market_open = is_us_equity_market_open()
@@ -135,16 +137,35 @@ def fetch_live_price_context_optional(client: Any = None, *, ticker: str) -> Dic
     ps = get_price_service()
     if market_open:
         px_orats = _extract_orats_live_summary_price(client, tk)
-        if px_orats is not None and px_orats > 0:
-            return {"price": float(px_orats), "source": "orats_live_summaries", "mode": "open_live", "marketOpen": True}
 
+        px_eodhd = None
         if ps is not None and callable(getattr(ps, "fetch_intraday_price", None)):
             try:
-                px_intraday = ps.fetch_intraday_price(tk)
+                px_eodhd = ps.fetch_intraday_price(tk)
+                if px_eodhd is not None and float(px_eodhd) <= 0:
+                    px_eodhd = None
+                elif px_eodhd is not None:
+                    px_eodhd = float(px_eodhd)
             except Exception:
-                px_intraday = None
-            if px_intraday is not None and float(px_intraday) > 0:
-                return {"price": float(px_intraday), "source": "eodhd_live_quote", "mode": "open_live", "marketOpen": True}
+                px_eodhd = None
+
+        if px_orats is not None and px_eodhd is not None:
+            divergence = abs(px_orats - px_eodhd) / max(px_orats, px_eodhd)
+            if divergence > 0.003:
+                return {
+                    "price": px_eodhd,
+                    "source": "eodhd_live_quote",
+                    "mode": "open_live_crosscheck",
+                    "marketOpen": True,
+                    "_oratsPx": round(px_orats, 2),
+                    "_divergencePct": round(divergence * 100, 2),
+                }
+            return {"price": float(px_orats), "source": "orats_live_summaries", "mode": "open_live", "marketOpen": True}
+
+        if px_eodhd is not None:
+            return {"price": px_eodhd, "source": "eodhd_live_quote", "mode": "open_live", "marketOpen": True}
+        if px_orats is not None:
+            return {"price": float(px_orats), "source": "orats_live_summaries", "mode": "open_live", "marketOpen": True}
 
         px_close = None
         if ps is not None:
