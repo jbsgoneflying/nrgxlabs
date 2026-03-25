@@ -326,6 +326,41 @@ def _sanitize_e2_for_llm(payload: Dict[str, Any]) -> Dict[str, Any]:
     return scan
 
 
+def _build_journal_context(digest: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Distil performance digest into a compact context block for the LLM."""
+    if not digest.get("hasData") or digest.get("totalClosed", 0) == 0:
+        return None
+
+    ctx: Dict[str, Any] = {
+        "totalClosed": digest["totalClosed"],
+        "winRate": digest.get("winRate"),
+        "avgPnl": digest.get("avgPnl"),
+        "avgWin": digest.get("avgWin"),
+        "avgLoss": digest.get("avgLoss"),
+        "riskTendency": digest.get("riskTendency"),
+    }
+
+    by_em = digest.get("byEm", {})
+    if by_em:
+        ctx["emPerformance"] = {
+            k: {"winRate": v["winRate"], "avgPnl": v["avgPnl"], "n": v["n"]}
+            for k, v in by_em.items()
+        }
+
+    by_wing = digest.get("byWing", {})
+    if by_wing:
+        ctx["wingPerformance"] = {
+            k: {"winRate": v["winRate"], "avgPnl": v["avgPnl"], "n": v["n"]}
+            for k, v in by_wing.items()
+        }
+
+    cal = digest.get("verdictCalibration", {})
+    if cal:
+        ctx["verdictCalibration"] = cal
+
+    return ctx
+
+
 # ---------------------------------------------------------------------------
 # Deterministic trade tracking
 # ---------------------------------------------------------------------------
@@ -467,11 +502,18 @@ def generate_trade_analysis(
         return fallback
 
     dms_dict = _load_todays_dms()
+
+    from backend.engine2_trades import compute_trade_performance_digest
+    perf_digest = compute_trade_performance_digest()
+    trade_journal = _build_journal_context(perf_digest) if perf_digest.get("hasData") else None
+
     context = {
         "scan": _sanitize_e2_for_llm(engine2_payload),
         "market": _extract_dms_context(dms_dict),
         "widthAnalysis": width_analysis or engine2_payload.get("widthComparison", []),
     }
+    if trade_journal:
+        context["tradeJournal"] = trade_journal
 
     payload_str = json.dumps(context, default=str)
     if len(payload_str) > 30000:

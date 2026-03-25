@@ -76,6 +76,15 @@ Return EXACTLY this JSON:
   "deskNote": "<1-2 sentence actionable desk summary>"
 }
 
+TRADE JOURNAL (learning context — if provided in "tradeJournal"):
+When a tradeJournal section is included, use it to CALIBRATE your recommendations:
+- winRate: overall win percentage across closed trades. If > 85% with low avgPnl, the desk may be leaving money on the table (too conservative).
+- riskTendency: "too_conservative" means you should lean toward tighter EM or wider wings for better ROC. "too_aggressive" means favor wider EM, narrower wings, or more PASS verdicts. "risk_reward_skewed" means avg losses outsize avg wins — tighten management or favor wider EM.
+- emPerformance: win rate and avg P&L by EM multiple. Prefer EM levels that have demonstrated positive expectancy.
+- wingPerformance: win rate and avg P&L by wing width. Use to validate or override your wing selection.
+- verdictCalibration: how often each verdict type (TRADE/LEAN_PASS/PASS) resulted in win/loss. If TRADE verdicts are mostly losses, raise the bar. If PASS verdicts would have won, lower it.
+- Reference specific numbers in deskNote when journal data influenced your decision.
+
 Rules:
 - Use ONLY the data provided. Never hallucinate prices, events, or data not in the payload.
 - All strike prices must be multiples of 5 (SPX standard).

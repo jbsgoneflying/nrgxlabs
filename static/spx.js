@@ -2052,11 +2052,35 @@ function renderAdvisorPanel(advisorResult) {
   }
   html += '</div>';
 
-  // Log trade button
+  // Log trade buttons
   if (verdict === "TRADE" || verdict === "LEAN_PASS") {
-    html += '<div style="padding:12px 20px;border-top:1px solid var(--border);text-align:right">';
+    html += '<div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:flex-end;gap:10px">';
+    html += '<button id="e2AdjustTradeBtn" class="chipToggle" type="button" style="font-size:12px;padding:8px 16px">Adjust & Log</button>';
     html += '<button id="e2LogTradeBtn" class="primaryButton" type="button" style="font-size:12px;padding:8px 20px">Log This Trade</button>';
     html += '</div>';
+
+    html += '<div id="e2AdjustForm" class="hidden" style="padding:16px 20px;border-top:1px solid var(--border);background:var(--bg-secondary)">';
+    html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px;margin-bottom:10px">Adjust Trade Before Logging</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;font-size:12px">';
+    var fields = [
+      ["adj_shortPut", "Short Put", ticket.shortPutStrike],
+      ["adj_longPut", "Long Put", ticket.longPutStrike],
+      ["adj_shortCall", "Short Call", ticket.shortCallStrike],
+      ["adj_longCall", "Long Call", ticket.longCallStrike],
+      ["adj_wingWidth", "Wing Width ($)", ticket.wingWidth],
+      ["adj_credit", "Entry Credit ($)", String(ticket.estimatedCredit || "").replace(/[^0-9.]/g, "")],
+    ];
+    fields.forEach(function (f) {
+      html += '<div><label style="color:var(--text-secondary);display:block;margin-bottom:3px">' + f[1] + '</label>';
+      html += '<input id="' + f[0] + '" type="number" step="any" value="' + escapeHtml(String(f[2] || "")) + '" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);font-family:var(--mono);font-size:12px" /></div>';
+    });
+    html += '</div>';
+    html += '<div style="margin-top:10px"><label style="color:var(--text-secondary);font-size:12px;display:block;margin-bottom:3px">Adjustment Note (optional)</label>';
+    html += '<input id="adj_note" type="text" placeholder="e.g. Better fill at wider put" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);font-size:12px" /></div>';
+    html += '<div style="margin-top:12px;text-align:right">';
+    html += '<button id="e2AdjustCancelBtn" class="chipToggle" type="button" style="font-size:11px;padding:6px 14px;margin-right:8px">Cancel</button>';
+    html += '<button id="e2AdjustSubmitBtn" class="primaryButton" type="button" style="font-size:11px;padding:6px 14px">Log Adjusted Trade</button>';
+    html += '</div></div>';
   }
 
   html += '</div>';
@@ -2067,6 +2091,27 @@ function renderAdvisorPanel(advisorResult) {
   if (logBtn) {
     logBtn.addEventListener("click", function () {
       _logAdvisorTrade(advisorResult);
+    });
+  }
+
+  var adjBtn = $("e2AdjustTradeBtn");
+  if (adjBtn) {
+    adjBtn.addEventListener("click", function () {
+      var form = $("e2AdjustForm");
+      if (form) form.classList.toggle("hidden");
+    });
+  }
+  var adjCancel = $("e2AdjustCancelBtn");
+  if (adjCancel) {
+    adjCancel.addEventListener("click", function () {
+      var form = $("e2AdjustForm");
+      if (form) form.classList.add("hidden");
+    });
+  }
+  var adjSubmit = $("e2AdjustSubmitBtn");
+  if (adjSubmit) {
+    adjSubmit.addEventListener("click", function () {
+      _logAdjustedTrade(advisorResult);
     });
   }
 }
@@ -2290,6 +2335,71 @@ async function _logAdvisorTrade(advisorResult) {
   }
 }
 
+async function _logAdjustedTrade(advisorResult) {
+  if (!advisorResult?.advisor?.tradeTicket) return;
+  var btn = $("e2AdjustSubmitBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "Logging..."; }
+  try {
+    var ticket = advisorResult.advisor.tradeTicket;
+    var current = advisorResult.current || {};
+    var em = advisorResult.expectedMove || {};
+
+    var adjSP = parseFloat($("adj_shortPut")?.value) || ticket.shortPutStrike;
+    var adjLP = parseFloat($("adj_longPut")?.value) || ticket.longPutStrike;
+    var adjSC = parseFloat($("adj_shortCall")?.value) || ticket.shortCallStrike;
+    var adjLC = parseFloat($("adj_longCall")?.value) || ticket.longCallStrike;
+    var adjWing = parseFloat($("adj_wingWidth")?.value) || ticket.wingWidth;
+    var adjCredit = parseFloat($("adj_credit")?.value) || 0;
+    var adjNote = ($("adj_note")?.value || "").trim();
+
+    var body = {
+      source: "adjusted",
+      entry: {
+        underlying: ticket.underlying || "SPX",
+        spotAtEntry: Number(current.regime?.components?.spotPrice) || 0,
+        entryDate: advisorResult.asOfDate || new Date().toISOString().slice(0, 10),
+        expiryDate: ticket.expiry,
+        shortPutStrike: adjSP,
+        longPutStrike: adjLP,
+        shortCallStrike: adjSC,
+        longCallStrike: adjLC,
+        wingWidth: adjWing,
+        emMultiple: ticket.emMultiple,
+        entryCredit: adjCredit,
+      },
+      entryContext: {
+        regimeScore: current.regime?.score,
+        regimeBucket: current.regime?.bucket,
+        macroBucket: current.macro?.bucket,
+        emPct: em.oratsExpectedMovePct || em.expectedMovePct,
+        volPressureState: lastPayload?.liveContext?.volPressure?.state,
+      },
+      advisorVerdict: advisorResult.advisor,
+      originalTicket: {
+        shortPutStrike: ticket.shortPutStrike,
+        longPutStrike: ticket.longPutStrike,
+        shortCallStrike: ticket.shortCallStrike,
+        longCallStrike: ticket.longCallStrike,
+        wingWidth: ticket.wingWidth,
+        estimatedCredit: ticket.estimatedCredit,
+      },
+      adjustmentNote: adjNote || null,
+    };
+    var resp = await fetch("/api/spx-ic/trade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    if (btn) { btn.textContent = "Logged ✓"; btn.style.background = "#34c759"; }
+    var form = $("e2AdjustForm");
+    if (form) form.classList.add("hidden");
+    _loadActiveTrades();
+  } catch (err) {
+    if (btn) { btn.textContent = "Error"; btn.style.background = "#ff453a"; }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Active Trades Panel
 // ---------------------------------------------------------------------------
@@ -2321,7 +2431,7 @@ async function _loadActiveTrades() {
 
       html += '<div style="padding:12px 20px;border-bottom:1px solid var(--border)">';
       html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
-      html += '<div style="font-size:13px;font-weight:600">' + escapeHtml(entry.underlying || "SPX") + ' IC · $' + escapeHtml(String(entry.wingWidth || "")) + ' wings</div>';
+      html += '<div style="font-size:13px;font-weight:600">' + escapeHtml(entry.underlying || "SPX") + ' IC · $' + escapeHtml(String(entry.wingWidth || "")) + ' wings' + (t.source === "adjusted" ? ' <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#5856d6;color:#fff;font-weight:600">ADJ</span>' : "") + '</div>';
       html += '<div style="display:flex;align-items:center;gap:8px">' + _statusBadge(status);
       html += '<button class="chipToggle" data-checkin-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:3px 10px">Check In</button>';
       html += '<button class="chipToggle" data-close-id="' + escapeHtml(t.tradeId) + '" type="button" style="font-size:10px;padding:3px 10px">Close</button>';
@@ -2371,22 +2481,221 @@ async function _runCheckin(tradeId) {
   }
 }
 
-async function _closeTrade(tradeId) {
-  if (!confirm("Close this trade?")) return;
+function _closeTrade(tradeId) {
+  var existing = $("e2CloseOverlay");
+  if (existing) existing.remove();
+
+  var overlay = document.createElement("div");
+  overlay.id = "e2CloseOverlay";
+  overlay.style.cssText = "position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center";
+
+  var box = document.createElement("div");
+  box.style.cssText = "background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;padding:24px;width:380px;max-width:90vw;color:var(--text-primary);font-family:var(--font)";
+
+  box.innerHTML = '<div style="font-size:14px;font-weight:700;margin-bottom:16px">Close Trade</div>' +
+    '<div style="display:grid;gap:12px;font-size:12px">' +
+    '<div><label style="color:var(--text-secondary);display:block;margin-bottom:3px">How did it close?</label>' +
+    '<select id="closeType" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary);font-size:12px">' +
+    '<option value="expired_worthless">Expired Worthless (Full Win)</option>' +
+    '<option value="closed_early">Closed Early</option>' +
+    '<option value="stopped_out">Stopped Out</option>' +
+    '<option value="rolled">Rolled / Adjusted Out</option>' +
+    '</select></div>' +
+    '<div id="closeExitRow"><label style="color:var(--text-secondary);display:block;margin-bottom:3px">Exit Debit Paid ($)</label>' +
+    '<input id="closeExitCredit" type="number" step="0.01" value="0" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary);font-family:var(--mono);font-size:12px" />' +
+    '<div style="color:var(--text-secondary);font-size:10px;margin-top:2px">Cost to close (0 if expired worthless)</div></div>' +
+    '<div><label style="color:var(--text-secondary);display:block;margin-bottom:3px">Notes (optional)</label>' +
+    '<input id="closeNotes" type="text" placeholder="e.g. Closed for .30 debit with 1 DTE" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary);font-size:12px" /></div>' +
+    '</div>' +
+    '<div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px">' +
+    '<button id="closeCancelBtn" class="chipToggle" type="button" style="font-size:12px;padding:6px 14px">Cancel</button>' +
+    '<button id="closeSubmitBtn" class="primaryButton" type="button" style="font-size:12px;padding:6px 14px">Close Trade</button>' +
+    '</div>';
+
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener("click", function (e) { if (e.target === overlay) overlay.remove(); });
+  $("closeCancelBtn").addEventListener("click", function () { overlay.remove(); });
+
+  var typeSelect = $("closeType");
+  typeSelect.addEventListener("change", function () {
+    var exitRow = $("closeExitRow");
+    if (typeSelect.value === "expired_worthless") {
+      exitRow.style.opacity = "0.4";
+      $("closeExitCredit").value = "0";
+    } else {
+      exitRow.style.opacity = "1";
+    }
+  });
+
+  $("closeSubmitBtn").addEventListener("click", async function () {
+    var btn = $("closeSubmitBtn");
+    btn.disabled = true;
+    btn.textContent = "Closing...";
+    try {
+      var closeType = typeSelect.value;
+      var exitCredit = parseFloat($("closeExitCredit").value) || 0;
+      var notes = ($("closeNotes").value || "").trim();
+      var body = {
+        reason: closeType,
+        exitCredit: exitCredit,
+        expiredWorthless: closeType === "expired_worthless",
+        notes: notes || null,
+      };
+      var resp = await fetch("/api/spx-ic/trade/" + encodeURIComponent(tradeId) + "/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      overlay.remove();
+      _loadActiveTrades();
+      _loadTradeJournal();
+    } catch (err) {
+      btn.textContent = "Error";
+      btn.style.background = "#ff453a";
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Trade Journal — closed trade history + performance stats
+// ---------------------------------------------------------------------------
+
+function _outcomeBadge(oc) {
+  var colors = { win: "#34c759", loss: "#ff453a", scratch: "#8e8e93" };
+  var labels = { win: "Win", loss: "Loss", scratch: "Scratch" };
+  var c = colors[oc] || "#8e8e93";
+  var l = labels[oc] || (oc || "—");
+  return '<span style="display:inline-block;padding:2px 10px;border-radius:6px;font-size:10px;font-weight:700;color:#fff;background:' + c + '">' + escapeHtml(l) + '</span>';
+}
+
+function _sourceBadge(src) {
+  if (src === "adjusted") return ' <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:#5856d6;color:#fff;font-weight:600">ADJ</span>';
+  return "";
+}
+
+async function _loadTradeJournal() {
+  var el = $("e2TradeJournalContent");
+  var sec = $("e2TradeJournal");
+  if (!el || !sec) return;
+
   try {
-    var resp = await fetch("/api/spx-ic/trade/" + encodeURIComponent(tradeId) + "/close", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reason: "manual" }),
-    });
-    if (!resp.ok) throw new Error("HTTP " + resp.status);
-    _loadActiveTrades();
-  } catch (err) {
-    alert("Close error: " + err.message);
+    var [histResp, perfResp] = await Promise.all([
+      fetch("/api/spx-ic/trades/history?limit=20"),
+      fetch("/api/spx-ic/trades/performance"),
+    ]);
+    if (!histResp.ok || !perfResp.ok) return;
+    var histData = await histResp.json();
+    var perfData = await perfResp.json();
+    var trades = histData.trades || [];
+
+    if (!trades.length && !perfData.hasData) {
+      sec.classList.add("hidden");
+      return;
+    }
+
+    sec.classList.remove("hidden");
+    var html = '<div class="taPanel">';
+    html += '<div class="taHeader"><div class="taHeaderRow"><span class="taHeaderTitle">Trade Journal</span>';
+    html += '<span class="taHeaderMeta">Learning System · ' + (perfData.totalClosed || 0) + ' closed trades</span></div></div>';
+
+    if (perfData.hasData) {
+      html += '<div style="padding:14px 20px;border-bottom:1px solid var(--border)">';
+      html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:12px;font-size:12px">';
+
+      var wr = perfData.winRate != null ? perfData.winRate + "%" : "—";
+      var wrColor = perfData.winRate != null ? (perfData.winRate >= 60 ? "#34c759" : perfData.winRate >= 40 ? "#ff9f0a" : "#ff453a") : "var(--text-secondary)";
+      html += '<div style="text-align:center"><div style="font-size:22px;font-weight:800;color:' + wrColor + '">' + wr + '</div><div style="color:var(--text-secondary);font-size:10px">Win Rate</div></div>';
+
+      var pnlStr = perfData.totalPnl != null ? "$" + perfData.totalPnl.toFixed(2) : "—";
+      var pnlColor = perfData.totalPnl > 0 ? "#34c759" : perfData.totalPnl < 0 ? "#ff453a" : "var(--text-secondary)";
+      html += '<div style="text-align:center"><div style="font-size:22px;font-weight:800;color:' + pnlColor + '">' + pnlStr + '</div><div style="color:var(--text-secondary);font-size:10px">Total P&L</div></div>';
+
+      var avgStr = perfData.avgPnl != null ? "$" + perfData.avgPnl.toFixed(2) : "—";
+      html += '<div style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--text-primary)">' + avgStr + '</div><div style="color:var(--text-secondary);font-size:10px">Avg P&L</div></div>';
+
+      html += '<div style="text-align:center"><div style="font-size:22px;font-weight:800;color:var(--text-primary)">' + perfData.wins + '-' + perfData.losses + '-' + perfData.scratches + '</div><div style="color:var(--text-secondary);font-size:10px">W-L-S</div></div>';
+
+      html += '</div>';
+
+      var tendency = perfData.riskTendency;
+      if (tendency && tendency !== "balanced") {
+        var tendencyLabels = {
+          too_conservative: "System may be too conservative — high win rate but low P&L. Consider tighter EM or wider wings.",
+          too_aggressive: "System may be too aggressive — low win rate suggests loosening EM or more PASS decisions.",
+          risk_reward_skewed: "Risk/reward skewed — average losses significantly exceed average wins. Tighten management rules.",
+        };
+        html += '<div style="margin-top:10px;padding:8px 12px;border-radius:8px;background:rgba(255,159,10,0.1);border:1px solid rgba(255,159,10,0.2);font-size:11px;color:#ff9f0a">';
+        html += '<span style="font-weight:700">Learning Insight:</span> ' + escapeHtml(tendencyLabels[tendency] || tendency);
+        html += '</div>';
+      }
+
+      // EM and Wing breakdowns side by side
+      var byEm = perfData.byEm || {};
+      var byWing = perfData.byWing || {};
+      if (Object.keys(byEm).length || Object.keys(byWing).length) {
+        html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">';
+        if (Object.keys(byEm).length) {
+          html += '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);margin-bottom:4px">By EM Multiple</div>';
+          html += '<div style="font-size:11px">';
+          Object.keys(byEm).sort().forEach(function (k) {
+            var b = byEm[k];
+            html += '<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid var(--border)">';
+            html += '<span>' + escapeHtml(k) + 'x</span><span class="mono">' + (b.winRate != null ? b.winRate + "%" : "—") + ' (' + b.n + ')</span>';
+            html += '</div>';
+          });
+          html += '</div></div>';
+        }
+        if (Object.keys(byWing).length) {
+          html += '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);margin-bottom:4px">By Wing Width</div>';
+          html += '<div style="font-size:11px">';
+          Object.keys(byWing).sort().forEach(function (k) {
+            var b = byWing[k];
+            html += '<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid var(--border)">';
+            html += '<span>' + escapeHtml(k) + '</span><span class="mono">' + (b.winRate != null ? b.winRate + "%" : "—") + ' (' + b.n + ')</span>';
+            html += '</div>';
+          });
+          html += '</div></div>';
+        }
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    // Recent closed trades list
+    if (trades.length) {
+      html += '<div style="padding:10px 20px;border-bottom:1px solid var(--border)"><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px">Recent Closed Trades</div></div>';
+      trades.forEach(function (t) {
+        var entry = t.entry || {};
+        var outcome = t.outcome || {};
+        var pnl = outcome.realizedPnl;
+        var pnlDisp = pnl != null ? (pnl >= 0 ? "+$" + pnl.toFixed(2) : "-$" + Math.abs(pnl).toFixed(2)) : "—";
+        var pnlC = pnl > 0 ? "#34c759" : pnl < 0 ? "#ff453a" : "var(--text-secondary)";
+
+        html += '<div style="padding:10px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;font-size:12px">';
+        html += '<div style="display:flex;align-items:center;gap:10px">';
+        html += _outcomeBadge(outcome.outcomeClass);
+        html += '<span style="font-weight:600">' + escapeHtml(entry.underlying || "SPX") + ' $' + escapeHtml(String(entry.wingWidth || "")) + ' wings · ' + escapeHtml(String(entry.emMultiple || "")) + 'x EM</span>';
+        html += _sourceBadge(t.source);
+        html += '</div>';
+        html += '<div style="display:flex;align-items:center;gap:14px">';
+        html += '<span class="mono" style="font-weight:700;color:' + pnlC + '">' + pnlDisp + '</span>';
+        html += '<span style="color:var(--text-secondary);font-size:10px">' + escapeHtml(String(t.closedAt || "").slice(0, 10)) + '</span>';
+        html += '</div></div>';
+      });
+    }
+
+    html += '</div>';
+    el.innerHTML = html;
+  } catch {
+    // silently fail
   }
 }
 
 main();
+_loadTradeJournal();
 
 // ---------------------------------------------------------------------------
 // Desk Insight Popup — LLM-powered card insights for Engine 2

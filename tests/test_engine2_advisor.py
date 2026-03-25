@@ -22,8 +22,10 @@ from backend.engine2_trades import (
     _TRADE_KEY_PREFIX,
     add_checkin,
     close_trade,
+    compute_trade_performance_digest,
     get_trade,
     list_active_trades,
+    list_closed_trades,
     log_trade,
 )
 from backend.news_theme_intelligence import (
@@ -518,3 +520,285 @@ class TestDeskConsensus:
         sanitized = _sanitize_e2_for_llm(payload)
         assert "deskConsensus" in sanitized
         assert sanitized["deskConsensus"]["riskLevel"] == "elevated"
+
+
+# ---------------------------------------------------------------------------
+# Adjusted trade tests
+# ---------------------------------------------------------------------------
+
+class TestAdjustedTrade:
+    def _make_flags(self):
+        return FeatureFlags(
+            ENGINE2_TRADE_TTL_S=3600,
+            ENGINE2_TRADE_MAX_INDEX=10,
+            ENGINE2_ADVISOR_ENABLED=True,
+        )
+
+    def test_adjusted_trade_stores_original_ticket(self):
+        store = FakeStore()
+        flags = self._make_flags()
+        trade_data = {
+            "source": "adjusted",
+            "entry": {
+                "underlying": "SPX",
+                "shortPutStrike": 6290,
+                "shortCallStrike": 6610,
+                "wingWidth": 10,
+                "entryCredit": 2.50,
+            },
+            "originalTicket": {
+                "shortPutStrike": 6300,
+                "shortCallStrike": 6600,
+                "wingWidth": 10,
+                "estimatedCredit": "~$2.80",
+            },
+            "adjustmentNote": "Better fill at wider put",
+        }
+        tid = log_trade(trade_data, store=store, flags=flags)
+        trade = get_trade(tid, store=store)
+        assert trade["source"] == "adjusted"
+        assert trade["originalTicket"]["shortPutStrike"] == 6300
+        assert trade["adjustmentNote"] == "Better fill at wider put"
+        assert trade["entry"]["shortPutStrike"] == 6290
+
+    def test_advisor_trade_has_no_original_ticket(self):
+        store = FakeStore()
+        flags = self._make_flags()
+        trade_data = {
+            "source": "advisor",
+            "entry": {"underlying": "SPX", "shortPutStrike": 6300},
+        }
+        tid = log_trade(trade_data, store=store, flags=flags)
+        trade = get_trade(tid, store=store)
+        assert trade["source"] == "advisor"
+        assert trade["originalTicket"] is None
+        assert trade["adjustmentNote"] is None
+
+
+# ---------------------------------------------------------------------------
+# Structured close / outcome tests
+# ---------------------------------------------------------------------------
+
+class TestStructuredClose:
+    def _make_flags(self):
+        return FeatureFlags(
+            ENGINE2_TRADE_TTL_S=3600,
+            ENGINE2_TRADE_MAX_INDEX=10,
+            ENGINE2_ADVISOR_ENABLED=True,
+        )
+
+    def test_close_with_exit_credit_computes_pnl(self):
+        store = FakeStore()
+        flags = self._make_flags()
+        tid = log_trade(
+            {"entry": {"underlying": "SPX", "entryCredit": 3.00}},
+            store=store, flags=flags,
+        )
+        result = close_trade(
+            tid,
+            close_data={"reason": "closed_early", "exitCredit": 0.80},
+            store=store, flags=flags,
+        )
+        assert result["outcome"]["realizedPnl"] == 2.20
+        assert result["outcome"]["outcomeClass"] == "win"
+        assert result["outcome"]["entryCredit"] == 3.00
+        assert result["outcome"]["exitCredit"] == 0.80
+
+    def test_close_expired_worthless_is_full_win(self):
+        store = FakeStore()
+        flags = self._make_flags()
+        tid = log_trade(
+            {"entry": {"underlying": "SPX", "entryCredit": 2.50}},
+            store=store, flags=flags,
+        )
+        result = close_trade(
+            tid,
+            close_data={"reason": "expired_worthless", "exitCredit": 0, "expiredWorthless": True},
+            store=store, flags=flags,
+        )
+        assert result["outcome"]["realizedPnl"] == 2.50
+        assert result["outcome"]["outcomeClass"] == "win"
+        assert result["outcome"]["expiredWorthless"] is True
+
+    def test_close_with_loss(self):
+        store = FakeStore()
+        flags = self._make_flags()
+        tid = log_trade(
+            {"entry": {"underlying": "SPX", "entryCredit": 1.50}},
+            store=store, flags=flags,
+        )
+        result = close_trade(
+            tid,
+            close_data={"reason": "stopped_out", "exitCredit": 5.00},
+            store=store, flags=flags,
+        )
+        assert result["outcome"]["realizedPnl"] == -3.50
+        assert result["outcome"]["outcomeClass"] == "loss"
+
+    def test_close_with_explicit_outcome_class(self):
+        store = FakeStore()
+        flags = self._make_flags()
+        tid = log_trade(
+            {"entry": {"underlying": "SPX", "entryCredit": 1.00}},
+            store=store, flags=flags,
+        )
+        result = close_trade(
+            tid,
+            close_data={"reason": "manual", "exitCredit": 1.02, "outcomeClass": "scratch"},
+            store=store, flags=flags,
+        )
+        assert result["outcome"]["outcomeClass"] == "scratch"
+
+    def test_close_with_notes(self):
+        store = FakeStore()
+        flags = self._make_flags()
+        tid = log_trade(
+            {"entry": {"underlying": "SPX", "entryCredit": 2.00}},
+            store=store, flags=flags,
+        )
+        result = close_trade(
+            tid,
+            close_data={"reason": "closed_early", "exitCredit": 0.5, "notes": "Took profits at 75%"},
+            store=store, flags=flags,
+        )
+        assert result["outcome"]["notes"] == "Took profits at 75%"
+
+
+# ---------------------------------------------------------------------------
+# Trade history and performance digest tests
+# ---------------------------------------------------------------------------
+
+class TestTradePerformanceDigest:
+    def _make_flags(self):
+        return FeatureFlags(
+            ENGINE2_TRADE_TTL_S=3600,
+            ENGINE2_TRADE_MAX_INDEX=100,
+            ENGINE2_ADVISOR_ENABLED=True,
+        )
+
+    def _create_closed_trade(self, store, flags, entry_credit, exit_credit, em=1.5, wing=10, regime="MODERATE", verdict="TRADE"):
+        td = {
+            "entry": {
+                "underlying": "SPX",
+                "entryCredit": entry_credit,
+                "emMultiple": em,
+                "wingWidth": wing,
+            },
+            "entryContext": {"regimeBucket": regime},
+            "advisorVerdict": {"verdict": verdict},
+        }
+        tid = log_trade(td, store=store, flags=flags)
+        close_trade(tid, close_data={"reason": "manual", "exitCredit": exit_credit}, store=store, flags=flags)
+        return tid
+
+    def test_list_closed_trades(self):
+        store = FakeStore()
+        flags = self._make_flags()
+        self._create_closed_trade(store, flags, 3.00, 0.50)
+        self._create_closed_trade(store, flags, 2.00, 4.00)
+        log_trade({"entry": {"underlying": "SPX"}}, store=store, flags=flags)
+        closed = list_closed_trades(store=store)
+        assert len(closed) == 2
+        assert all(t["status"] == "closed" for t in closed)
+
+    def test_digest_empty_returns_no_data(self):
+        store = FakeStore()
+        digest = compute_trade_performance_digest(store=store)
+        assert digest["totalClosed"] == 0
+        assert digest["hasData"] is False
+
+    def test_digest_basic_stats(self):
+        store = FakeStore()
+        flags = self._make_flags()
+        self._create_closed_trade(store, flags, 3.00, 0.50)
+        self._create_closed_trade(store, flags, 2.00, 0.00)
+        self._create_closed_trade(store, flags, 1.50, 5.00)
+
+        digest = compute_trade_performance_digest(store=store)
+        assert digest["hasData"] is True
+        assert digest["totalClosed"] == 3
+        assert digest["wins"] == 2
+        assert digest["losses"] == 1
+        assert digest["winRate"] == pytest.approx(66.7, abs=0.1)
+        assert digest["totalPnl"] == pytest.approx(1.00, abs=0.01)
+
+    def test_digest_by_em_breakdown(self):
+        store = FakeStore()
+        flags = self._make_flags()
+        self._create_closed_trade(store, flags, 3.00, 0.50, em=1.0)
+        self._create_closed_trade(store, flags, 2.00, 0.50, em=1.0)
+        self._create_closed_trade(store, flags, 1.50, 5.00, em=2.0)
+
+        digest = compute_trade_performance_digest(store=store)
+        assert "1.0" in digest["byEm"]
+        assert digest["byEm"]["1.0"]["winRate"] == 100.0
+        assert digest["byEm"]["1.0"]["n"] == 2
+        assert "2.0" in digest["byEm"]
+        assert digest["byEm"]["2.0"]["winRate"] == 0.0
+        assert digest["byEm"]["2.0"]["n"] == 1
+
+    def test_digest_by_wing_breakdown(self):
+        store = FakeStore()
+        flags = self._make_flags()
+        self._create_closed_trade(store, flags, 3.00, 0.50, wing=5)
+        self._create_closed_trade(store, flags, 2.00, 0.50, wing=10)
+        self._create_closed_trade(store, flags, 1.50, 5.00, wing=10)
+
+        digest = compute_trade_performance_digest(store=store)
+        assert "$5" in digest["byWing"]
+        assert digest["byWing"]["$5"]["winRate"] == 100.0
+        assert "$10" in digest["byWing"]
+        assert digest["byWing"]["$10"]["winRate"] == 50.0
+
+    def test_digest_risk_tendency_too_conservative(self):
+        store = FakeStore()
+        flags = self._make_flags()
+        for _ in range(10):
+            self._create_closed_trade(store, flags, 0.50, 0.10)
+
+        digest = compute_trade_performance_digest(store=store)
+        assert digest["winRate"] == 100.0
+        assert digest["riskTendency"] == "too_conservative"
+
+    def test_digest_risk_tendency_too_aggressive(self):
+        store = FakeStore()
+        flags = self._make_flags()
+        for _ in range(5):
+            self._create_closed_trade(store, flags, 1.00, 8.00)
+        self._create_closed_trade(store, flags, 3.00, 0.50)
+
+        digest = compute_trade_performance_digest(store=store)
+        assert digest["winRate"] < 40
+        assert digest["riskTendency"] == "too_aggressive"
+
+    def test_digest_verdict_calibration(self):
+        store = FakeStore()
+        flags = self._make_flags()
+        self._create_closed_trade(store, flags, 3.00, 0.50, verdict="TRADE")
+        self._create_closed_trade(store, flags, 1.50, 5.00, verdict="TRADE")
+        self._create_closed_trade(store, flags, 2.00, 0.50, verdict="LEAN_PASS")
+
+        digest = compute_trade_performance_digest(store=store)
+        assert "TRADE" in digest["verdictCalibration"]
+        assert digest["verdictCalibration"]["TRADE"]["total"] == 2
+        assert digest["verdictCalibration"]["TRADE"]["win"] == 1
+        assert digest["verdictCalibration"]["TRADE"]["loss"] == 1
+        assert "LEAN_PASS" in digest["verdictCalibration"]
+        assert digest["verdictCalibration"]["LEAN_PASS"]["win"] == 1
+
+    def test_digest_counts_adjusted_trades(self):
+        store = FakeStore()
+        flags = self._make_flags()
+        td = {
+            "source": "adjusted",
+            "entry": {"underlying": "SPX", "entryCredit": 2.50, "emMultiple": 1.5, "wingWidth": 10},
+            "originalTicket": {"shortPutStrike": 6300},
+            "adjustmentNote": "Better fill",
+            "entryContext": {"regimeBucket": "MODERATE"},
+            "advisorVerdict": {"verdict": "TRADE"},
+        }
+        tid = log_trade(td, store=store, flags=flags)
+        close_trade(tid, close_data={"reason": "manual", "exitCredit": 0.5}, store=store, flags=flags)
+
+        digest = compute_trade_performance_digest(store=store)
+        assert digest["adjustedCount"] == 1

@@ -16,8 +16,10 @@ from backend.engine2_advisor import (
 from backend.engine2_trades import (
     add_checkin,
     close_trade,
+    compute_trade_performance_digest,
     get_trade,
     list_active_trades,
+    list_closed_trades,
     log_trade,
 )
 from backend.market_hours import is_us_equity_market_open
@@ -519,3 +521,25 @@ def spx_ic_trade_close(trade_id: str, body: Dict[str, Any] = Body(default={})):
         raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
 
     return {"status": "ok", "trade": trade}
+
+
+@router.get("/api/spx-ic/trades/history")
+def spx_ic_trades_history(limit: int = Query(default=30, ge=1, le=100)):
+    """Return closed trades for the trade journal."""
+    f = get_flags()
+    if not f.ENGINE2_ADVISOR_ENABLED:
+        raise HTTPException(status_code=404, detail="Engine 2 advisor disabled")
+    store = get_store_optional()
+    closed = list_closed_trades(store=store, limit=limit)
+    return {"trades": closed, "count": len(closed)}
+
+
+@router.get("/api/spx-ic/trades/performance")
+def spx_ic_trades_performance():
+    """Return aggregated performance digest from closed trades."""
+    f = get_flags()
+    if not f.ENGINE2_ADVISOR_ENABLED:
+        raise HTTPException(status_code=404, detail="Engine 2 advisor disabled")
+    store = get_store_optional()
+    digest = compute_trade_performance_digest(store=store)
+    return digest
