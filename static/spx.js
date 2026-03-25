@@ -1819,9 +1819,10 @@ function render(payload) {
     var advisorEl = $("e2AdvisorContent");
     if (advisorSec && advisorEl) {
       advisorSec.classList.remove("hidden");
-      advisorEl.innerHTML = '<div class="taPanel"><div class="taHeader">' +
+      advisorEl.innerHTML = '<div class="taPanel"><div class="taHeader"><div class="taHeaderRow">' +
         '<span class="taHeaderTitle">AI Trade Advisor</span>' +
-        '<span class="taHeaderMeta"><button id="e2RunAdvisorBtn" class="primaryButton" type="button" style="font-size:11px;padding:6px 16px">Run Advisor</button></span></div></div>';
+        '<span class="taHeaderActions"><button id="e2RunAdvisorBtn" class="primaryButton" type="button" style="font-size:11px;padding:6px 16px">Run Advisor</button></span>' +
+        '</div></div></div>';
       renderWidthComparison(wc);
       var advBtn = $("e2RunAdvisorBtn");
       if (advBtn) advBtn.addEventListener("click", function () { _runAdvisor(); });
@@ -1988,7 +1989,7 @@ function renderAdvisorPanel(advisorResult) {
   var a = advisorResult?.advisor;
   if (!a || a._source === "fallback") {
     var reason = a?._fallback_reason || "Advisor unavailable";
-    el.innerHTML = '<div class="taPanel"><div class="taHeader"><span class="taHeaderTitle">AI Trade Advisor</span></div>' +
+    el.innerHTML = '<div class="taPanel"><div class="taHeader"><div class="taHeaderRow"><span class="taHeaderTitle">AI Trade Advisor</span></div></div>' +
       '<div style="padding:16px;color:var(--text-secondary);font-size:13px;">' + escapeHtml(reason) + '</div></div>';
     sec.classList.remove("hidden");
     return;
@@ -2000,7 +2001,7 @@ function renderAdvisorPanel(advisorResult) {
   var vc = _verdictColor(verdict);
 
   var html = '<div class="taPanel">';
-  html += '<div class="taHeader"><span class="taHeaderTitle">AI Trade Advisor</span><span class="taHeaderMeta">Powered by LLM · ' + escapeHtml(a._model || "") + '</span></div>';
+  html += '<div class="taHeader"><div class="taHeaderRow"><span class="taHeaderTitle">AI Trade Advisor</span><span class="taHeaderMeta">Powered by LLM · ' + escapeHtml(a._model || "") + '</span></div></div>';
 
   // Verdict badge
   html += '<div style="display:flex;align-items:center;gap:16px;padding:16px 20px;border-bottom:1px solid var(--border)">';
@@ -2090,11 +2091,14 @@ function renderWidthComparison(widthComparison) {
   var _fv = function(v, d) { return v !== null && v !== undefined ? Number(v).toFixed(d) : "—"; };
   var emLabels = { "1": "Aggressive", "1.0": "Aggressive", "1.5": "Standard", "2": "Defensive", "2.0": "Defensive" };
 
-  var html = '<div style="padding:12px 20px;border-top:1px solid var(--border)">';
-  html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px;margin-bottom:4px">EM × Wing Width Analysis</div>';
+  var html = '<div class="taPanel" style="gap:8px;padding:14px">';
+  html += '<div class="taHeader" style="padding:12px 14px 10px">';
+  html += '<div class="taHeaderRow">';
+  html += '<span class="taHeaderTitle">EM × Wing Width Analysis</span>';
   if (emPref.compositeScore != null) {
-    html += '<div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px">EM Preference: <strong>' + (prefEm || "—") + 'x</strong> (' + escapeHtml(emPref.label || "") + ') &middot; Composite Score: ' + Number(emPref.compositeScore).toFixed(0) + '/100</div>';
+    html += '<span class="taHeaderMeta">Preferred: <strong>' + (prefEm || "—") + 'x</strong> ' + escapeHtml(emPref.label || "") + ' · Score ' + Number(emPref.compositeScore).toFixed(0) + '</span>';
   }
+  html += '</div></div>';
 
   emOrder.forEach(function (ek) {
     var rows = emGroups[ek];
@@ -2103,15 +2107,18 @@ function renderWidthComparison(widthComparison) {
     var isRec = prefEm != null && Math.abs(emVal - prefEm) < 0.01;
     var emLabel = emLabels[ek] || "";
 
-    html += '<div style="margin-top:10px;padding:8px 12px;border-radius:6px;border:1px solid ' + (isRec ? 'var(--accent)' : 'var(--border)') + ';background:' + (isRec ? 'rgba(52,199,89,0.04)' : 'transparent') + '">';
-    html += '<div style="font-size:11px;font-weight:700;margin-bottom:6px">';
-    html += 'EM ' + ek + 'x';
-    if (emLabel) html += ' <span style="font-weight:400;color:var(--text-secondary)">[' + emLabel + ']</span>';
-    html += ' &mdash; Short Strike Breach: <strong>' + (breachPct != null ? Number(breachPct).toFixed(1) + '%' : '—') + '</strong>';
-    if (isRec) html += ' <span style="color:var(--accent);font-weight:700;margin-left:6px">← Recommended</span>';
+    var borderColor = isRec ? 'rgba(52,199,89,0.45)' : 'var(--ta-glass-border)';
+    var bgColor = isRec ? 'rgba(52,199,89,0.03)' : 'var(--ta-glass-bg)';
+    html += '<div style="border:1px solid ' + borderColor + ';border-radius:var(--ta-radius-lg);background:' + bgColor + ';overflow:hidden">';
+
+    html += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--ta-glass-border)">';
+    html += '<span style="font-size:13px;font-weight:700">EM ' + ek + 'x</span>';
+    if (emLabel) html += '<span style="font-size:11px;font-weight:600;color:var(--ta-muted)">' + emLabel + '</span>';
+    html += '<span class="mono" style="font-size:12px;font-weight:600">Breach: ' + (breachPct != null ? Number(breachPct).toFixed(1) + '%' : '—') + '</span>';
+    if (isRec) html += '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:rgba(52,199,89,1);background:rgba(52,199,89,0.10);padding:2px 8px;border-radius:6px">Recommended</span>';
     html += '</div>';
 
-    html += '<div class="tableWrap"><table class="dataTable"><thead><tr>';
+    html += '<div style="overflow:auto"><table class="dataTable" style="min-width:800px"><thead><tr>';
     html += '<th>Wing</th><th class="num">Outside %</th><th class="num">Max Loss</th><th class="num">Credit</th><th class="num">ROC %</th><th class="num">Risk-Adj ROC</th><th class="num">MAE95×Wing</th><th>Label</th>';
     html += '</tr></thead><tbody>';
 
@@ -2120,7 +2127,7 @@ function renderWidthComparison(widthComparison) {
 
     rows.forEach(function (w) {
       var isTop = isRec && topRaroc != null && w.riskAdjRocPct === topRaroc;
-      var rowStyle = isTop ? ' style="background:rgba(52,199,89,0.08);font-weight:600"' : '';
+      var rowStyle = isTop ? ' style="background:rgba(52,199,89,0.06);font-weight:600"' : '';
       html += '<tr' + rowStyle + '>';
       html += '<td class="mono">$' + w.wingWidthPts + '</td>';
       html += '<td class="num mono">' + _f(w.outsidePct, 1) + '</td>';
