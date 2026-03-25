@@ -963,6 +963,7 @@ def compute_engine2_spx_ic(
         po = beta_binomial_mean(k=k_o, n=n, alpha=1.0, beta=1.0)
         mae95 = pctile(mae_list, 95.0)
         loss95 = pctile(loss_list, 95.0)
+        mean_loss = (sum(loss_list) / len(loss_list)) if loss_list else None
         cells_out.append(
             {
                 "entryDay": entry_day_k,
@@ -978,6 +979,7 @@ def compute_engine2_spx_ic(
                 "mae95xWing": None if (mae95 is None or wp_k <= 0) else round(float(mae95) / float(wp_k), 3),
                 "loss95Pts": None if loss95 is None else round(float(loss95), 3),
                 "loss95xWing": None if (loss95 is None or wp_k <= 0) else round(float(loss95) / float(wp_k), 3),
+                "meanLossPts": None if mean_loss is None else round(float(mean_loss), 4),
             }
         )
 
@@ -1276,12 +1278,20 @@ def compute_engine2_spx_ic(
                 loss_vals = [float(c["loss95Pts"]) for c in wp_cells if c.get("loss95Pts") is not None]
                 avg_loss95 = round(sum(loss_vals) / len(loss_vals), 2) if loss_vals else None
 
+                # Expected-loss credit proxy: E[loss] = P(partial) * wing/2 + P(outside) * wing
+                # Then scale by VRP (volatility risk premium) for realistic premium estimate.
+                _ml_vals = [float(c["meanLossPts"]) for c in wp_cells if c.get("meanLossPts") is not None]
+                _ml_ns = [int(c.get("n", 0)) for c in wp_cells if c.get("meanLossPts") is not None]
+                _ml_total = sum(_ml_ns)
+                avg_mean_loss = (sum(m * n for m, n in zip(_ml_vals, _ml_ns)) / _ml_total) if _ml_total > 0 else None
+
                 max_loss = float(wp) * 100.0
-                if avg_loss95 is not None and max_loss > 0:
-                    credit_proxy = round(max_loss - avg_loss95 * 100.0, 2)
-                    credit_proxy = max(credit_proxy, round(max_loss * 0.05, 2))
+                if avg_mean_loss is not None and max_loss > 0:
+                    vrp_factor = 1.25 + 0.10 * float(em)
+                    credit_proxy = round(avg_mean_loss * 100.0 * vrp_factor, 2)
+                    credit_proxy = max(credit_proxy, round(max_loss * 0.02, 2))
                 else:
-                    credit_proxy = round(max_loss * 0.12 * (1 + float(wp) * 0.008), 2) if wp else 0.0
+                    credit_proxy = round(max_loss * 0.10 * math.exp(-0.3 * float(em)), 2) if wp else 0.0
                 roc = round(credit_proxy / (max_loss - credit_proxy) * 100.0, 2) if (max_loss > credit_proxy > 0) else None
                 risk_adj_roc = round(roc * survival / 100.0, 2) if (roc is not None and survival is not None) else None
                 total_obs = sum(int(c.get("n", 0)) for c in wp_cells)
@@ -1290,8 +1300,10 @@ def compute_engine2_spx_ic(
                     "wingWidthPts": int(wp),
                     "breachPct": em_breach,
                     "outsidePct": outside_pct,
+                    "fullLossPct": outside_pct,
                     "survivalPct": survival,
                     "creditProxy": credit_proxy,
+                    "expectedLoss": round(avg_mean_loss * 100.0, 2) if avg_mean_loss is not None else None,
                     "maxLoss": max_loss,
                     "rocPct": roc,
                     "riskAdjRocPct": risk_adj_roc,

@@ -2082,14 +2082,14 @@ function renderWidthComparison(widthComparison) {
   var emGroups = {};
   var emOrder = [];
   widthComparison.forEach(function (w) {
-    var ek = String(w.emMult || "unknown");
+    var ek = Number(w.emMult).toFixed(1);
     if (!emGroups[ek]) { emGroups[ek] = []; emOrder.push(ek); }
     emGroups[ek].push(w);
   });
 
   var _f = function(v, d) { return v !== null && v !== undefined ? Number(v).toFixed(d) + "%" : "—"; };
   var _fv = function(v, d) { return v !== null && v !== undefined ? Number(v).toFixed(d) : "—"; };
-  var emLabels = { "1": "Aggressive", "1.0": "Aggressive", "1.5": "Standard", "2": "Defensive", "2.0": "Defensive" };
+  var emLabels = { "1.0": "Aggressive", "1.5": "Standard", "2.0": "Defensive" };
 
   var html = '<div class="taPanel" style="gap:8px;padding:14px">';
   html += '<div class="taHeader" style="padding:12px 14px 10px">';
@@ -2118,8 +2118,8 @@ function renderWidthComparison(widthComparison) {
     if (isRec) html += '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:rgba(52,199,89,1);background:rgba(52,199,89,0.10);padding:2px 8px;border-radius:6px">Recommended</span>';
     html += '</div>';
 
-    html += '<div style="overflow:auto"><table class="dataTable" style="min-width:800px"><thead><tr>';
-    html += '<th>Wing</th><th class="num">Outside %</th><th class="num">Max Loss</th><th class="num">Credit</th><th class="num">ROC %</th><th class="num">Risk-Adj ROC</th><th class="num">MAE95×Wing</th><th>Label</th>';
+    html += '<div style="overflow:auto"><table class="dataTable" style="min-width:720px"><thead><tr>';
+    html += '<th>Wing</th><th class="num">Full Loss %</th><th class="num">E[Loss]</th><th class="num">Credit</th><th class="num">Max Loss</th><th class="num">ROC %</th><th class="num">Risk-Adj ROC</th><th class="num">Obs</th><th>Label</th>';
     html += '</tr></thead><tbody>';
 
     rows.sort(function(a,b){ return (b.riskAdjRocPct || 0) - (a.riskAdjRocPct || 0); });
@@ -2130,12 +2130,13 @@ function renderWidthComparison(widthComparison) {
       var rowStyle = isTop ? ' style="background:rgba(52,199,89,0.06);font-weight:600"' : '';
       html += '<tr' + rowStyle + '>';
       html += '<td class="mono">$' + w.wingWidthPts + '</td>';
-      html += '<td class="num mono">' + _f(w.outsidePct, 1) + '</td>';
+      html += '<td class="num mono">' + _f(w.fullLossPct != null ? w.fullLossPct : w.outsidePct, 1) + '</td>';
+      html += '<td class="num mono">' + (w.expectedLoss != null ? '$' + Number(w.expectedLoss).toLocaleString() : '—') + '</td>';
+      html += '<td class="num mono">' + (w.creditProxy != null ? '$' + Number(w.creditProxy).toLocaleString() : '—') + '</td>';
       html += '<td class="num mono">$' + Number(w.maxLoss).toLocaleString() + '</td>';
-      html += '<td class="num mono">$' + _fv(w.creditProxy, 0) + '</td>';
       html += '<td class="num mono">' + _f(w.rocPct, 1) + '</td>';
       html += '<td class="num mono">' + _f(w.riskAdjRocPct, 1) + '</td>';
-      html += '<td class="num mono">' + _fv(w.avgMae95xWing, 3) + '</td>';
+      html += '<td class="num mono">' + (w.totalObs || '—') + '</td>';
       html += '<td>' + escapeHtml(w.label || "") + (isTop ? " ★" : "") + '</td>';
       html += '</tr>';
     });

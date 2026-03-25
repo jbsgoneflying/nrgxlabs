@@ -343,6 +343,8 @@ def test_engine2_width_comparison_2d_em_x_wing(monkeypatch):
         assert entry["breachPct"] is not None
         assert entry["survivalPct"] is not None
         assert "outsidePct" in entry
+        assert "expectedLoss" in entry
+        assert "fullLossPct" in entry
 
     # Breach % must be constant across wing widths for a given EM
     em_groups = {}
