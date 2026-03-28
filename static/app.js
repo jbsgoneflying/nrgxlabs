@@ -566,6 +566,21 @@ async function exportEngine1OnePageOnly() {
   }
 }
 
+function _e1DataBadgeText(payload) {
+  var gng = payload?.goNoGo || {};
+  var status = String(gng?.status || "").toUpperCase();
+  if (status === "NO_GO") return "LIQUIDITY BLOCK";
+  var flagCount = gng?.flagCount || 0;
+  if (flagCount > 0) return "DATA OK \u00B7 " + flagCount + " FLAG" + (flagCount > 1 ? "S" : "");
+  return "DATA OK";
+}
+function _e1DataBadgeClass(payload) {
+  var status = String((payload?.goNoGo || {})?.status || "").toUpperCase();
+  if (status === "NO_GO") return "bad";
+  if ((payload?.goNoGo || {})?.flagCount > 0) return "warn";
+  return "neu";
+}
+
 let _tooltipsGlobalBound = false;
 function renderEngine1DecisionPanel(payload) {
   const host = $("e1DecisionSection");
@@ -590,9 +605,9 @@ function renderEngine1DecisionPanel(payload) {
     : null;
 
   const rg = payload?.regime || {};
-  const gate = String(rg?.guidance?.tradeGate || "");
-  const gateTxt = gate === "NO_TRADE" ? "No Trade" : gate === "CAUTION" ? "Caution" : gate === "OK" ? "OK" : "—";
   const label = String(rg?.label || "—");
+  const tailMult = rg?.tailMultiplier;
+  const tailTxt = (tailMult !== null && tailMult !== undefined && Number.isFinite(Number(tailMult))) ? ` (${Number(tailMult).toFixed(2)}x)` : "";
 
   // Expected Move data (ATM-forward straddle calculation)
   const em = payload?.expectedMove || {};
@@ -627,8 +642,7 @@ function renderEngine1DecisionPanel(payload) {
   const gvcCtc = gvc?.ctc || {};
 
   const chips = [];
-  if (gateTxt !== "—") chips.push(`Gate: ${gateTxt}`);
-  if (label && label !== "—") chips.push(`Regime: ${label}`);
+  if (label && label !== "—") chips.push(`Regime: ${label}${tailTxt}`);
   if (payload?.eventRisk?.label) chips.push(`Event risk: ${String(payload.eventRisk.label)}`);
   const chipHtml = chips.slice(0, 3).map((c) => `<span class="taChip">${escapeHtml(c)}</span>`).join("");
 
@@ -653,7 +667,7 @@ function renderEngine1DecisionPanel(payload) {
           <div class="taHeaderMeta">${metaRight}</div>
         </div>
         <div class="taHeaderRow taHeaderRow--sub">
-          <div class="taBiasPill taBiasPill--neu">RISK CHECK</div>
+          <div class="taBiasPill taBiasPill--${_e1DataBadgeClass(payload)}">${_e1DataBadgeText(payload)}</div>
           <div class="taConf" title="Confidence dots (heuristic)">${dots}</div>
           <div class="taChips">${chipHtml}</div>
           <div class="taHeaderActions">
@@ -1763,9 +1777,10 @@ function buildBufferTarget(payload) {
   const qRecStr = String(qRecRaw || "");
   const isAvoid = qRecStr.startsWith("Avoid");
 
-  // Muted / no-trade display rules.
-  if (gate === "NO_TRADE" || isAvoid) {
-    return { primary: "—", secondary: null, subtext: "No trade", muted: true };
+  // Muted when quarter recommendation is Avoid (fundamental data signal).
+  // Regime stress is context, not a blocker — still show the wing target.
+  if (isAvoid) {
+    return { primary: "—", secondary: null, subtext: "Quarter: Avoid", muted: true };
   }
 
   // Canonical "final" multiplier for strike selection is the model's base wing multiple
@@ -1807,7 +1822,7 @@ function _wingRecLabel(label) {
   if (l === "WIDEN_PUTS_TIGHTEN_CALLS") return "Widen puts / tighten calls";
   if (l === "WIDEN_CALLS_TIGHTEN_PUTS") return "Widen calls / tighten puts";
   if (l === "SYMMETRIC") return "Symmetric";
-  if (l === "NO_TRADE") return "No trade (gate)";
+  if (l === "NO_TRADE") return "Regime stressed — use with caution";
   return l || "—";
 }
 
@@ -1987,12 +2002,8 @@ function renderSkewWings(payload) {
     `;
   }
 
-  const gate = (payload?.regime?.guidance || {})?.tradeGate;
-  const isNoTrade = gate === "NO_TRADE";
-  if (wingCard) wingCard.classList.toggle("isMuted", isNoTrade);
   if (hasWing && wingWhy) {
-    if (isNoTrade) wingWhy.textContent = "No Trade (Regime Gate).";
-    else wingWhy.textContent = (wr.structureRationale || wr.rationale || "—");
+    wingWhy.textContent = (wr.structureRationale || wr.rationale || "—");
   }
 
   const meta = $("skewWingsMeta");
@@ -2186,8 +2197,8 @@ function renderEventRisk(payload) {
   const rgAdj = payload?.regime?.eventRiskAdjustment || null;
   if (rgAdj && rgAdj.enabled) {
     const bump = rgAdj.tailMultiplierBumpPct;
-    const gate = payload?.regime?.guidance?.tradeGate || payload?.regime?.tradeGate || "—";
-    impacts.push(`Regime: +${Number(bump || 0).toFixed(1)}% tail · gate=${gate}`);
+    const rgLbl = payload?.regime?.label || "—";
+    impacts.push(`Regime: +${Number(bump || 0).toFixed(1)}% tail · ${rgLbl}`);
   } else {
     impacts.push("Regime: no adjustment");
   }
@@ -2349,7 +2360,7 @@ function renderTradeBuilder(payload) {
     `;
   }
 
-  const extra = gate === "NO_TRADE" ? "No Trade (Regime Gate)." : "Chain-based strike selection not enabled; showing distance targets only.";
+  const extra = "Chain-based strike selection not enabled; showing distance targets only.";
   const cur = payload?.current || null;
   const usingDelayed = cur?.delayedImpliedMovePct !== null && cur?.delayedImpliedMovePct !== undefined && Number.isFinite(Number(cur.delayedImpliedMovePct)) && Number(cur.delayedImpliedMovePct) > 0;
   const emLabel = usingDelayed ? "15-min delayed" : "EOD";
@@ -2605,10 +2616,10 @@ function render(payload) {
   if (tm) tm.textContent = (rg.tailMultiplier === null || rg.tailMultiplier === undefined) ? "—" : `${Number(rg.tailMultiplier).toFixed(2)}×`;
   const tg = $("tradeGate");
   if (tg) {
-    const gate = rg?.guidance?.tradeGate;
-    if (gate === "NO_TRADE") tg.innerHTML = pill("No Trade", "bad");
-    else if (gate === "CAUTION") tg.innerHTML = pill("Caution", "warn");
-    else if (gate === "OK") tg.innerHTML = pill("OK", "neutral");
+    const rgLabel = String(rg?.label || "").toLowerCase();
+    if (rgLabel === "stress") tg.innerHTML = pill("Stress", "warn");
+    else if (rgLabel === "elevated") tg.innerHTML = pill("Elevated", "warn");
+    else if (rgLabel === "normal" || rgLabel === "calm") tg.innerHTML = pill(rg.label, "neutral");
     else tg.textContent = "—";
   }
   // Market dealer gamma (live, informational only)
@@ -3784,8 +3795,6 @@ document.addEventListener("DOMContentLoaded", () => {
   if (tbRecalc) {
     tbRecalc.addEventListener("click", async () => {
       if (isBusy) return;
-      const gate = (lastPayload?.regime?.guidance || {})?.tradeGate;
-      if (gate === "NO_TRADE") return;
       const extra = {
         mode: tradeBuilderState.mode,
         symmetry: tradeBuilderState.symmetry,

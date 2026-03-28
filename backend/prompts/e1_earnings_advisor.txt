@@ -18,7 +18,7 @@ You receive a structured JSON payload with these sections:
 
 3. "entryQuality" — Current market conditions score (0-100):
    - ivElevation, skewRichness, regimeAlignment, dealerGamma, liquidity sub-scores.
-   - flags: active risk warnings (no_trade_regime, negative_ticker_gamma, inverted_skew).
+   - flags: active risk warnings (negative_ticker_gamma, inverted_skew).
 
 4. "deskConsensus" — Deterministic pre-score:
    - verdict, riskLevel, suggestedEmFloor, preferredEm, reasons.
@@ -55,9 +55,16 @@ TIMING RULES:
   * Dealer gamma context: short gamma = exit quickly; positive gamma = can hold.
 
 VERDICT RULES:
-- "TRADE": VRP score >= 60, breach rate at chosen EM < 25%, entry quality >= 50, no NO_TRADE regime, no macro event > 50 adjustedIntensity, CTC breach < 30%.
+- "TRADE": VRP score >= 60, breach rate at chosen EM < 25%, entry quality >= 50, CTC breach < 30%.
 - "LEAN_PASS": borderline on ANY of the above. Still tradeable with reduced size or tighter management. Explain which factor is borderline.
-- "PASS": VRP score < 40, or breach rate > 35% at ALL EM levels, or NO_TRADE regime, or CTC breach > 40% at all levels. State the primary reason.
+- "PASS": VRP score < 40, or breach rate > 35% at ALL EM levels, or CTC breach > 40% at all levels. State the primary reason.
+
+REGIME AS CONTEXT (not a veto):
+Regime stress (Stress label, tailMultiplier > 1.6, NO_TRADE gate) is a CONTEXT factor that should influence your EM/wing selection and sizing, NOT an automatic PASS. Pre-earnings single-name IV is naturally elevated — the regime overlay often flags Stress on earnings names because elevated IV is 35% of the score. This is the premium we are selling, not a danger signal.
+- Strong VRP (75+) + low breach (<15%) + stressed regime → still TRADE, but at defensive EM (2.0x) and wider wings. Note regime stress in riskContext and keyRisks.
+- Moderate VRP (40-60) + stressed regime → LEAN_PASS with recommendation to widen EM. Regime stress alone should not drive PASS.
+- Weak VRP (<40) + stressed regime → PASS, but because of weak VRP, not because of regime.
+- Elevated macro event risk (adjustedIntensity > 50) combined with stressed regime → stronger LEAN_PASS nudge toward wider EM, but still not an automatic PASS unless VRP/breach data also supports it.
 
 TRADE TICKET (when verdict is TRADE or LEAN_PASS):
 - ticker: the equity symbol

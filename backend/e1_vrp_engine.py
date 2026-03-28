@@ -374,18 +374,33 @@ def compute_entry_quality(
             flags.append("inverted_skew")
     scores["skewRichness"] = skew_score
 
-    # Regime alignment (25%): calm = best
+    # Regime alignment (25%): graduated scale — regime stress lowers the
+    # score but never zeroes it.  Pre-earnings IV naturally elevates the
+    # regime overlay's single-name component, so a hard zero would penalize
+    # exactly the condition vol-crush desks seek.
     regime_score = 50.0
     if regime:
-        bucket = str(regime.get("regimeBucket") or regime.get("bucket") or "").upper()
+        _scores = regime.get("scores") if isinstance(regime.get("scores"), dict) else {}
+        r_score_raw = _f(_scores.get("regimeScore") or regime.get("regimeScore") or regime.get("score"))
         _guidance = regime.get("guidance") if isinstance(regime.get("guidance"), dict) else {}
         _tg = str(_guidance.get("tradeGate") or regime.get("tradeGate") or "").upper()
-        r_score_val = _f(regime.get("regimeScore") or regime.get("score"))
-        if bucket == "NO_TRADE" or _tg == "NO_TRADE":
-            regime_score = 0.0
-            flags.append("no_trade_regime")
-        elif r_score_val is not None:
-            regime_score = max(0.0, min(100.0, 100.0 - r_score_val))
+        _label = str(regime.get("label") or "").lower()
+
+        if r_score_raw is not None:
+            # r_score_raw is 0-1 (from regime overlay) or 0-100 (from some paths)
+            rs = r_score_raw if r_score_raw <= 1.0 else r_score_raw / 100.0
+            if rs >= 0.80:
+                regime_score = 15.0
+            elif rs >= 0.67:
+                regime_score = 25.0
+            elif rs >= 0.50:
+                regime_score = 40.0
+            else:
+                regime_score = max(0.0, min(100.0, (1.0 - rs) * 100.0))
+        elif _tg == "NO_TRADE" or _label == "stress":
+            regime_score = 20.0
+        elif _tg == "CAUTION" or _label == "elevated":
+            regime_score = 35.0
     scores["regimeAlignment"] = round(regime_score, 1)
 
     # Dealer gamma context (15%): positive gamma = dampened moves
@@ -469,42 +484,48 @@ def compute_e1_desk_consensus(
 
         ctc_all_high = all(_ctc_bp(k) > 40.0 for k in ["1.0", "1.5", "2.0"])
 
-    regime_bucket = ""
+    # Regime data — used as weighted context, NOT a binary gate.
+    # Pre-earnings IV is expected to be elevated (that's the premium we sell),
+    # so the regime overlay's single-name IV component often pushes toward
+    # Stress/NO_TRADE on earnings names by design. We treat regime stress as
+    # a factor that widens EM recommendations, not a trade veto.
     trade_gate = ""
+    regime_score_raw: Optional[float] = None
+    tail_mult: Optional[float] = None
+    regime_label = ""
     if regime:
-        regime_bucket = str(regime.get("regimeBucket") or regime.get("bucket") or "").upper()
-        # DMS regime uses guidance.tradeGate; regime overlay uses top-level tradeGate
         _guidance = regime.get("guidance") if isinstance(regime.get("guidance"), dict) else {}
         trade_gate = str(_guidance.get("tradeGate") or regime.get("tradeGate") or "").upper()
+        regime_label = str(regime.get("label") or "").lower()
+        _scores = regime.get("scores") if isinstance(regime.get("scores"), dict) else {}
+        regime_score_raw = _f(_scores.get("regimeScore") or regime.get("regimeScore") or regime.get("score"))
+        tail_mult = _f(regime.get("tailMultiplier"))
 
     macro_intensity_high = False
+    macro_score01: Optional[float] = None
     if event_risk and isinstance(event_risk, dict):
-        score01 = _f(event_risk.get("score01"))
-        if score01 is not None and score01 >= 0.60:
+        macro_score01 = _f(event_risk.get("score01"))
+        if macro_score01 is not None and macro_score01 >= 0.60:
             macro_intensity_high = True
 
     # --- Decision ---
+    # Hard PASS only from VRP/breach data (the core signal).
+    # Regime and macro are context factors → LEAN_PASS nudge, not veto.
     verdict = "TRADE"
     reasons: List[str] = []
 
-    # PASS conditions (any one triggers)
+    # PASS conditions — only fundamental VRP/breach data
     if vrp_score is not None and vrp_score < 40:
         verdict = "PASS"
         reasons.append(f"VRP score {vrp_score} < 40 — name does not systematically overprice earnings")
     if all_breach_high:
         verdict = "PASS"
         reasons.append("Breach rate > 35% at ALL EM levels")
-    if regime_bucket == "NO_TRADE" or trade_gate == "NO_TRADE":
-        verdict = "PASS"
-        reasons.append("Regime/trade gate is NO_TRADE")
     if ctc_all_high:
         verdict = "PASS"
         reasons.append("CTC breach rate > 40% at all EM levels — dangerous post-open drift")
-    if "no_trade_regime" in eq_flags:
-        verdict = "PASS"
-        reasons.append("No-trade regime detected in entry quality")
 
-    # LEAN_PASS conditions (borderline)
+    # LEAN_PASS conditions (borderline VRP/breach + regime/macro context)
     if verdict == "TRADE":
         lean_reasons: List[str] = []
         if vrp_score is not None and 40 <= vrp_score < 60:
@@ -513,26 +534,33 @@ def compute_e1_desk_consensus(
             lean_reasons.append(f"Breach rate {best_breach}% at {preferred_em}x is elevated (25-35%)")
         if eq_score is not None and 35 <= eq_score < 50:
             lean_reasons.append(f"Entry quality {eq_score} is borderline (35-50)")
+
+        # Regime stress as context (not a veto)
+        _tm_str = f" (tail {tail_mult:.2f}x)" if tail_mult is not None else ""
+        if trade_gate == "NO_TRADE" or regime_label == "stress":
+            lean_reasons.append(f"Regime stress elevated{_tm_str} — consider wider EM")
+        elif trade_gate == "CAUTION" or regime_label == "elevated":
+            lean_reasons.append(f"Regime elevated{_tm_str}")
+
         if macro_intensity_high:
-            lean_reasons.append("Elevated macro/event risk intensity")
+            lean_reasons.append(f"Elevated macro/event risk (score {macro_score01:.2f})")
         if "negative_ticker_gamma" in eq_flags:
             lean_reasons.append("Negative ticker dealer gamma")
         if "inverted_skew" in eq_flags:
             lean_reasons.append("Inverted skew")
-        if trade_gate == "CAUTION":
-            lean_reasons.append("Trade gate is CAUTION — elevated regime risk")
 
         if lean_reasons:
             verdict = "LEAN_PASS"
             reasons.extend(lean_reasons)
 
-    # Determine suggested EM floor
+    # Determine suggested EM floor — regime stress pushes floor wider
     suggested_em_floor = 2.0
     _bb = best_breach if best_breach is not None else 100.0
-    if vrp_score is not None and vrp_score >= 75 and _bb < 15:
+    _regime_stressed = trade_gate == "NO_TRADE" or regime_label == "stress"
+    if vrp_score is not None and vrp_score >= 75 and _bb < 15 and not _regime_stressed:
         suggested_em_floor = 1.0
     elif vrp_score is not None and vrp_score >= 55 and _bb < 25:
-        suggested_em_floor = 1.5
+        suggested_em_floor = 1.5 if not _regime_stressed else 2.0
 
     risk_level = "low"
     if verdict == "PASS":
