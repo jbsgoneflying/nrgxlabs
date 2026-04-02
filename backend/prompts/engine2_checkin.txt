@@ -37,6 +37,13 @@ Return EXACTLY this JSON:
   "deskNote": "<1 sentence actionable takeaway>"
 }
 
+TRADE JOURNAL (if provided in "tradeJournal"):
+When journal context is available, use it to calibrate your check-in:
+- recentTrades: if a past trade in similar conditions (same regime, similar breach proximity) was closed early and that was the RIGHT call, recommend early exit. If it was held and won, recommend patience.
+- patternInsights: if patterns suggest the current scenario has a known outcome tendency, reference it.
+- streakInfo: if the desk is on a losing streak (tiltWarning=true), lean toward protective recommendations.
+- Reference specific past trades by their outcome and lesson when relevant to the current situation.
+
 Rules:
 - Use ONLY the data provided.
 - Cite specific numbers (breach proximity %, regime score, DTE).

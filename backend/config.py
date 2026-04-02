@@ -163,8 +163,8 @@ class FeatureFlags:
     ENGINE2_ADVISOR_ENABLED: bool = True
     ENGINE2_ADVISOR_MODEL: str = "gpt-5.4"
     ENGINE2_ADVISOR_MAX_CALLS_PER_MINUTE: int = 4
-    ENGINE2_TRADE_TTL_S: int = 60 * 86400   # 60 days
-    ENGINE2_TRADE_MAX_INDEX: int = 100
+    ENGINE2_TRADE_TTL_S: int = 180 * 86400   # 180 days (survive full earnings cycle)
+    ENGINE2_TRADE_MAX_INDEX: int = 200
 
     # Regime thresholds (score is 0..100)
     ENGINE2_REGIME_LOW_MAX: float = 25.0
@@ -186,7 +186,7 @@ class FeatureFlags:
     E1_ADVISOR_MAX_CALLS_PER_MINUTE: int = 4
     E1_EM_MULTS: str = "1.0,1.5,2.0"
     E1_WING_WIDTH_PTS: str = "2.5,5,7.5,10"
-    E1_TRADE_TTL_S: int = 60 * 86400   # 60 days
+    E1_TRADE_TTL_S: int = 180 * 86400   # 180 days (survive full earnings cycle)
     E1_TRADE_MAX_INDEX: int = 200
 
     # --- Engine 1: GO / NO-GO decisioning (strict; additive UI) ---
@@ -435,8 +435,8 @@ class FeatureFlags:
             ENGINE2_ADVISOR_ENABLED=_get_bool("ENGINE2_ADVISOR_ENABLED", True),
             ENGINE2_ADVISOR_MODEL=os.getenv("ENGINE2_ADVISOR_MODEL", "gpt-5.4"),
             ENGINE2_ADVISOR_MAX_CALLS_PER_MINUTE=_get_int("ENGINE2_ADVISOR_MAX_CALLS_PER_MINUTE", 4),
-            ENGINE2_TRADE_TTL_S=_get_int("ENGINE2_TRADE_TTL_S", 60 * 86400),
-            ENGINE2_TRADE_MAX_INDEX=_get_int("ENGINE2_TRADE_MAX_INDEX", 100),
+            ENGINE2_TRADE_TTL_S=_get_int("ENGINE2_TRADE_TTL_S", 180 * 86400),
+            ENGINE2_TRADE_MAX_INDEX=_get_int("ENGINE2_TRADE_MAX_INDEX", 200),
             ENGINE2_REGIME_LOW_MAX=_get_float("ENGINE2_REGIME_LOW_MAX", 25.0),
             ENGINE2_REGIME_MODERATE_MAX=_get_float("ENGINE2_REGIME_MODERATE_MAX", 45.0),
             ENGINE2_REGIME_ELEVATED_MAX=_get_float("ENGINE2_REGIME_ELEVATED_MAX", 65.0),
@@ -453,7 +453,7 @@ class FeatureFlags:
             E1_ADVISOR_MAX_CALLS_PER_MINUTE=_get_int("E1_ADVISOR_MAX_CALLS_PER_MINUTE", 4),
             E1_EM_MULTS=os.getenv("E1_EM_MULTS", "1.0,1.5,2.0"),
             E1_WING_WIDTH_PTS=os.getenv("E1_WING_WIDTH_PTS", "2.5,5,7.5,10"),
-            E1_TRADE_TTL_S=_get_int("E1_TRADE_TTL_S", 60 * 86400),
+            E1_TRADE_TTL_S=_get_int("E1_TRADE_TTL_S", 180 * 86400),
             E1_TRADE_MAX_INDEX=_get_int("E1_TRADE_MAX_INDEX", 200),
 
             GO_IVP_MIN=_get_float("GO_IVP_MIN", 0.80),

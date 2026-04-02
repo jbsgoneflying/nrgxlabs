@@ -243,9 +243,34 @@ def _build_e1_journal_context(digest: Dict[str, Any]) -> Optional[Dict[str, Any]
     if cal:
         ctx["verdictCalibration"] = cal
 
+    # v2 enrichments
     recent = digest.get("recentTrades")
     if recent:
-        ctx["recentTrades"] = recent[:5]
+        ctx["recentTrades"] = recent[:10]
+
+    insights = digest.get("patternInsights")
+    if insights:
+        ctx["patternInsights"] = insights
+
+    tags = digest.get("tagAnalysis")
+    if tags:
+        ctx["tagAnalysis"] = tags
+
+    streak = digest.get("streakInfo")
+    if streak:
+        ctx["streakInfo"] = streak
+
+    trend = digest.get("weeklyTrend")
+    if trend:
+        ctx["weeklyTrend"] = trend
+
+    vrp_cal = digest.get("vrpCalibration")
+    if vrp_cal and vrp_cal.get("hasData"):
+        ctx["vrpCalibration"] = vrp_cal
+
+    breach_cal = digest.get("breachCalibrationByEm")
+    if breach_cal:
+        ctx["breachCalibrationByEm"] = breach_cal
 
     return ctx
 
@@ -350,5 +375,102 @@ def generate_e1_trade_analysis(
     except Exception as e:
         reason = f"{type(e).__name__}: {e}"
         LOG.warning("E1 advisor LLM call failed: %s", reason)
+        fallback["_fallback_reason"] = reason
+        return fallback
+
+
+# ---------------------------------------------------------------------------
+# Post-mortem generation
+# ---------------------------------------------------------------------------
+
+_POST_MORTEM_REQUIRED_KEYS = {
+    "vrpThesis", "category", "lesson", "confidenceInAssessment", "deskNote",
+}
+
+
+def generate_e1_post_mortem(
+    trade: Dict[str, Any],
+    *,
+    flags: Optional[FeatureFlags] = None,
+    journal_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Generate an LLM post-mortem for a closed Engine 1 earnings trade."""
+    f = flags or get_flags()
+    fallback: Dict[str, Any] = {
+        "category": "push",
+        "lesson": "Insufficient data for automated post-mortem.",
+        "confidenceInAssessment": 0,
+        "_source": "fallback",
+    }
+
+    if trade.get("status") != "closed":
+        fallback["_fallback_reason"] = "Trade not closed"
+        return fallback
+
+    system_prompt = _load_prompt("e1_post_mortem.txt")
+    if not system_prompt:
+        fallback["_fallback_reason"] = "Post-mortem prompt file missing"
+        return fallback
+
+    if not _rate_limiter.acquire():
+        fallback["_fallback_reason"] = "Rate limited"
+        return fallback
+
+    client = _get_openai_client()
+    if client is None:
+        fallback["_fallback_reason"] = "OpenAI client unavailable"
+        return fallback
+
+    context: Dict[str, Any] = {
+        "ticker": trade.get("ticker"),
+        "entry": trade.get("entry", {}),
+        "entryContext": trade.get("entryContext", {}),
+        "marketSnapshot": trade.get("marketSnapshot", {}),
+        "vrpSnapshot": trade.get("vrpSnapshot", {}),
+        "breachSnapshot": trade.get("breachSnapshot", {}),
+        "predictionSnapshot": trade.get("predictionSnapshot", {}),
+        "advisorVerdict": trade.get("advisorVerdict"),
+        "checkIns": (trade.get("checkIns") or [])[-3:],
+        "outcome": trade.get("outcome", {}),
+        "closeReason": trade.get("closeReason"),
+    }
+    if journal_context:
+        context["tradeJournal"] = journal_context
+
+    payload_str = json.dumps(context, default=str)
+    if len(payload_str) > 25000:
+        payload_str = payload_str[:25000]
+
+    model = str(f.E1_ADVISOR_MODEL or "gpt-5.4").strip()
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": payload_str},
+            ],
+            temperature=0.3,
+            max_completion_tokens=800,
+            timeout=30,
+            response_format={"type": "json_object"},
+        )
+
+        content = response.choices[0].message.content.strip()
+        result = _parse_llm_json(content)
+
+        if result is None or not _POST_MORTEM_REQUIRED_KEYS.issubset(set(result.keys())):
+            LOG.warning("E1 post-mortem: LLM response missing required keys")
+            fallback["_fallback_reason"] = "LLM returned invalid JSON"
+            return fallback
+
+        result["_source"] = "llm"
+        result["_model"] = model
+        result["_generatedAt"] = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return result
+
+    except Exception as e:
+        reason = f"{type(e).__name__}: {e}"
+        LOG.warning("E1 post-mortem LLM call failed: %s", reason)
         fallback["_fallback_reason"] = reason
         return fallback

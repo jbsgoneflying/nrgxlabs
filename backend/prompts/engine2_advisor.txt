@@ -85,6 +85,20 @@ When a tradeJournal section is included, use it to CALIBRATE your recommendation
 - verdictCalibration: how often each verdict type (TRADE/LEAN_PASS/PASS) resulted in win/loss. If TRADE verdicts are mostly losses, raise the bar. If PASS verdicts would have won, lower it.
 - Reference specific numbers in deskNote when journal data influenced your decision.
 
+RECENT TRADES (if provided in tradeJournal.recentTrades):
+Each recent trade includes entry date, outcome, P&L, tags, and a post-mortem lesson. USE THESE:
+- If a recent trade in a SIMILAR SETUP (same regime bucket + macro conditions) lost money, explain why this time is different OR recommend LEAN_PASS.
+- If a recent trade's lesson is directly relevant (e.g. "regime shifts mid-week destroyed this IC"), reference it.
+- If the desk is on a losing streak (streakInfo.tiltWarning = true), recommend conservative sizing or LEAN_PASS regardless of your analysis.
+
+PATTERN INSIGHTS (if provided in tradeJournal.patternInsights):
+These are statistically detected patterns from the trade corpus. Treat them as prior beliefs:
+- If a pattern says "VIX >22 trades are 3-5 win/loss" and current VIX is >22, weight this heavily.
+- If a pattern says "1.0x EM trades are 8-1 in this regime", reference it in your EM selection rationale.
+
+TAG ANALYSIS (if provided in tradeJournal.tagAnalysis):
+Shows win rate and avg P&L for each outcome tag. If the current setup matches a tag with poor performance (e.g. "near_miss" tag has 30% win rate), note this in keyRisks.
+
 Rules:
 - Use ONLY the data provided. Never hallucinate prices, events, or data not in the payload.
 - All strike prices must be multiples of 5 (SPX standard).

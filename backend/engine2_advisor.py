@@ -358,6 +358,27 @@ def _build_journal_context(digest: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if cal:
         ctx["verdictCalibration"] = cal
 
+    # v2 enrichments
+    recent = digest.get("recentTrades")
+    if recent:
+        ctx["recentTrades"] = recent[:10]
+
+    insights = digest.get("patternInsights")
+    if insights:
+        ctx["patternInsights"] = insights
+
+    tags = digest.get("tagAnalysis")
+    if tags:
+        ctx["tagAnalysis"] = tags
+
+    streak = digest.get("streakInfo")
+    if streak:
+        ctx["streakInfo"] = streak
+
+    trend = digest.get("weeklyTrend")
+    if trend:
+        ctx["weeklyTrend"] = trend
+
     return ctx
 
 
@@ -590,6 +611,15 @@ def generate_checkin_analysis(
         return fallback
 
     dms_dict = _load_todays_dms()
+
+    trade_journal = None
+    try:
+        from backend.engine2_trades import compute_trade_performance_digest
+        perf_digest = compute_trade_performance_digest()
+        trade_journal = _build_journal_context(perf_digest) if perf_digest.get("hasData") else None
+    except Exception:
+        pass
+
     context = {
         "trade": {
             "entry": trade.get("entry", {}),
@@ -600,10 +630,12 @@ def generate_checkin_analysis(
         "tracking": tracking,
         "market": _extract_dms_context(dms_dict),
     }
+    if trade_journal:
+        context["tradeJournal"] = trade_journal
 
     payload_str = json.dumps(context, default=str)
-    if len(payload_str) > 20000:
-        payload_str = payload_str[:20000]
+    if len(payload_str) > 25000:
+        payload_str = payload_str[:25000]
 
     model = str(f.ENGINE2_ADVISOR_MODEL or "gpt-5.4").strip()
 
@@ -636,5 +668,98 @@ def generate_checkin_analysis(
     except Exception as e:
         reason = f"{type(e).__name__}: {e}"
         LOG.warning("Engine2 check-in LLM call failed: %s", reason)
+        fallback["_fallback_reason"] = reason
+        return fallback
+
+
+# ---------------------------------------------------------------------------
+# Post-mortem generation
+# ---------------------------------------------------------------------------
+
+_POST_MORTEM_REQUIRED_KEYS = {
+    "thesisAssessment", "category", "lesson", "confidenceInAssessment", "deskNote",
+}
+
+
+def generate_post_mortem(
+    trade: Dict[str, Any],
+    *,
+    flags: Optional[FeatureFlags] = None,
+    journal_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Generate an LLM post-mortem for a closed Engine 2 trade."""
+    f = flags or get_flags()
+    fallback: Dict[str, Any] = {
+        "category": "push",
+        "lesson": "Insufficient data for automated post-mortem.",
+        "confidenceInAssessment": 0,
+        "_source": "fallback",
+    }
+
+    if trade.get("status") != "closed":
+        fallback["_fallback_reason"] = "Trade not closed"
+        return fallback
+
+    system_prompt = _load_prompt("engine2_post_mortem.txt")
+    if not system_prompt:
+        fallback["_fallback_reason"] = "Post-mortem prompt file missing"
+        return fallback
+
+    if not _rate_limiter.acquire():
+        fallback["_fallback_reason"] = "Rate limited"
+        return fallback
+
+    client = _get_openai_client()
+    if client is None:
+        fallback["_fallback_reason"] = "OpenAI client unavailable"
+        return fallback
+
+    context: Dict[str, Any] = {
+        "entry": trade.get("entry", {}),
+        "entryContext": trade.get("entryContext", {}),
+        "marketSnapshot": trade.get("marketSnapshot", {}),
+        "advisorVerdict": trade.get("advisorVerdict"),
+        "checkIns": (trade.get("checkIns") or [])[-5:],
+        "outcome": trade.get("outcome", {}),
+        "closeReason": trade.get("closeReason"),
+    }
+    if journal_context:
+        context["tradeJournal"] = journal_context
+
+    payload_str = json.dumps(context, default=str)
+    if len(payload_str) > 25000:
+        payload_str = payload_str[:25000]
+
+    model = str(f.ENGINE2_ADVISOR_MODEL or "gpt-5.4").strip()
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": payload_str},
+            ],
+            temperature=0.3,
+            max_completion_tokens=800,
+            timeout=30,
+            response_format={"type": "json_object"},
+        )
+
+        content = response.choices[0].message.content.strip()
+        result = _parse_llm_json(content)
+
+        if result is None or not _POST_MORTEM_REQUIRED_KEYS.issubset(set(result.keys())):
+            LOG.warning("Engine2 post-mortem: LLM response missing required keys")
+            fallback["_fallback_reason"] = "LLM returned invalid JSON"
+            return fallback
+
+        result["_source"] = "llm"
+        result["_model"] = model
+        result["_generatedAt"] = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return result
+
+    except Exception as e:
+        reason = f"{type(e).__name__}: {e}"
+        LOG.warning("Engine2 post-mortem LLM call failed: %s", reason)
         fallback["_fallback_reason"] = reason
         return fallback

@@ -415,6 +415,16 @@ def spx_ic_trade_log(body: Dict[str, Any] = Body(...)):
     if store is None:
         raise HTTPException(status_code=503, detail="Redis unavailable")
 
+    if "marketSnapshot" not in body:
+        try:
+            from backend.trade_memory import capture_market_snapshot
+            from backend.deps import get_client_optional
+            body["marketSnapshot"] = capture_market_snapshot(
+                store=store, orats_client=get_client_optional(), ticker="SPY",
+            )
+        except Exception:
+            pass
+
     trade_id = log_trade(trade_data=body, store=store, flags=f)
     if trade_id is None:
         raise HTTPException(status_code=500, detail="Failed to log trade")
@@ -436,12 +446,23 @@ def spx_ic_trades_list():
     px_ctx = fetch_live_price_context_optional(client=get_client(), ticker="SPX")
     current_spot = float(px_ctx.get("price", 0)) if px_ctx else 0.0
 
+    current_regime = None
+    current_vol = None
+    try:
+        from backend.engine5_snapshot import select_best_snapshot
+        e5 = select_best_snapshot(store, max_age_days=f.ENGINE5_SNAPSHOT_BEST_MAX_AGE_DAYS,
+                                  snapshot_ttl=f.ENGINE5_SNAPSHOT_TTL_S)
+        if e5:
+            rdata = e5.get("data", {}).get("regime", {})
+            current_regime = {"score": rdata.get("score"), "bucket": rdata.get("label")}
+            current_vol = rdata.get("vol_pressure_state")
+    except Exception:
+        pass
+
     enriched = []
     for t in trades:
         tracking = None
         if current_spot > 0:
-            current_regime = None
-            current_vol = None
             tracking = compute_trade_tracking(
                 trade=t,
                 current_spot=current_spot,
@@ -458,7 +479,7 @@ def spx_ic_trades_list():
 
 
 @router.post("/api/spx-ic/trade/{trade_id}/checkin")
-def spx_ic_trade_checkin(trade_id: str):
+def spx_ic_trade_checkin(trade_id: str, body: Dict[str, Any] = Body(default={})):
     """Run a check-in analysis on an open trade."""
     f = get_flags()
     if not f.ENGINE2_ADVISOR_ENABLED:
@@ -477,9 +498,24 @@ def spx_ic_trade_checkin(trade_id: str):
     if current_spot <= 0:
         raise HTTPException(status_code=502, detail="Could not fetch current spot price")
 
+    current_regime = None
+    current_vol = None
+    try:
+        from backend.engine5_snapshot import select_best_snapshot
+        e5 = select_best_snapshot(store, max_age_days=f.ENGINE5_SNAPSHOT_BEST_MAX_AGE_DAYS,
+                                  snapshot_ttl=f.ENGINE5_SNAPSHOT_TTL_S)
+        if e5:
+            rdata = e5.get("data", {}).get("regime", {})
+            current_regime = {"score": rdata.get("score"), "bucket": rdata.get("label")}
+            current_vol = rdata.get("vol_pressure_state")
+    except Exception:
+        pass
+
     tracking = compute_trade_tracking(
         trade=trade,
         current_spot=current_spot,
+        current_regime=current_regime,
+        current_vol_pressure=current_vol,
     )
 
     analysis = generate_checkin_analysis(
@@ -488,13 +524,30 @@ def spx_ic_trade_checkin(trade_id: str):
         flags=f,
     )
 
+    checkin_snapshot = None
+    try:
+        from backend.trade_memory import capture_market_snapshot
+        from backend.deps import get_client_optional
+        checkin_snapshot = capture_market_snapshot(
+            store=store, orats_client=get_client_optional(), ticker="SPY",
+        )
+    except Exception:
+        pass
+
     checkin_record = {
         "status": analysis.get("status", tracking.get("deterministicStatus")),
         "headline": analysis.get("headline"),
         "recommendation": analysis.get("recommendation"),
         "adjustment": analysis.get("adjustmentIfNeeded"),
+        "spotAnalysis": analysis.get("spotAnalysis"),
+        "regimeDrift": analysis.get("regimeDrift"),
+        "riskUpdate": analysis.get("riskUpdate"),
+        "deskNote": analysis.get("deskNote"),
         "tracking": tracking,
         "spotAtCheckin": current_spot,
+        "marketSnapshot": checkin_snapshot,
+        "overrideNote": body.get("overrideNote"),
+        "_llmSource": analysis.get("_source"),
     }
     add_checkin(trade_id, checkin_record, store=store, flags=f)
 
@@ -517,11 +570,76 @@ def spx_ic_trade_close(trade_id: str, body: Dict[str, Any] = Body(default={})):
     if store is None:
         raise HTTPException(status_code=503, detail="Redis unavailable")
 
+    if "spotAtExit" not in body:
+        try:
+            px_ctx = fetch_live_price_context_optional(client=get_client(), ticker="SPX")
+            if px_ctx:
+                body["spotAtExit"] = float(px_ctx.get("price", 0))
+        except Exception:
+            pass
+    if "vixAtExit" not in body:
+        try:
+            from backend.deps import get_client_optional
+            orats = get_client_optional()
+            if orats:
+                resp = orats.live_summaries(ticker="SPY")
+                rows = resp.rows or []
+                if rows:
+                    body["vixAtExit"] = rows[0].get("iv30dMean") or rows[0].get("ivMean")
+        except Exception:
+            pass
+    if "regimeAtExit" not in body:
+        try:
+            from backend.engine5_snapshot import select_best_snapshot
+            e5 = select_best_snapshot(store, max_age_days=f.ENGINE5_SNAPSHOT_BEST_MAX_AGE_DAYS,
+                                      snapshot_ttl=f.ENGINE5_SNAPSHOT_TTL_S)
+            if e5:
+                rdata = e5.get("data", {}).get("regime", {})
+                body["regimeAtExit"] = {"label": rdata.get("label"), "score": rdata.get("score")}
+        except Exception:
+            pass
+
     trade = close_trade(trade_id, close_data=body, store=store, flags=f)
     if trade is None:
         raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
 
     return {"status": "ok", "trade": trade}
+
+
+@router.post("/api/spx-ic/trade/{trade_id}/post-mortem")
+def spx_ic_trade_post_mortem(trade_id: str):
+    """Generate and store an LLM post-mortem for a closed trade."""
+    f = get_flags()
+    if not f.ENGINE2_ADVISOR_ENABLED:
+        raise HTTPException(status_code=404, detail="Engine 2 advisor disabled")
+
+    store = get_store_optional()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    trade = get_trade(trade_id, store=store)
+    if trade is None:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
+    if trade.get("status") != "closed":
+        raise HTTPException(status_code=400, detail="Trade must be closed for post-mortem")
+
+    journal_ctx = None
+    try:
+        digest = compute_trade_performance_digest(store=store)
+        from backend.engine2_advisor import _build_journal_context
+        journal_ctx = _build_journal_context(digest)
+    except Exception:
+        pass
+
+    from backend.engine2_advisor import generate_post_mortem as gen_pm
+    from backend.engine2_trades import set_post_mortem
+
+    pm = gen_pm(trade, flags=f, journal_context=journal_ctx)
+    updated = set_post_mortem(trade_id, pm, store=store, flags=f)
+    if updated is None:
+        raise HTTPException(status_code=500, detail="Failed to persist post-mortem")
+
+    return {"tradeId": trade_id, "postMortem": pm}
 
 
 @router.get("/api/spx-ic/trades/history")

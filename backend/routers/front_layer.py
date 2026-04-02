@@ -393,6 +393,47 @@ def api_backtest_close_trade(trade_id: str, body: dict = Body(...)):
     return {"status": "ok", "trade": result.to_dict()}
 
 
+@router.get("/api/trade-review/weekly")
+def api_weekly_review(week_of: Optional[str] = Query(None)):
+    """Get a weekly trade review. Defaults to the most recent available."""
+    from backend.weekly_review_engine import get_weekly_review, list_weekly_reviews
+    store = get_store_optional()
+    if week_of:
+        review = get_weekly_review(week_of, store=store)
+        if review is None:
+            raise HTTPException(status_code=404, detail=f"No review found for week of {week_of}")
+        return review
+    reviews = list_weekly_reviews(store=store, limit=1)
+    if not reviews:
+        return {"message": "No weekly reviews generated yet."}
+    return get_weekly_review(reviews[0]["weekOf"], store=store)
+
+
+@router.get("/api/trade-review/weekly/list")
+def api_weekly_review_list(limit: int = Query(12, ge=1, le=52)):
+    """List available weekly reviews."""
+    from backend.weekly_review_engine import list_weekly_reviews
+    store = get_store_optional()
+    return {"reviews": list_weekly_reviews(store=store, limit=limit)}
+
+
+@router.post("/api/trade-review/weekly/generate")
+def api_weekly_review_generate(body: dict = Body(default={})):
+    """Trigger weekly review generation (usually run by cron)."""
+    from backend.weekly_review_engine import generate_weekly_review
+    store = get_store_optional()
+    week_end = None
+    if body.get("weekEnd"):
+        try:
+            week_end = dt.date.fromisoformat(str(body["weekEnd"]))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid weekEnd date format")
+    result = generate_weekly_review(week_end=week_end, store=store)
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+    return result
+
+
 @router.get("/api/front-layer/consensus")
 def api_front_layer_consensus():
     """Cross-engine consensus dashboard.

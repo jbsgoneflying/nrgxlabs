@@ -61,6 +61,10 @@ def log_trade(
         "ticker": str(trade_data.get("ticker", "")).upper(),
         "entry": trade_data.get("entry", {}),
         "entryContext": trade_data.get("entryContext", {}),
+        "marketSnapshot": trade_data.get("marketSnapshot", {}),
+        "vrpSnapshot": trade_data.get("vrpSnapshot", {}),
+        "breachSnapshot": trade_data.get("breachSnapshot", {}),
+        "predictionSnapshot": trade_data.get("predictionSnapshot", {}),
         "advisorVerdict": trade_data.get("advisorVerdict"),
         "checkIns": [],
     }
@@ -110,6 +114,48 @@ def close_trade(
     trade["status"] = "closed"
     trade["closedAt"] = _utcnow_iso()
     trade["closeReason"] = cd.get("closeReason", "manual")
+
+    # Realized move vs predicted move (the core VRP metric)
+    actual_move = cd.get("actualMove")
+    predicted_move = float(trade.get("entry", {}).get("impliedMovePct", 0) or 0)
+    move_vs_predicted = None
+    if actual_move is not None and predicted_move > 0:
+        move_vs_predicted = round(float(actual_move) / predicted_move, 3)
+
+    # Breach detection from check-ins or close data
+    breach_occurred = bool(cd.get("breachOccurred", False))
+    if not breach_occurred:
+        for ci in trade.get("checkIns", []):
+            if ci.get("breachOccurred"):
+                breach_occurred = True
+                break
+
+    # Hold duration
+    hold_duration_days = None
+    entry_date_str = trade.get("entry", {}).get("entryDate") or (trade.get("loggedAt") or "")[:10]
+    close_date_str = trade["closedAt"][:10]
+    try:
+        ed = dt.date.fromisoformat(entry_date_str)
+        cd_date = dt.date.fromisoformat(close_date_str)
+        hold_duration_days = (cd_date - ed).days
+    except Exception:
+        pass
+
+    # Auto outcome tags
+    auto_tags: list = []
+    try:
+        from backend.trade_memory import compute_auto_tags_e1
+        trade["outcome"] = {
+            "expiredWorthless": bool(cd.get("expiredWorthless", False)),
+            "breachOccurred": breach_occurred,
+            "moveVsPredicted": move_vs_predicted,
+            "holdDecision": cd.get("holdDecision"),
+        }
+        auto_tags = compute_auto_tags_e1(trade)
+    except Exception:
+        pass
+    user_tags = cd.get("outcomeTags", [])
+
     trade["outcome"] = {
         "entryCredit": entry_credit,
         "exitCredit": float(exit_credit) if exit_credit is not None else None,
@@ -117,6 +163,16 @@ def close_trade(
         "outcomeClass": outcome_class,
         "expiredWorthless": bool(cd.get("expiredWorthless", False)),
         "notes": cd.get("notes"),
+        "actualMove": float(actual_move) if actual_move is not None else None,
+        "moveVsPredicted": move_vs_predicted,
+        "breachOccurred": breach_occurred,
+        "holdDecision": cd.get("holdDecision"),
+        "holdDeltaPnl": cd.get("holdDeltaPnl"),
+        "holdDurationDays": hold_duration_days,
+        "spotAtExit": cd.get("spotAtExit"),
+        "vixAtExit": cd.get("vixAtExit"),
+        "autoTags": auto_tags,
+        "userTags": user_tags if isinstance(user_tags, list) else [],
     }
 
     try:
@@ -143,6 +199,28 @@ def list_closed_trades(store: Optional[RedisStore] = None, limit: int = 100) -> 
     closed = [t for t in _list_all(store) if t.get("status") == "closed"]
     closed.sort(key=lambda t: t.get("closedAt", ""), reverse=True)
     return closed[:limit]
+
+
+def set_post_mortem(
+    trade_id: str,
+    post_mortem: Dict[str, Any],
+    store: Optional[RedisStore] = None,
+) -> bool:
+    """Attach a post-mortem to a closed trade."""
+    s = store or get_store_optional()
+    if s is None:
+        return False
+    trade = get_trade(trade_id, store=s)
+    if trade is None or trade.get("status") != "closed":
+        return False
+    trade["postMortem"] = post_mortem
+    try:
+        ttl = int(get_flags().E1_TRADE_TTL_S)
+        s.set_json(_trade_key(trade_id), trade, ttl_s=ttl)
+        LOG.info("E1 post-mortem set for %s category=%s", trade_id, post_mortem.get("category"))
+        return True
+    except Exception:
+        return False
 
 
 def add_checkin(
@@ -311,10 +389,13 @@ def compute_e1_trade_performance_digest(
             }
         return out
 
-    # Recent trades with ticker names for LLM context
+    # --- v2 enrichments ---
+
+    # Recent trades with post-mortem lessons (last 10)
     recent_trades: List[Dict[str, Any]] = []
-    for t in closed[:5]:
+    for t in closed[:10]:
         rt: Dict[str, Any] = {
+            "tradeId": t.get("tradeId"),
             "ticker": t.get("ticker"),
             "earningsTiming": (t.get("entryContext") or {}).get("earningsTiming"),
             "emMultiple": (t.get("entry") or {}).get("emMultiple"),
@@ -322,8 +403,119 @@ def compute_e1_trade_performance_digest(
             "outcome": (t.get("outcome") or {}).get("outcomeClass"),
             "pnl": (t.get("outcome") or {}).get("realizedPnl"),
             "closedAt": t.get("closedAt"),
+            "actualMove": (t.get("outcome") or {}).get("actualMove"),
+            "moveVsPredicted": (t.get("outcome") or {}).get("moveVsPredicted"),
+            "breachOccurred": (t.get("outcome") or {}).get("breachOccurred"),
+            "holdDecision": (t.get("outcome") or {}).get("holdDecision"),
+            "tags": ((t.get("outcome") or {}).get("autoTags") or [])
+                   + ((t.get("outcome") or {}).get("userTags") or []),
         }
+        pm = t.get("postMortem")
+        if pm:
+            rt["lesson"] = pm.get("lesson")
+            rt["category"] = pm.get("category")
         recent_trades.append(rt)
+
+    # Pattern insights
+    pattern_insights: List[str] = []
+    try:
+        from backend.trade_memory import detect_patterns
+        pattern_insights = detect_patterns(closed, engine="e1")
+    except Exception:
+        pass
+
+    # Tag analysis
+    tag_analysis: Dict[str, Dict[str, Any]] = {}
+    for t in closed:
+        outcome = t.get("outcome") or {}
+        oc = outcome.get("outcomeClass")
+        pnl_val = outcome.get("realizedPnl")
+        all_tags = (outcome.get("autoTags") or []) + (outcome.get("userTags") or [])
+        for tag in all_tags:
+            if tag not in tag_analysis:
+                tag_analysis[tag] = {"count": 0, "wins": 0, "pnls": []}
+            tag_analysis[tag]["count"] += 1
+            if oc == "win":
+                tag_analysis[tag]["wins"] += 1
+            if pnl_val is not None:
+                tag_analysis[tag]["pnls"].append(float(pnl_val))
+    tag_summary: Dict[str, Any] = {}
+    for tag, data in tag_analysis.items():
+        n = data["count"]
+        tag_summary[tag] = {
+            "n": n,
+            "winRate": round(data["wins"] / n * 100, 1) if n > 0 else None,
+            "avgPnl": round(statistics.mean(data["pnls"]), 2) if data["pnls"] else None,
+        }
+
+    # Weekly trend
+    weekly_trend = None
+    if len(pnl_list) >= 5:
+        last5_pnl = pnl_list[-5:]
+        last5_outcomes = [
+            (t.get("outcome") or {}).get("outcomeClass")
+            for t in closed[:5]
+        ]
+        l5_wins = sum(1 for o in last5_outcomes if o == "win")
+        weekly_trend = {
+            "rolling5WinRate": round(l5_wins / 5 * 100, 1),
+            "rolling5AvgPnl": round(statistics.mean(last5_pnl), 2),
+            "improving": l5_wins >= 3 and (round(statistics.mean(last5_pnl), 2) > (avg_pnl or 0)),
+        }
+
+    # Streak info
+    streak_info = None
+    recent_ocs = [
+        (t.get("outcome") or {}).get("outcomeClass")
+        for t in closed if (t.get("outcome") or {}).get("outcomeClass") in ("win", "loss")
+    ]
+    if recent_ocs:
+        streak = 1
+        for i in range(1, len(recent_ocs)):
+            if recent_ocs[i] == recent_ocs[0]:
+                streak += 1
+            else:
+                break
+        streak_info = {
+            "currentType": recent_ocs[0],
+            "currentStreak": streak,
+            "tiltWarning": streak >= 3 and recent_ocs[0] == "loss",
+        }
+
+    # VRP calibration: predicted vs actual move ratio across all closed trades
+    vrp_calibration: Dict[str, Any] = {"hasData": False}
+    move_ratios: List[float] = []
+    em_breach_actual: Dict[str, Dict[str, int]] = {}
+    for t in closed:
+        outcome = t.get("outcome") or {}
+        mvp = outcome.get("moveVsPredicted")
+        if mvp is not None:
+            move_ratios.append(float(mvp))
+        em_key = str(t.get("entry", {}).get("emMultiple", "?"))
+        if em_key not in em_breach_actual:
+            em_breach_actual[em_key] = {"total": 0, "breached": 0}
+        em_breach_actual[em_key]["total"] += 1
+        if outcome.get("breachOccurred"):
+            em_breach_actual[em_key]["breached"] += 1
+
+    if move_ratios:
+        vrp_calibration = {
+            "hasData": True,
+            "avgMoveRatio": round(statistics.mean(move_ratios), 3),
+            "medianMoveRatio": round(statistics.median(move_ratios), 3),
+            "sampleSize": len(move_ratios),
+            "volCrushRate": round(sum(1 for r in move_ratios if r < 1.0) / len(move_ratios) * 100, 1),
+            "strongCrushRate": round(sum(1 for r in move_ratios if r < 0.75) / len(move_ratios) * 100, 1),
+        }
+
+    breach_calibration: Dict[str, Any] = {}
+    for em_key, counts in em_breach_actual.items():
+        if counts["total"] >= 2:
+            breach_calibration[em_key] = {
+                "total": counts["total"],
+                "breached": counts["breached"],
+                "actualBreachRate": round(counts["breached"] / counts["total"] * 100, 1),
+            }
 
     return {
         "totalClosed": total,
@@ -346,6 +538,12 @@ def compute_e1_trade_performance_digest(
         "byTiming": _bucket_summary(timing_buckets),
         "verdictCalibration": verdict_outcomes,
         "recentTrades": recent_trades,
+        "patternInsights": pattern_insights,
+        "tagAnalysis": tag_summary,
+        "weeklyTrend": weekly_trend,
+        "streakInfo": streak_info,
+        "vrpCalibration": vrp_calibration,
+        "breachCalibrationByEm": breach_calibration,
     }
 
 

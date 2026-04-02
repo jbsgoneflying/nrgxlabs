@@ -71,6 +71,8 @@ def log_trade(
         "source": source,
         "entry": trade_data.get("entry", {}),
         "entryContext": trade_data.get("entryContext", {}),
+        "marketSnapshot": trade_data.get("marketSnapshot", {}),
+        "positionGreeks": trade_data.get("positionGreeks", {}),
         "advisorVerdict": trade_data.get("advisorVerdict"),
         "originalTicket": trade_data.get("originalTicket") if source == "adjusted" else None,
         "adjustmentNote": trade_data.get("adjustmentNote") if source == "adjusted" else None,
@@ -161,6 +163,44 @@ def close_trade(
         else:
             outcome_class = "scratch"
 
+    # Hold duration
+    hold_duration_days = None
+    entry_date_str = trade.get("entry", {}).get("entryDate") or (trade.get("loggedAt") or "")[:10]
+    close_date_str = trade["closedAt"][:10]
+    try:
+        ed = dt.date.fromisoformat(entry_date_str)
+        cd_date = dt.date.fromisoformat(close_date_str)
+        hold_duration_days = (cd_date - ed).days
+    except Exception:
+        pass
+
+    # Max drawdown from check-ins (highest breach proximity seen)
+    max_breach_prox = 0.0
+    peak_profit = None
+    for ci in trade.get("checkIns", []):
+        tracking = ci.get("tracking", {}) or {}
+        bp_put = float(tracking.get("breachProxPut", 0) or tracking.get("breachProximityPut", 0) or 0)
+        bp_call = float(tracking.get("breachProxCall", 0) or tracking.get("breachProximityCall", 0) or 0)
+        max_breach_prox = max(max_breach_prox, bp_put, bp_call)
+
+    # DTE at exit
+    dte_at_exit = None
+    expiry = trade.get("entry", {}).get("expiryDate")
+    if expiry:
+        try:
+            dte_at_exit = max((dt.date.fromisoformat(expiry) - dt.date.today()).days, 0)
+        except Exception:
+            pass
+
+    # Auto outcome tags
+    auto_tags: list = []
+    try:
+        from backend.trade_memory import compute_auto_tags_e2
+        auto_tags = compute_auto_tags_e2(trade)
+    except Exception:
+        pass
+    user_tags = cd.get("outcomeTags", [])
+
     trade["outcome"] = {
         "entryCredit": entry_credit,
         "exitCredit": float(exit_credit) if exit_credit is not None else None,
@@ -168,6 +208,14 @@ def close_trade(
         "outcomeClass": outcome_class,
         "notes": cd.get("notes"),
         "expiredWorthless": bool(cd.get("expiredWorthless", False)),
+        "spotAtExit": cd.get("spotAtExit"),
+        "vixAtExit": cd.get("vixAtExit"),
+        "regimeAtExit": cd.get("regimeAtExit"),
+        "dteAtExit": dte_at_exit,
+        "holdDurationDays": hold_duration_days,
+        "maxBreachProximity": round(max_breach_prox, 1),
+        "autoTags": auto_tags,
+        "userTags": user_tags if isinstance(user_tags, list) else [],
     }
 
     ttl = _trade_ttl(flags)
@@ -306,6 +354,96 @@ def compute_trade_performance_digest(
         elif avg_loss is not None and avg_win is not None and abs(avg_loss) > avg_win * 3:
             risk_tendency = "risk_reward_skewed"
 
+    # --- v2 enrichments ---
+
+    # Recent trades with post-mortem lessons (last 10, not just aggregates)
+    recent_trades: List[Dict[str, Any]] = []
+    for t in closed[:10]:
+        rt: Dict[str, Any] = {
+            "tradeId": t.get("tradeId"),
+            "entryDate": t.get("entry", {}).get("entryDate") or (t.get("loggedAt") or "")[:10],
+            "closedAt": t.get("closedAt"),
+            "emMultiple": t.get("entry", {}).get("emMultiple"),
+            "wingWidth": t.get("entry", {}).get("wingWidth"),
+            "outcome": (t.get("outcome") or {}).get("outcomeClass"),
+            "pnl": (t.get("outcome") or {}).get("realizedPnl"),
+            "holdDuration": (t.get("outcome") or {}).get("holdDurationDays"),
+            "maxBreachProx": (t.get("outcome") or {}).get("maxBreachProximity"),
+            "tags": ((t.get("outcome") or {}).get("autoTags") or [])
+                   + ((t.get("outcome") or {}).get("userTags") or []),
+        }
+        pm = t.get("postMortem")
+        if pm:
+            rt["lesson"] = pm.get("lesson")
+            rt["category"] = pm.get("category")
+        recent_trades.append(rt)
+
+    # Pattern insights from the corpus
+    pattern_insights: List[str] = []
+    try:
+        from backend.trade_memory import detect_patterns
+        pattern_insights = detect_patterns(closed, engine="e2")
+    except Exception:
+        pass
+
+    # Tag analysis: win rate and avg P&L by outcome tag
+    tag_analysis: Dict[str, Dict[str, Any]] = {}
+    for t in closed:
+        outcome = t.get("outcome") or {}
+        oc = outcome.get("outcomeClass")
+        pnl_val = outcome.get("realizedPnl")
+        all_tags = (outcome.get("autoTags") or []) + (outcome.get("userTags") or [])
+        for tag in all_tags:
+            if tag not in tag_analysis:
+                tag_analysis[tag] = {"count": 0, "wins": 0, "pnls": []}
+            tag_analysis[tag]["count"] += 1
+            if oc == "win":
+                tag_analysis[tag]["wins"] += 1
+            if pnl_val is not None:
+                tag_analysis[tag]["pnls"].append(float(pnl_val))
+    tag_summary: Dict[str, Any] = {}
+    for tag, data in tag_analysis.items():
+        n = data["count"]
+        tag_summary[tag] = {
+            "n": n,
+            "winRate": round(data["wins"] / n * 100, 1) if n > 0 else None,
+            "avgPnl": round(statistics.mean(data["pnls"]), 2) if data["pnls"] else None,
+        }
+
+    # Weekly trend: rolling 5-trade metrics
+    weekly_trend = None
+    if len(pnl_list) >= 5:
+        last5_pnl = pnl_list[-5:]
+        last5_outcomes = [
+            (t.get("outcome") or {}).get("outcomeClass")
+            for t in closed[:5]
+        ]
+        l5_wins = sum(1 for o in last5_outcomes if o == "win")
+        weekly_trend = {
+            "rolling5WinRate": round(l5_wins / 5 * 100, 1),
+            "rolling5AvgPnl": round(statistics.mean(last5_pnl), 2),
+            "improving": l5_wins >= 3 and (round(statistics.mean(last5_pnl), 2) > (avg_pnl or 0)),
+        }
+
+    # Streak info
+    streak_info = None
+    recent_ocs = [
+        (t.get("outcome") or {}).get("outcomeClass")
+        for t in closed if (t.get("outcome") or {}).get("outcomeClass") in ("win", "loss")
+    ]
+    if recent_ocs:
+        streak = 1
+        for i in range(1, len(recent_ocs)):
+            if recent_ocs[i] == recent_ocs[0]:
+                streak += 1
+            else:
+                break
+        streak_info = {
+            "currentType": recent_ocs[0],
+            "currentStreak": streak,
+            "tiltWarning": streak >= 3 and recent_ocs[0] == "loss",
+        }
+
     return {
         "totalClosed": total,
         "hasData": True,
@@ -324,7 +462,34 @@ def compute_trade_performance_digest(
         "byWing": _bucket_summary(wing_buckets),
         "byRegime": _bucket_summary(regime_buckets),
         "verdictCalibration": verdict_outcomes,
+        "recentTrades": recent_trades,
+        "patternInsights": pattern_insights,
+        "tagAnalysis": tag_summary,
+        "weeklyTrend": weekly_trend,
+        "streakInfo": streak_info,
     }
+
+
+def set_post_mortem(
+    trade_id: str,
+    post_mortem: Dict[str, Any],
+    store: Optional[RedisStore] = None,
+    flags: Optional[FeatureFlags] = None,
+) -> Optional[Dict[str, Any]]:
+    """Attach a post-mortem to a closed trade. Returns updated trade or None."""
+    s = store or get_store_optional()
+    if s is None:
+        return None
+
+    trade = _load_trade(trade_id, s)
+    if trade is None or trade.get("status") != "closed":
+        return None
+
+    trade["postMortem"] = post_mortem
+    ttl = _trade_ttl(flags)
+    s.set_json(f"{_TRADE_KEY_PREFIX}{trade_id}", trade, ttl_s=ttl)
+    LOG.info("engine2_trades: post-mortem set for %s category=%s", trade_id, post_mortem.get("category"))
+    return trade
 
 
 def add_checkin(

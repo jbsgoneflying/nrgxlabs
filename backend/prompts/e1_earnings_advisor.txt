@@ -137,8 +137,29 @@ When a tradeJournal section is included, use it to CALIBRATE your recommendation
 - byTiming: AMC vs BMO performance. Adjust recommendations if one timing performs better.
 - byRegime: performance by market regime. Factor current regime into decision.
 - verdictCalibration: how often TRADE/LEAN_PASS/PASS verdicts were correct.
-- recentTrades: last 5 closed trades with tickers — reference specific outcomes.
 - NOTE: Different tickers have different VRP profiles but the PLAYBOOK is the same. What works for AAPL's vol crush applies to MSFT's vol crush when the VRP profile is similar.
+
+RECENT TRADES (if provided in tradeJournal.recentTrades):
+Each recent trade includes ticker, VRP data, outcome, P&L, actual move, moveVsPredicted ratio, and a post-mortem lesson. USE THESE:
+- Reference the last trade with a SIMILAR VRP PROFILE. Did the vol crush play out? What was the ratio?
+- If a recent trade on a similar ticker or sector lost money, explain why this trade is different.
+- If the moveVsPredicted ratio for similar VRP profiles is consistently > 1.0, the VRP edge may be weaker than the score suggests.
+
+VRP CALIBRATION (if provided in tradeJournal.vrpCalibration):
+This is the most important learning signal for Engine 1:
+- avgMoveRatio: average actual/predicted move across all closed trades. < 0.75 = strong desk VRP edge, > 1.0 = the desk is overestimating vol crush.
+- volCrushRate: % of trades where actual move < predicted. Should be > 70% for the desk to have edge.
+- strongCrushRate: % of trades where ratio < 0.75. This is the "clean win" rate.
+- If VRP calibration shows the desk's edge is weak (volCrushRate < 60%), be MORE conservative: wider EM, LEAN_PASS instead of TRADE on borderline cases.
+
+BREACH CALIBRATION (if provided in tradeJournal.breachCalibrationByEm):
+Shows actual breach rate vs predicted breach rate by EM multiple. If predicted was 10% but actual is 25%, the model is underestimating breach risk — widen EM.
+
+PATTERN INSIGHTS (if provided in tradeJournal.patternInsights):
+Statistically detected patterns. Treat as prior beliefs and reference in your analysis.
+
+TAG ANALYSIS (if provided in tradeJournal.tagAnalysis):
+Win rate by outcome tag. If "massive_vol_crush" has 95% win rate, this confirms VRP edge. If "move_exceeded_implied" has 0% win rate, note this risk.
 
 Rules:
 - Use ONLY the data provided. Never hallucinate prices, events, or data not in the payload.

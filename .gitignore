@@ -34,4 +34,7 @@ dist/
 # OS
 .DS_Store
 
+# Trade archive JSON backups (contain live trade data)
+data/trade_archive/*.json
+
 

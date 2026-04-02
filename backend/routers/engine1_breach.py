@@ -380,6 +380,19 @@ async def e1_log_trade(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
+    if "marketSnapshot" not in body:
+        try:
+            from backend.trade_memory import capture_market_snapshot
+            from backend.deps import get_client_optional
+            from backend.redis_store import get_store_optional
+            body["marketSnapshot"] = capture_market_snapshot(
+                store=get_store_optional(),
+                orats_client=get_client_optional(),
+                ticker=str(body.get("ticker", "SPY")),
+            )
+        except Exception:
+            pass
+
     from backend.e1_earnings_trades import log_trade
     trade_id = log_trade(body)
     if trade_id is None:
@@ -392,6 +405,132 @@ def e1_list_trades():
     """List active Engine 1 earnings IC trades."""
     from backend.e1_earnings_trades import list_active_trades
     return {"trades": list_active_trades()}
+
+
+@router.post("/api/breach/trade/{trade_id}/checkin")
+async def e1_trade_checkin(trade_id: str, request: Request):
+    """Post-earnings check-in: capture realized move, gap, and breach status."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    from backend.e1_earnings_trades import get_trade, add_checkin
+
+    trade = get_trade(trade_id)
+    if trade is None:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
+
+    ticker = trade.get("ticker", "")
+    entry = trade.get("entry", {})
+    predicted_move_pct = float(entry.get("impliedMovePct", 0) or 0)
+    pre_earnings_close = float(entry.get("spotAtEntry", 0) or body.get("preEarningsClose", 0) or 0)
+    post_earnings_open = float(body.get("postEarningsOpen", 0) or 0)
+
+    actual_move_pct = 0.0
+    move_vs_predicted = None
+    gap_direction = "flat"
+    if pre_earnings_close > 0 and post_earnings_open > 0:
+        actual_move_pct = round(abs(post_earnings_open - pre_earnings_close) / pre_earnings_close * 100, 2)
+        gap_direction = "up" if post_earnings_open > pre_earnings_close else "down" if post_earnings_open < pre_earnings_close else "flat"
+        if predicted_move_pct > 0:
+            move_vs_predicted = round(actual_move_pct / predicted_move_pct, 3)
+
+    short_put = float(entry.get("shortPutStrike", 0) or 0)
+    short_call = float(entry.get("shortCallStrike", 0) or 0)
+    breach_occurred = False
+    if post_earnings_open > 0:
+        if short_put > 0 and post_earnings_open < short_put:
+            breach_occurred = True
+        if short_call > 0 and post_earnings_open > short_call:
+            breach_occurred = True
+
+    current_vix = None
+    try:
+        from backend.deps import get_client_optional
+        orats = get_client_optional()
+        if orats:
+            resp = orats.live_summaries(ticker="SPY")
+            rows = resp.rows or []
+            if rows:
+                current_vix = rows[0].get("iv30dMean") or rows[0].get("ivMean")
+    except Exception:
+        pass
+
+    llm_assessment = None
+    try:
+        from backend.e1_earnings_advisor import _get_openai_client, _parse_llm_json
+        client = _get_openai_client()
+        if client and predicted_move_pct > 0:
+            prompt = (
+                f"Earnings check-in for {ticker}. Predicted EM: {predicted_move_pct:.1f}%, "
+                f"Actual move: {actual_move_pct:.1f}% ({gap_direction}), "
+                f"Ratio actual/predicted: {move_vs_predicted:.2f}. "
+                f"Breach occurred: {breach_occurred}. "
+                f"Pre-close: ${pre_earnings_close:.2f}, Post-open: ${post_earnings_open:.2f}. "
+                "Provide a 2-3 sentence assessment of this outcome and what it means "
+                "for the VRP thesis on this name. Return JSON with keys: assessment, volCrushWorked (bool), lesson."
+            )
+            resp = client.chat.completions.create(
+                model="gpt-5.4",
+                messages=[
+                    {"role": "system", "content": "You are a vol-crush desk analyst reviewing a post-earnings outcome. Be concise."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.2, max_completion_tokens=300, timeout=20,
+                response_format={"type": "json_object"},
+            )
+            llm_assessment = _parse_llm_json(resp.choices[0].message.content.strip())
+    except Exception:
+        pass
+
+    checkin_data = {
+        "type": "post_earnings",
+        "postEarningsOpen": post_earnings_open,
+        "preEarningsClose": pre_earnings_close,
+        "actualMovePct": actual_move_pct,
+        "predictedMovePct": predicted_move_pct,
+        "moveVsPredicted": move_vs_predicted,
+        "gapDirection": gap_direction,
+        "breachOccurred": breach_occurred,
+        "vixAtCheckin": current_vix,
+        "llmAssessment": llm_assessment,
+        "userNotes": body.get("notes"),
+    }
+
+    success = add_checkin(trade_id, checkin_data)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to persist check-in")
+
+    return {"tradeId": trade_id, "checkin": checkin_data}
+
+
+@router.post("/api/breach/trade/{trade_id}/post-mortem")
+async def e1_trade_post_mortem(trade_id: str):
+    """Generate and store an LLM post-mortem for a closed E1 trade."""
+    from backend.e1_earnings_trades import get_trade, set_post_mortem, compute_e1_trade_performance_digest
+
+    trade = get_trade(trade_id)
+    if trade is None:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
+    if trade.get("status") != "closed":
+        raise HTTPException(status_code=400, detail="Trade must be closed for post-mortem")
+
+    journal_ctx = None
+    try:
+        from backend.e1_earnings_advisor import _build_e1_journal_context
+        digest = compute_e1_trade_performance_digest()
+        journal_ctx = _build_e1_journal_context(digest)
+    except Exception:
+        pass
+
+    from backend.e1_earnings_advisor import generate_e1_post_mortem
+    pm = generate_e1_post_mortem(trade, journal_context=journal_ctx)
+    success = set_post_mortem(trade_id, pm)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to persist post-mortem")
+
+    return {"tradeId": trade_id, "postMortem": pm}
 
 
 @router.post("/api/breach/trade/{trade_id}/close")
