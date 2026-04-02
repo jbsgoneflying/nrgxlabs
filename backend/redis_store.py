@@ -94,6 +94,26 @@ class RedisStore:
         except Exception:
             return False
 
+    def scan_keys(self, pattern: str) -> list:
+        """Return all keys matching a glob pattern using non-blocking SCAN."""
+        c = self._client()
+        if c is None:
+            return []
+        try:
+            keys = []
+            cursor = 0
+            while True:
+                cursor, batch = c.scan(cursor=cursor, match=pattern, count=200)
+                keys.extend(
+                    k.decode("utf-8") if isinstance(k, bytes) else k
+                    for k in batch
+                )
+                if cursor == 0:
+                    break
+            return keys
+        except Exception:
+            return []
+
 
 def get_store_optional() -> Optional[RedisStore]:
     url = str(os.getenv("REDIS_URL") or "").strip()

@@ -37,6 +37,51 @@ def _trade_max_index(flags: Optional[FeatureFlags] = None) -> int:
     return int(f.ENGINE2_TRADE_MAX_INDEX)
 
 
+def _refresh_index_ttl(store: RedisStore, flags: Optional[FeatureFlags] = None) -> None:
+    """Touch the index key's TTL without modifying its contents.
+
+    Called from close_trade, add_checkin, and set_post_mortem so the index
+    TTL stays aligned with individual trade key TTLs.
+    """
+    ttl = _trade_ttl(flags)
+    index = store.get_json(_TRADE_INDEX_KEY)
+    if index is not None:
+        store.set_json(_TRADE_INDEX_KEY, index, ttl_s=ttl)
+
+
+def rebuild_index_if_missing(
+    store: Optional[RedisStore] = None,
+    flags: Optional[FeatureFlags] = None,
+) -> bool:
+    """Rebuild the trade index from existing keys if it has expired.
+
+    Uses SCAN to discover orphaned trade keys and reconstructs the index.
+    Returns True if a rebuild was performed, False otherwise (including
+    the normal case where the index already exists).
+    """
+    s = store or get_store_optional()
+    if s is None:
+        return False
+    existing = s.get_json(_TRADE_INDEX_KEY)
+    if existing is not None:
+        return False
+    keys = s.scan_keys(f"{_TRADE_KEY_PREFIX}*")
+    if not keys:
+        return False
+    trade_ids = sorted(
+        k.replace(_TRADE_KEY_PREFIX, "")
+        for k in keys
+        if k != _TRADE_INDEX_KEY
+    )
+    if not trade_ids:
+        return False
+    ttl = _trade_ttl(flags)
+    max_idx = _trade_max_index(flags)
+    s.set_json(_TRADE_INDEX_KEY, trade_ids[-max_idx:], ttl_s=ttl)
+    LOG.info("engine2_trades: rebuilt index from %d keys", len(trade_ids))
+    return True
+
+
 def _utcnow_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -220,6 +265,7 @@ def close_trade(
 
     ttl = _trade_ttl(flags)
     s.set_json(f"{_TRADE_KEY_PREFIX}{trade_id}", trade, ttl_s=ttl)
+    _refresh_index_ttl(s, flags)
     LOG.info("engine2_trades: closed trade %s reason=%s outcome=%s", trade_id, trade["closeReason"], outcome_class)
     return trade
 
@@ -488,6 +534,7 @@ def set_post_mortem(
     trade["postMortem"] = post_mortem
     ttl = _trade_ttl(flags)
     s.set_json(f"{_TRADE_KEY_PREFIX}{trade_id}", trade, ttl_s=ttl)
+    _refresh_index_ttl(s, flags)
     LOG.info("engine2_trades: post-mortem set for %s category=%s", trade_id, post_mortem.get("category"))
     return trade
 
@@ -521,5 +568,6 @@ def add_checkin(
 
     ttl = _trade_ttl(flags)
     s.set_json(f"{_TRADE_KEY_PREFIX}{trade_id}", trade, ttl_s=ttl)
+    _refresh_index_ttl(s, flags)
     LOG.info("engine2_trades: check-in for %s status=%s", trade_id, checkin_data.get("status"))
     return trade

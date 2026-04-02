@@ -34,6 +34,50 @@ def _trade_key(trade_id: str) -> str:
     return f"{_PREFIX}:{trade_id}"
 
 
+def _refresh_index_ttl(store: RedisStore) -> None:
+    """Touch the index key's TTL without modifying its contents.
+
+    Called from close_trade, add_checkin, and set_post_mortem so the index
+    TTL stays aligned with individual trade key TTLs.
+    """
+    ttl = int(get_flags().E1_TRADE_TTL_S)
+    index = store.get_json(_INDEX_KEY)
+    if index is not None:
+        store.set_json(_INDEX_KEY, index, ttl_s=ttl)
+
+
+def rebuild_index_if_missing(
+    store: Optional[RedisStore] = None,
+) -> bool:
+    """Rebuild the trade index from existing keys if it has expired.
+
+    Uses SCAN to discover orphaned trade keys and reconstructs the index.
+    Returns True if a rebuild was performed, False otherwise.
+    """
+    s = store or get_store_optional()
+    if s is None:
+        return False
+    existing = s.get_json(_INDEX_KEY)
+    if existing is not None:
+        return False
+    keys = s.scan_keys(f"{_PREFIX}:*")
+    if not keys:
+        return False
+    trade_ids = sorted(
+        k.replace(f"{_PREFIX}:", "")
+        for k in keys
+        if k != _INDEX_KEY
+    )
+    if not trade_ids:
+        return False
+    f = get_flags()
+    ttl = int(f.E1_TRADE_TTL_S)
+    max_idx = int(f.E1_TRADE_MAX_INDEX)
+    s.set_json(_INDEX_KEY, trade_ids[-max_idx:], ttl_s=ttl)
+    LOG.info("E1 trades: rebuilt index from %d keys", len(trade_ids))
+    return True
+
+
 # ---------------------------------------------------------------------------
 # CRUD
 # ---------------------------------------------------------------------------
@@ -178,6 +222,7 @@ def close_trade(
     try:
         ttl = int(get_flags().E1_TRADE_TTL_S)
         s.set_json(_trade_key(trade_id), trade, ttl_s=ttl)
+        _refresh_index_ttl(s)
         return trade
     except Exception as e:
         LOG.warning("E1 close trade failed: %s", e)
@@ -217,6 +262,7 @@ def set_post_mortem(
     try:
         ttl = int(get_flags().E1_TRADE_TTL_S)
         s.set_json(_trade_key(trade_id), trade, ttl_s=ttl)
+        _refresh_index_ttl(s)
         LOG.info("E1 post-mortem set for %s category=%s", trade_id, post_mortem.get("category"))
         return True
     except Exception:
@@ -243,6 +289,7 @@ def add_checkin(
     try:
         ttl = int(get_flags().E1_TRADE_TTL_S)
         s.set_json(_trade_key(trade_id), trade, ttl_s=ttl)
+        _refresh_index_ttl(s)
         return True
     except Exception:
         return False

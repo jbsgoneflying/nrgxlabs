@@ -22,6 +22,9 @@
 # Weekly roadmap: Sunday evening (generates planning brief)
 0 22 * * 0   cd /app && python3 scripts/refresh_daily_market_state.py --weekly >> /var/log/cron.log 2>&1
 
+# Daily trade archive (weekdays after market close — shrinks data loss window to ~1 day)
+0 22 * * 1-5 cd /app && python3 scripts/archive_trades.py >> /var/log/cron.log 2>&1
+
 # Weekly trade review: Sunday evening (generates LLM trade learning review + trade archive backup)
 30 22 * * 0  curl -sf -X POST http://localhost:8000/api/trade-review/weekly/generate >> /var/log/cron.log 2>&1
 45 22 * * 0  cd /app && python3 scripts/archive_trades.py >> /var/log/cron.log 2>&1

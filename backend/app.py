@@ -352,3 +352,16 @@ app.include_router(engine12_vix_fade.router)
 app.include_router(calendar.router)
 app.include_router(market_intel.router)
 app.include_router(front_layer.router)
+
+
+# ── Startup: rebuild trade indexes if they expired while the app was down ──
+
+@app.on_event("startup")
+def _rebuild_trade_indexes():
+    try:
+        from backend.engine2_trades import rebuild_index_if_missing as e2_rebuild
+        from backend.e1_earnings_trades import rebuild_index_if_missing as e1_rebuild
+        e2_rebuild()
+        e1_rebuild()
+    except Exception:
+        pass
