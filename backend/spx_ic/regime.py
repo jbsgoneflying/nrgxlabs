@@ -253,12 +253,28 @@ def _macro_classify_name(name: str) -> Optional[str]:
         return None
     if "cpi" in n or "consumer price" in n:
         return "CPI"
+    if "fomc" in n and "minutes" in n:
+        return "FOMC_MINUTES"
     if "fomc" in n or "fed rate" in n or "interest rate decision" in n:
         return "FOMC"
     if "nonfarm" in n or "nfp" in n or "payroll" in n:
         return "NFP"
-    if "refunding" in n or "treasury" in n and "auction" in n:
+    if "ppi" in n or "producer price" in n:
+        return "PPI"
+    if "pmi" in n or "ism" in n:
+        return "PMI_ISM"
+    if "gdp" in n or "gross domestic" in n:
+        return "GDP"
+    if "pce" in n or "personal consumption" in n:
+        return "PCE"
+    if "retail" in n and "sales" in n:
+        return "RETAIL_SALES"
+    if "jobless" in n or "claims" in n:
+        return "JOBLESS_CLAIMS"
+    if "refunding" in n:
         return "REFUNDING"
+    if "auction" in n and ("treasury" in n or "note" in n or "bond" in n or "bill" in n):
+        return "TREASURY_AUCTION"
     return None
 
 
@@ -326,9 +342,19 @@ def _macro_context(
     out: Dict[str, Any] = {
         "window": {"start": _fmt_date(start), "end": _fmt_date(end)},
         "highImpactUS": {"count": 0, "top": []},
-        "flags": {"CPI": False, "FOMC": False, "NFP": False, "OPEX": False, "REFUNDING": False},
+        "flags": {
+            "CPI": False, "FOMC": False, "FOMC_MINUTES": False, "NFP": False,
+            "OPEX": False, "REFUNDING": False, "GDP": False, "PCE": False,
+            "PPI": False, "PMI_ISM": False, "RETAIL_SALES": False,
+            "JOBLESS_CLAIMS": False, "TREASURY_AUCTION": False,
+        },
         "multiplier": 1.0,
-        "components": {"CPI": 0.0, "FOMC": 0.0, "NFP": 0.0, "OPEX": 0.0, "REFUNDING": 0.0, "OTHER": 0.0},
+        "components": {
+            "CPI": 0.0, "FOMC": 0.0, "FOMC_MINUTES": 0.0, "NFP": 0.0,
+            "OPEX": 0.0, "REFUNDING": 0.0, "GDP": 0.0, "PCE": 0.0,
+            "PPI": 0.0, "PMI_ISM": 0.0, "RETAIL_SALES": 0.0,
+            "JOBLESS_CLAIMS": 0.0, "TREASURY_AUCTION": 0.0, "OTHER": 0.0,
+        },
         "sources": [],
         "notes": [],
     }
@@ -363,17 +389,21 @@ def _macro_context(
                     days = None
                 if days is not None:
                     decay = math.exp(-float(flags.ENGINE2_MACRO_LAMBDA) * float(days))
-                    base = 0.0
-                    if k == "CPI":
-                        base = float(flags.ENGINE2_MACRO_BASE_CPI)
-                    elif k == "FOMC":
-                        base = float(flags.ENGINE2_MACRO_BASE_FOMC)
-                    elif k == "NFP":
-                        base = float(flags.ENGINE2_MACRO_BASE_NFP)
-                    elif k == "REFUNDING":
-                        base = float(flags.ENGINE2_MACRO_BASE_REFUNDING)
-                    else:
-                        base = 0.25
+                    _base_map = {
+                        "CPI": flags.ENGINE2_MACRO_BASE_CPI,
+                        "FOMC": flags.ENGINE2_MACRO_BASE_FOMC,
+                        "FOMC_MINUTES": flags.ENGINE2_MACRO_BASE_FOMC_MINUTES,
+                        "NFP": flags.ENGINE2_MACRO_BASE_NFP,
+                        "REFUNDING": flags.ENGINE2_MACRO_BASE_REFUNDING,
+                        "GDP": flags.ENGINE2_MACRO_BASE_GDP,
+                        "PCE": flags.ENGINE2_MACRO_BASE_PCE,
+                        "PPI": flags.ENGINE2_MACRO_BASE_PPI,
+                        "PMI_ISM": flags.ENGINE2_MACRO_BASE_PMI_ISM,
+                        "RETAIL_SALES": flags.ENGINE2_MACRO_BASE_RETAIL_SALES,
+                        "JOBLESS_CLAIMS": flags.ENGINE2_MACRO_BASE_JOBLESS_CLAIMS,
+                        "TREASURY_AUCTION": flags.ENGINE2_MACRO_BASE_TREASURY_AUCTION,
+                    }
+                    base = float(_base_map.get(k, flags.ENGINE2_MACRO_BASE_OTHER))
                     scored.append((k or "OTHER", base * decay, date, name))
         hi.sort(key=lambda x: (-x[0], x[1]))
         out["highImpactUS"]["count"] = int(len(hi))
