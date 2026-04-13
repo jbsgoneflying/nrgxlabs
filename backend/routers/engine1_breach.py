@@ -29,6 +29,9 @@ from backend.orats_client import OratsError
 
 router = APIRouter()
 
+# Must stay below gunicorn --timeout so pool threads surface real errors instead of BrokenProcessPool noise.
+_BREACH_COMPARE_FUTURE_TIMEOUT_S = 210
+
 
 @router.get("/api/breach")
 def breach(
@@ -61,7 +64,7 @@ def breach(
             "dte_target": dte_target,
             "exp": exp,
         }
-        has_trade_builder = any(v is not None for v in trade_builder_inputs.values())
+        has_trade_builder_params = any(v is not None for v in trade_builder_inputs.values())
 
         base_flags = get_flags()
         overrides = {}
@@ -79,12 +82,12 @@ def breach(
         effective_flags = replace(base_flags, **overrides) if overrides else base_flags
         enable_mc = bool(effective_flags.ENABLE_MONTE_CARLO_EARNINGS)
 
-        # MC depends on near-term anchoring (nextEvent/current snapshot); avoid mixing stale cached payloads.
-        if enable_mc:
-            has_trade_builder = True
+        # Full breach cache is unsafe for MC (monteCarlo is tied to snapshot at compute time; we only refresh
+        # `current` on cache hits for non-MC). Skip cache whenever MC is on or trade-builder params are set.
+        skip_breach_cache = bool(enable_mc or has_trade_builder_params)
 
         key = breach_cache_key(ticker, n, years, k, effective_flags.cache_fingerprint())
-        if not has_trade_builder:
+        if not skip_breach_cache:
             with breach_cache_lock:
                 cached = breach_cache.get(key)
             if cached is not None:
@@ -110,7 +113,7 @@ def breach(
             n=n,
             years=years,
             k=k,
-            trade_builder_inputs=(trade_builder_inputs if has_trade_builder else None),
+            trade_builder_inputs=(trade_builder_inputs if has_trade_builder_params else None),
             flags_override=effective_flags,
             next_event_override={"date": mc_event_date, "timing": mc_event_timing},
             benzinga_client=get_benzinga_client_optional(),
@@ -144,7 +147,7 @@ def breach(
         except Exception as egc_err:
             LOG.debug(f"Earnings gamma context skipped for {ticker}: {egc_err}")
 
-        if not has_trade_builder:
+        if not skip_breach_cache:
             with breach_cache_lock:
                 breach_cache[key] = payload
         return payload
@@ -290,7 +293,7 @@ def breach_compare(
             for future in as_completed(futures):
                 ticker = futures[future]
                 try:
-                    _, payload = future.result(timeout=60)
+                    _, payload = future.result(timeout=_BREACH_COMPARE_FUTURE_TIMEOUT_S)
                     payloads.append((ticker, payload))
                 except Exception as e:
                     LOG.warning(f"Failed to fetch {ticker}: {e}")
@@ -439,7 +442,7 @@ async def e10_portfolio_advisor(request: Request):
                 for future in as_completed(futures):
                     ticker = futures[future]
                     try:
-                        _, payload = future.result(timeout=60)
+                        _, payload = future.result(timeout=_BREACH_COMPARE_FUTURE_TIMEOUT_S)
                         payloads.append((ticker, payload))
                     except Exception as e:
                         LOG.warning(f"Failed to fetch {ticker}: {e}")
