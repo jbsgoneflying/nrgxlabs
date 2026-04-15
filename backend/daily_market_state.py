@@ -355,6 +355,15 @@ def persist_dms(dms: DailyMarketState, store: Any, ttl_s: int = DMS_TTL_S) -> bo
     index = index[:150]
     store.set_json(DMS_INDEX_KEY, index, ttl_s=ttl_s)
 
+    # Bust in-memory DMS cache so GET /daily-market-state matches Redis (diff
+    # always loads Redis; stale cache caused empty Asymmetry Radar vs DoD).
+    try:
+        from backend.deps import dms_cache
+
+        dms_cache.pop(f"dms:{dms.date}", None)
+    except Exception:
+        pass
+
     LOG.info("Persisted DMS for %s", dms.date)
     return True
 
