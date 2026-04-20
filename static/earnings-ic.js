@@ -127,30 +127,105 @@
   }
 
   function renderScanResult(data) {
+    const s = (data && data.engine1Summary) || {};
     const e1 = (data && data.engine1) || {};
+    // Back-compat: if the server didn't send engine1Summary (older builds),
+    // fall back to reading the raw payload inline.
     const current = e1.current || {};
     const vrp = e1.vrpAnalysis || {};
     const dc = e1.deskConsensus || {};
     const next = e1.nextEvent || {};
-    const embr = e1.emBreachSummary || {};
+    const em = e1.expectedMove || {};
+    const st = e1.strikeTargets || {};
+
+    const stockPrice = s.stockPrice != null ? s.stockPrice : current.stockPrice;
+    const asOfDate = s.asOfDate || current.asOfDate;
+    const vrpScore = s.vrpScore != null ? s.vrpScore : vrp.vrpScore;
+    const ivElev = s.ivElevation != null ? s.ivElevation : vrp.ivElevation;
+    const oratsEmPct = s.oratsEmPct != null ? s.oratsEmPct : current.impliedMovePct;
+    const delayedEmPct = s.delayedEmPct != null ? s.delayedEmPct : current.delayedImpliedMovePct;
+    const delayedUpdated = s.delayedUpdatedAt || current.delayedUpdatedAt;
+    const straddlePct = s.straddleEmPct != null ? s.straddleEmPct : em.expectedMovePct;
+    const straddleDollars = s.straddleEmDollars != null ? s.straddleEmDollars : em.expectedMoveDollars;
+    const straddleExpiry = s.straddleExpiry || em.expiry;
+    const straddleSource = (s.straddleSource || em.source || '').toLowerCase();
+    const strike1x = (s.strikeTargets && s.strikeTargets.whitePct) != null ? s.strikeTargets.whitePct : st.whitePct;
+    const strike15x = (s.strikeTargets && s.strikeTargets.bluePct) != null ? s.strikeTargets.bluePct : st.bluePct;
+    const strike2x = (s.strikeTargets && s.strikeTargets.redPct) != null ? s.strikeTargets.redPct : st.redPct;
+    const strikeEmSource = (s.strikeTargets && s.strikeTargets.emSource) || st.emSource;
+    const nextDate = s.nextEventDate || next.earnDate || next.earnDateNext || next.date;
+    const nextTiming = s.anncTod || next.timing || next.timingPlanned || next.anncTod;
+    const pricingExpiry = s.nextEventPricingExpiry || next.pricingExpiry;
+    const nextSource = s.nextEventSource || next.source;
+    const deskVerdict = s.deskConsensus || dc.consensus || dc.verdict;
+    const deskScore = s.deskConsensusScore != null ? s.deskConsensusScore : dc.score;
+    const breach1x = s.emBreachRate1xPct;
+    const breach15x = s.emBreachRate15xPct;
+    const breach2x = s.emBreachRate2xPct;
+    const breachN = s.emBreachN != null ? s.emBreachN : ((e1.summary || {}).events_used);
+    const regimeLabel = s.regimeLabel || (e1.regime || {}).label;
+    const regimeTail = s.regimeTailMultiplier != null ? s.regimeTailMultiplier : (e1.regime || {}).tailMultiplier;
+    const eventRiskLabel = s.eventRiskLabel || (e1.eventRisk || {}).label;
+    const evN = s.historyN != null ? s.historyN : (e1.events || []).length;
+
+    const srcLabel = (s.emPctSource === 'live' || !s.emPctSource) ? 'Live' : 'Delayed';
+    const nextSrcCaption = nextSource === 'friday_expiry_fallback'
+      ? 'Friday-exp fallback — confirm date'
+      : (nextSource === 'orats_snapshot' ? 'ORATS snapshot' : '');
+    const regimeCaption = regimeLabel
+      ? `Regime ${regimeLabel}${regimeTail != null ? ' (' + Number(regimeTail).toFixed(2) + 'x)' : ''}${eventRiskLabel ? ' · Risk ' + eventRiskLabel : ''}`
+      : '';
 
     const cards = $('e1Cards');
     cards.innerHTML = '';
-    cards.appendChild(card('Stock Price', fmtNum(current.stockPrice, 2),
-      `EM: ${fmtPct(current.impliedMovePct, 2)}`));
+
+    // 1. Stock Price (EOD anchor + headline EM)
+    const stockCaption = asOfDate
+      ? `EOD ${String(asOfDate).slice(0,10)}${Number.isFinite(oratsEmPct) || Number.isFinite(delayedEmPct) ? ' · EM ' + fmtPct(oratsEmPct != null ? oratsEmPct : delayedEmPct, 2) + ' (' + srcLabel + ')' : ''}`
+      : (Number.isFinite(oratsEmPct) || Number.isFinite(delayedEmPct)) ? 'EM ' + fmtPct(oratsEmPct != null ? oratsEmPct : delayedEmPct, 2) : '—';
+    cards.appendChild(card('Stock Price', fmtNum(stockPrice, 2), stockCaption));
+
+    // 2. VRP + IV elevation
     cards.appendChild(card('VRP Score',
-      vrp.vrpScore != null ? Number(vrp.vrpScore).toFixed(2) : '—',
-      `IV elev: ${fmtPct(vrp.ivElevation, 1)}`));
-    cards.appendChild(card('Next Event',
-      next.earnDate || next.date || '—',
-      `${next.anncTod || next.timing || '—'}`));
-    cards.appendChild(card('Desk Consensus',
-      dc.consensus || dc.verdict || '—',
-      dc.score != null ? `Score ${Number(dc.score).toFixed(2)}` : ''));
-    cards.appendChild(card('EM Breach',
-      fmtPct(embr.breachRatePct || embr.breachPct, 0),
-      `n=${embr.n || 0}`));
-    const evN = (e1.events || []).length;
+      vrpScore != null ? Number(vrpScore).toFixed(2) : '—',
+      ivElev != null ? `IV elev: ${fmtPct(ivElev, 1)}` : regimeCaption || ''));
+
+    // 3. Next Event — date + pricing expiry
+    const nextCaption = [nextTiming || '—',
+      pricingExpiry ? `Exp: ${String(pricingExpiry).slice(0,10)}` : '',
+      nextSrcCaption].filter(Boolean).join(' · ');
+    cards.appendChild(card('Next Event', nextDate || '—', nextCaption));
+
+    // 4. Straddle EM ($ and %, expiry, source)
+    const straddleCaption = [
+      Number.isFinite(straddleDollars) ? `$${Number(straddleDollars).toFixed(2)} pts` : '',
+      straddleExpiry ? `Exp: ${String(straddleExpiry).slice(0,10)}` : '',
+      straddleSource ? straddleSource.toUpperCase() : ''
+    ].filter(Boolean).join(' · ') || '—';
+    cards.appendChild(card('Straddle EM', fmtPct(straddlePct, 2), straddleCaption));
+
+    // 5. ORATS EM (EOD + delayed block)
+    const oratsCardVal = fmtPct(oratsEmPct, 2);
+    const oratsCaption = `EOD${asOfDate ? ' ' + String(asOfDate).slice(0,10) : ''} · Delayed ${fmtPct(delayedEmPct, 2)}${delayedUpdated ? ' @ ' + String(delayedUpdated).slice(11,16) : ''}`;
+    cards.appendChild(card('ORATS EM', oratsCardVal, oratsCaption));
+
+    // 6. Strike Targets (1x / 1.5x / 2x)
+    const strikeCardVal = Number.isFinite(strike1x) ? `${fmtPct(strike1x, 2)} / ${fmtPct(strike15x, 2)} / ${fmtPct(strike2x, 2)}` : '—';
+    const strikeCaption = `1× / 1.5× / 2× EM wing distance${strikeEmSource ? ' · ' + strikeEmSource : ''}`;
+    cards.appendChild(card('Strike Targets', strikeCardVal, strikeCaption));
+
+    // 7. Desk Consensus
+    cards.appendChild(card('Desk Consensus', deskVerdict || '—',
+      deskScore != null ? `Score ${Number(deskScore).toFixed(2)}` : (regimeCaption || '')));
+
+    // 8. EM Breach (multi-row)
+    const breachVal = (breach1x != null || breach15x != null || breach2x != null)
+      ? `${fmtPct(breach1x, 0)} / ${fmtPct(breach15x, 0)} / ${fmtPct(breach2x, 0)}`
+      : '—';
+    cards.appendChild(card('EM Breach', breachVal,
+      `1× / 1.5× / 2× historical breach${breachN != null ? ' · n=' + breachN : ''}`));
+
+    // 9. Events Harvested
     cards.appendChild(card('Events Harvested', String(evN),
       evN >= 8 ? 'Sufficient for replay' : 'Thin; consider running backfill'));
 
@@ -181,40 +256,54 @@
   }
 
   function prefillScenarioForm(scan) {
+    const s = scan.engine1Summary || {};
     const e1 = scan.engine1 || {};
     const next = e1.nextEvent || {};
     const current = e1.current || {};
-    const earnDate = next.earnDate || next.date || '';
-    const timing = (next.anncTod || next.timing || 'BMO').toUpperCase();
-    const stock = current.stockPrice ? Number(current.stockPrice) : null;
-    const emPct = current.impliedMovePct ? Number(current.impliedMovePct) : null;
+    const em = e1.expectedMove || {};
+
+    const earnDate = s.nextEventDate || next.earnDate || next.earnDateNext || next.date || '';
+    const timing = String(s.anncTod || next.timing || next.timingPlanned || next.anncTod || 'BMO').toUpperCase();
+    const stock = (s.stockPrice != null ? s.stockPrice
+      : (s.straddleSpotPrice != null ? s.straddleSpotPrice : current.stockPrice));
+    // Prefer delayed ORATS EM (strike-target basis on E1) then live ORATS,
+    // then straddle EM, so pre-market prefill always lands on a real number.
+    const emPct = s.delayedEmPct != null ? s.delayedEmPct
+      : s.oratsEmPct != null ? s.oratsEmPct
+      : s.straddleEmPct != null ? s.straddleEmPct
+      : (current.delayedImpliedMovePct || current.impliedMovePct || em.expectedMovePct || null);
+    // Prefer the upcoming Friday expiry E1 already computed.
+    const pricingExpiry = s.nextEventPricingExpiry || s.straddleExpiry || next.pricingExpiry || em.expiry || '';
 
     $('earningsDate').value = earnDate;
     $('earningsTiming').value = ['BMO', 'AMC', 'UNK'].includes(timing) ? timing : 'BMO';
 
-    // Default entry / exit windows
     if (earnDate) {
       const entry = timing === 'AMC' ? earnDate : shiftBizDays(earnDate, -1);
       const exit = timing === 'AMC' ? shiftBizDays(earnDate, 1) : earnDate;
       $('entryDate').value = entry;
       $('plannedExitDate').value = exit;
-      $('expiry').value = shiftBizDays(earnDate, 4); // Friday-ish
+      // Prefer E1's computed straddle expiry over a heuristic shift.
+      $('expiry').value = pricingExpiry ? String(pricingExpiry).slice(0, 10) : shiftBizDays(earnDate, 4);
+    } else if (pricingExpiry) {
+      // No earnings date — still anchor the expiry field so the form isn't empty.
+      $('expiry').value = String(pricingExpiry).slice(0, 10);
     }
 
-    // Suggest strikes at ±1.5σ if EM + price known
-    if (stock && emPct) {
-      const emDollars = stock * (emPct / 100.0);
-      const tickStep = stock < 50 ? 1 : (stock < 200 ? 1 : 5);
+    const stockNum = stock != null ? Number(stock) : null;
+    const emNum = emPct != null ? Number(emPct) : null;
+    if (stockNum && emNum) {
+      const emDollars = stockNum * (emNum / 100.0);
+      const tickStep = stockNum < 50 ? 1 : (stockNum < 200 ? 1 : 5);
       const snap = (v) => Math.round(v / tickStep) * tickStep;
-      const shortPut = snap(stock - 1.5 * emDollars);
+      const shortPut = snap(stockNum - 1.5 * emDollars);
       const longPut = snap(shortPut - Math.max(tickStep * 2, 2));
-      const shortCall = snap(stock + 1.5 * emDollars);
+      const shortCall = snap(stockNum + 1.5 * emDollars);
       const longCall = snap(shortCall + Math.max(tickStep * 2, 2));
       $('shortPut').value = shortPut;
       $('longPut').value = longPut;
       $('shortCall').value = shortCall;
       $('longCall').value = longCall;
-      // Rough credit heuristic: 20% of wing width
       const wing = Math.max(shortPut - longPut, longCall - shortCall, tickStep);
       $('creditReceived').value = (wing * 0.2).toFixed(2);
     }

@@ -365,6 +365,13 @@ def _empty_payload(
 
 
 def _summarize_engine1(e1: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compact Engine-1 summary for the Engine-15 scan card grid.
+
+    Mirrors the data Engine 1's UI surfaces so the desk sees the same
+    numbers they'd see on /breach — ORATS EM (EOD + 15-min delayed),
+    straddle EM (upcoming Friday expiry), 1x/1.5x/2x strike targets,
+    regime/event-risk chips, and breach summary.
+    """
     if not e1:
         return {}
     current = e1.get("current") or {}
@@ -372,23 +379,96 @@ def _summarize_engine1(e1: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     dc = e1.get("deskConsensus") or {}
     em_breach = e1.get("emBreachSummary") or {}
     next_event = e1.get("nextEvent") or {}
+    expected_move = e1.get("expectedMove") or {}
+    strike_targets = e1.get("strikeTargets") or {}
+    regime = e1.get("regime") or {}
+    event_risk = e1.get("eventRisk") or {}
+    summary = e1.get("summary") or {}
+
     em_pct = current.get("impliedMovePct")
     em_pct_source = "live"
     if em_pct is None:
         em_pct = current.get("delayedImpliedMovePct")
         if em_pct is not None:
             em_pct_source = "delayed"
+
+    # Breach summary can arrive either as a simple float map keyed
+    # by EM multiple ("1.0": 0.0, ...) from compute_earnings_width_comparison,
+    # or as a dict with breachRatePct/n keys from older callsites. Support
+    # both so the UI can always render a headline "n-ratio breach" number.
+    breach_rate_1x: Optional[float] = None
+    breach_rate_15x: Optional[float] = None
+    breach_rate_2x: Optional[float] = None
+    try:
+        if isinstance(em_breach, dict):
+            if "1.0" in em_breach:
+                breach_rate_1x = float(em_breach.get("1.0"))
+            if "1.5" in em_breach:
+                breach_rate_15x = float(em_breach.get("1.5"))
+            if "2.0" in em_breach:
+                breach_rate_2x = float(em_breach.get("2.0"))
+    except Exception:
+        pass
+    breach_rate_fallback = em_breach.get("breachRatePct") if isinstance(em_breach, dict) else None
+
     return {
+        # --- Core anchors ---
+        "ticker": e1.get("ticker"),
+        "stockPrice": current.get("stockPrice"),
+        "asOfDate": current.get("asOfDate"),
         "vrpScore": vrp.get("vrpScore"),
         "ivElevation": vrp.get("ivElevation"),
+        "deskConsensus": dc.get("consensus") or dc.get("verdict"),
+        "deskConsensusScore": dc.get("score"),
+        "historyN": len(e1.get("events") or []),
+        "eventsUsed": summary.get("events_used"),
+        "eventsFound": summary.get("events_found"),
+        # --- ORATS EM (impErnMv) — EOD + 15-min delayed ---
+        "oratsEmPct": current.get("impliedMovePct"),
+        "oratsEmAsOf": current.get("asOfDate"),
+        "oratsEmSource": current.get("source"),
+        "delayedEmPct": current.get("delayedImpliedMovePct"),
+        "delayedUpdatedAt": current.get("delayedUpdatedAt"),
+        "delayedTradeDate": current.get("delayedTradeDate"),
+        # Headline EM the UI renders — prefers live, falls back to delayed.
         "emPct": em_pct,
         "emPctSource": em_pct_source,
-        "stockPrice": current.get("stockPrice"),
+        # --- Straddle EM (upcoming Friday expiry) ---
+        "straddleEmPct": expected_move.get("expectedMovePct"),
+        "straddleEmDollars": expected_move.get("expectedMoveDollars"),
+        "straddleExpiry": expected_move.get("expiry"),
+        "straddleSource": expected_move.get("source"),
+        "straddleDte": expected_move.get("dte"),
+        "straddleSpotPrice": expected_move.get("spotPrice"),
+        # --- Strike Targets (1x/1.5x/2x wing distances as % of spot) ---
+        "strikeTargets": {
+            "whitePct": strike_targets.get("whitePct"),
+            "bluePct": strike_targets.get("bluePct"),
+            "redPct": strike_targets.get("redPct"),
+            "whitePts": strike_targets.get("whitePts"),
+            "bluePts": strike_targets.get("bluePts"),
+            "redPts": strike_targets.get("redPts"),
+            "emSource": strike_targets.get("emSource"),
+            "basedOnEmPct": strike_targets.get("basedOnEmPct"),
+            "basedOnSpot": strike_targets.get("basedOnSpot"),
+        } if strike_targets else None,
+        # --- Next event (with Friday-expiry fallback) ---
         "anncTod": next_event.get("anncTod") or next_event.get("timing") or next_event.get("timingPlanned"),
         "nextEventDate": next_event.get("earnDate") or next_event.get("date") or next_event.get("earnDateNext"),
-        "deskConsensus": dc.get("consensus") or dc.get("verdict"),
-        "emBreachPct": em_breach.get("breachRatePct") or em_breach.get("breachPct"),
-        "historyN": len(e1.get("events") or []),
+        "nextEventPricingExpiry": next_event.get("pricingExpiry"),
+        "nextEventSource": next_event.get("source"),
+        "nextEventConfidence": next_event.get("confidence"),
+        # --- Regime / event risk chips ---
+        "regimeLabel": regime.get("label"),
+        "regimeTailMultiplier": regime.get("tailMultiplier"),
+        "eventRiskLabel": event_risk.get("label"),
+        # --- Breach summary (supports both float-map and legacy dict shape) ---
+        "emBreachRate1xPct": breach_rate_1x if breach_rate_1x is not None else breach_rate_fallback,
+        "emBreachRate15xPct": breach_rate_15x,
+        "emBreachRate2xPct": breach_rate_2x,
+        "emBreachN": summary.get("events_used"),
+        # Back-compat fields (older callers).
+        "emBreachPct": em_breach.get("breachRatePct") or em_breach.get("breachPct") if isinstance(em_breach, dict) else None,
     }
 
 

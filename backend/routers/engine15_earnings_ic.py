@@ -87,84 +87,173 @@ def _norm_ticker(body: Dict[str, Any]) -> str:
 
 
 def _discover_next_event(
-    client, *, ticker: str, current: Dict[str, Any]
+    client, *, ticker: str, payload: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
-    """Lightweight ``nextEvent`` probe — no Monte Carlo, no Benzinga.
+    """Resolve the forward earnings event for Engine 15.
 
-    Engine 1's ``compute_breach_stats`` only populates ``nextEvent`` when
-    ``ENABLE_MONTE_CARLO_EARNINGS`` is True (the whole block lives inside
-    that conditional). Engine 15 needs this field for UI prefill regardless
-    of whether the MC branch is enabled, so we re-implement a minimal
-    discovery path that calls ORATS ``/cores`` (snapshot) directly for the
-    ``nextErn`` / ``nextErnTod`` fields and blends in the ``current``
-    delayed-vs-live implied move data E1 already fetched.
+    Resolution ladder:
 
-    Returns ``None`` if ORATS has no forward earnings date in its snapshot
-    (caller falls back to manual user input in the UI).
+    1. Trust ORATS ``/cores`` ``nextErn`` when it publishes a plausible date
+       (parses, within +180d / -10d).
+    2. Fall back to the **upcoming Friday expiry** already computed by Engine 1
+       under ``payload.expectedMove`` — the same chain E1 uses for its
+       straddle-EM / strike-target math. The desk only routes single-name
+       earnings trades to this engine when the ticker reports that week, so
+       "that week's Friday expiry" is always the correct reference chain.
+       We derive the likely earnings date via the quarterly cadence of the
+       most recent prior event (``events[0].earnDate`` + ~91 days).
+
+    Returns ``None`` only if *both* ladders produce nothing — callers then
+    leave ``nextEvent`` empty and the UI falls back to manual entry.
     """
+    import datetime as _dt
     from backend.earnings_logic import classify_timing
 
+    current = payload.get("current") or {}
+    expected_move = payload.get("expectedMove") or {}
+    events = payload.get("events") or []
+
+    # --- 1. ORATS nextErn (primary) -------------------------------------
+    next_date_orats: Optional[str] = None
+    raw_tod_orats: Any = None
+    days_orats: Any = None
     try:
         snap = client.cores(
             ticker=ticker,
             fields="ticker,tradeDate,stockPrice,impErnMv,nextErn,nextErnTod,daysToNextErn",
         )
         rows = getattr(snap, "rows", None) or []
+        if rows:
+            row = rows[0] or {}
+            cand = str(row.get("nextErn") or "").strip()[:10]
+            if cand and cand not in ("0000-00-00", "1970-01-01"):
+                try:
+                    parsed = _dt.date.fromisoformat(cand)
+                    today = _dt.date.today()
+                    if (today - parsed).days <= 10 and (parsed - today).days <= 180:
+                        next_date_orats = cand
+                        raw_tod_orats = row.get("nextErnTod")
+                        days_orats = row.get("daysToNextErn")
+                except ValueError:
+                    pass
     except Exception as e:
         LOG.debug("cores snapshot failed for %s: %s", ticker, e)
-        return None
-    if not rows:
-        return None
-    row = rows[0] or {}
-    next_date = str(row.get("nextErn") or "").strip()[:10]
-    # ORATS occasionally returns sentinel "0000-00-00" or out-of-range
-    # placeholders when no forward earnings date has been published.
-    # Validate the date parses and is in the future before accepting it.
-    import datetime as _dt
-    valid = False
-    parsed_next: Optional[_dt.date] = None
-    if next_date and next_date not in ("0000-00-00", "1970-01-01"):
+
+    # --- 2. Friday-expiry fallback --------------------------------------
+    # Engine 1's ``expectedMove.expiry`` is the near-dated Friday the
+    # straddle-EM was computed against. When ORATS' earnings-date feed is
+    # stale or missing, this is the chain the desk actually cares about.
+    friday_expiry = str(expected_move.get("expiry") or "").strip()[:10]
+
+    em_live = current.get("impliedMovePct")
+    em_delayed = current.get("delayedImpliedMovePct")
+    em_straddle_pct = expected_move.get("expectedMovePct")
+    em_straddle_dollars = expected_move.get("expectedMoveDollars")
+
+    if next_date_orats:
+        timing = classify_timing(raw_tod_orats) if raw_tod_orats is not None else "UNK"
+        em_pct = None
+        if em_live is not None:
+            em_pct = float(em_live)
+            em_src = "orats_snapshot_live"
+        elif em_delayed is not None:
+            em_pct = float(em_delayed)
+            em_src = "orats_snapshot_delayed"
+        elif em_straddle_pct is not None:
+            em_pct = float(em_straddle_pct)
+            em_src = "straddle_em"
+        else:
+            em_src = "none"
         try:
-            parsed_next = _dt.date.fromisoformat(next_date)
-            today = _dt.date.today()
-            # Accept dates up to 120 days in the future (covers quarterly
-            # pre-announcements) and ~10 days in the past (just-announced).
-            if (today - parsed_next).days <= 10 and (parsed_next - today).days <= 180:
-                valid = True
+            days = int(days_orats) if days_orats is not None else None
+        except Exception:
+            days = None
+        return {
+            "earnDateNext": next_date_orats,
+            "timingPlanned": timing,
+            "anncTod": None if raw_tod_orats is None else str(raw_tod_orats),
+            "daysToNext": days,
+            "impliedMovePctPlanned": em_pct,
+            "impliedMoveSource": em_src,
+            "pricingExpiry": friday_expiry or None,
+            "source": "orats_snapshot",
+            "confidence": "HIGH" if timing in ("BMO", "AMC") else "MED",
+            "notes": [],
+        }
+
+    # ORATS didn't give us a usable earnings date. Use Engine 1's
+    # ``expectedMove.expiry`` as the pricing reference and infer the likely
+    # earnings date from the most recent quarter's anchor.
+    if not friday_expiry:
+        return None
+
+    # Cadence from events[0] — most recent prior earnings + ~91 days.
+    inferred_date: Optional[str] = None
+    timing_inferred = "UNK"
+    if events:
+        try:
+            last = events[0] or {}
+            anchor = str(last.get("earnDate") or "").strip()[:10]
+            if anchor:
+                d = _dt.date.fromisoformat(anchor)
+                # Walk forward in 91-day steps until we land within the next
+                # 10 days-earlier-to-45-days-later of today (covers early or
+                # late quarterly reporters).
+                today = _dt.date.today()
+                for step in range(1, 9):
+                    guess = d + _dt.timedelta(days=91 * step)
+                    if (guess - today).days <= 45 and (today - guess).days <= 10:
+                        inferred_date = guess.isoformat()
+                        break
+            tl = str(last.get("timing") or "").strip().upper()
+            if tl in ("BMO", "AMC"):
+                timing_inferred = tl
+            else:
+                timing_inferred = classify_timing(last.get("anncTod")) or "UNK"
+        except Exception:
+            pass
+
+    # If cadence inference produced nothing sensible, bias the earnings
+    # date to the business day before the Friday expiry (Thursday-PM /
+    # Friday-AM coverage), which is where most earnings weeks land.
+    if not inferred_date:
+        try:
+            fri = _dt.date.fromisoformat(friday_expiry)
+            # Earnings typically land Mon-Thu AM or Wed-Thu PM of the same
+            # week; use Wednesday of the expiry's week as a placeholder so
+            # the UI prefills something reasonable the desk can adjust.
+            # (Friday - 2 business days = Wednesday.)
+            inferred_date = (fri - _dt.timedelta(days=2)).isoformat()
         except ValueError:
             pass
-    if not valid:
-        return None
-    raw_tod = row.get("nextErnTod")
-    timing = classify_timing(raw_tod) if raw_tod is not None else "UNK"
-    # Pull implied-move — prefer the current delayed-fallback EM so the UI
-    # doesn't render as "missing" pre-market.
-    em_pct = None
-    try:
-        v = current.get("impliedMovePct")
-        if v is None:
-            v = current.get("delayedImpliedMovePct")
-        if v is not None:
-            em_pct = float(v)
-    except Exception:
-        em_pct = None
-    days = row.get("daysToNextErn")
-    try:
-        days = int(days) if days is not None else None
-    except Exception:
-        days = None
+
+    em_pct: Optional[float] = None
+    em_src = "none"
+    if em_delayed is not None:
+        em_pct = float(em_delayed)
+        em_src = "orats_delayed"
+    elif em_straddle_pct is not None:
+        em_pct = float(em_straddle_pct)
+        em_src = "straddle_em"
+    elif em_live is not None:
+        em_pct = float(em_live)
+        em_src = "orats_live"
+
     return {
-        "earnDateNext": next_date,
-        "timingPlanned": timing,
-        "anncTod": None if raw_tod is None else str(raw_tod),
-        "daysToNext": days,
+        "earnDateNext": inferred_date,
+        "timingPlanned": timing_inferred,
+        "anncTod": None,
+        "daysToNext": None,
         "impliedMovePctPlanned": em_pct,
-        "impliedMoveSource": (
-            "orats_snapshot_live" if (current.get("impliedMovePct") is not None) else "orats_snapshot_delayed"
-        ),
-        "source": "orats_snapshot",
-        "confidence": "HIGH" if timing in ("BMO", "AMC") else "MED",
-        "notes": [],
+        "impliedMoveSource": em_src,
+        "pricingExpiry": friday_expiry,
+        "source": "friday_expiry_fallback",
+        "confidence": "MED" if timing_inferred in ("BMO", "AMC") else "LOW",
+        "notes": [
+            "ORATS nextErn was missing or stale; Engine 15 derived the next "
+            "event from the upcoming Friday expiry (Engine 1's expectedMove "
+            "chain). Confirm the earnings date manually before trading."
+        ],
     }
 
 
@@ -238,7 +327,7 @@ def _run_engine1(ticker: str, *, n: int = 20, years: int = 5, k: float = 1.0) ->
     # the same snapshot that Engine 1's MC branch consults. This keeps the
     # scan lightweight (one extra /cores call, no MC simulation latency).
     try:
-        next_event = _discover_next_event(client, ticker=ticker, current=current)
+        next_event = _discover_next_event(client, ticker=ticker, payload=payload)
         if next_event:
             # Honor Engine 1 if it already populated nextEvent (MC flag on).
             existing = payload.get("nextEvent") or {}
@@ -317,9 +406,20 @@ def earnings_ic_scan(body: Dict[str, Any] = Body(default_factory=dict)) -> Dict[
     except Exception:
         coverage = {"ticker": ticker, "daysCovered": 0}
 
+    # Provide a flat Engine-1 summary alongside the raw payload so the UI
+    # can render E1-parity cards (ORATS EM + straddle EM + strike targets)
+    # without each frontend having to re-implement the dig-through logic.
+    try:
+        from backend.engine15.simulator import _summarize_engine1
+        summary = _summarize_engine1(payload)
+    except Exception as e:
+        LOG.debug("engine1Summary build failed for %s: %s", ticker, e)
+        summary = {}
+
     return {
         "ticker": ticker,
         "engine1": payload,
+        "engine1Summary": summary,
         "chainCoverage": coverage,
         "generatedAt": dt.datetime.now(dt.timezone.utc).replace(tzinfo=None).isoformat() + "Z",
     }
