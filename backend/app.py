@@ -28,6 +28,7 @@ from backend.routers import (
     engine12_vix_fade,
     engine13_gap_regime,
     engine14_ic_scenario,
+    engine15_earnings_ic,
     calendar,
     market_intel,
     front_layer,
@@ -355,6 +356,14 @@ def ic_scenario_page():
     return FileResponse(str(STATIC_DIR / "ic-scenario.html"))
 
 
+@app.get("/earnings-ic")
+def earnings_ic_page():
+    fl = get_flags()
+    if not getattr(fl, "ENABLE_ENGINE15_EARNINGS_IC", False):
+        raise HTTPException(status_code=404, detail="Engine 15 disabled")
+    return FileResponse(str(STATIC_DIR / "earnings-ic.html"))
+
+
 @app.get("/compare")
 def serve_compare():
     return FileResponse(str(STATIC_DIR / "compare.html"))
@@ -378,6 +387,7 @@ app.include_router(engine9_credit.router)
 app.include_router(engine12_vix_fade.router)
 app.include_router(engine13_gap_regime.router)
 app.include_router(engine14_ic_scenario.router)
+app.include_router(engine15_earnings_ic.router)
 app.include_router(calendar.router)
 app.include_router(market_intel.router)
 app.include_router(front_layer.router)

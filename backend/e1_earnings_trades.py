@@ -307,8 +307,16 @@ def compute_e1_trade_performance_digest(
     Unlike Engine 2 (always SPX), Engine 1 trades different names each time.
     The digest buckets by profile characteristics that transfer across tickers:
     VRP score bucket, breach rate bucket, EM, wing, AMC/BMO timing, regime.
+
+    Engine 15 trades (source="engine15") are excluded: they live in the same
+    Redis namespace for convenience but have a different entry schema (no
+    ``emMultiple`` / ``wingWidth`` in the E1 sense), and mixing them would
+    pollute the E1 learning journal's cross-ticker buckets.
     """
-    closed = list_closed_trades(store=store, limit=100)
+    closed = [
+        t for t in list_closed_trades(store=store, limit=200)
+        if str(t.get("source") or "").lower() != "engine15"
+    ][:100]
     if not closed:
         return {"totalClosed": 0, "hasData": False}
 
@@ -591,6 +599,86 @@ def compute_e1_trade_performance_digest(
         "streakInfo": streak_info,
         "vrpCalibration": vrp_calibration,
         "breachCalibrationByEm": breach_calibration,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Engine 15 digest — compact, separate from E1's cross-ticker buckets.
+# ---------------------------------------------------------------------------
+
+def compute_e15_trade_performance_digest(
+    store: Optional[RedisStore] = None,
+) -> Dict[str, Any]:
+    """Aggregate closed Engine 15 (earnings-IC scenario) trades.
+
+    Engine 15 trades carry ``source="engine15"`` and a different entry
+    schema: strikes on the wings, planned-exit date + hours, and an
+    attached scenario snapshot under ``entryContext.engine15Scenario``.
+    We compute a compact digest the E15 advisor / UI can read to show
+    the user how their sim calibrates against actual outcomes across
+    names.
+    """
+    closed = [
+        t for t in list_closed_trades(store=store, limit=400)
+        if str(t.get("source") or "").lower() == "engine15"
+    ]
+    if not closed:
+        return {"totalClosed": 0, "hasData": False}
+
+    pnl_list: List[float] = []
+    wins = losses = scratches = 0
+    by_timing: Dict[str, List[float]] = {}
+    sim_error_pp: List[float] = []
+    by_ticker: Dict[str, List[float]] = {}
+
+    for t in closed:
+        outcome = t.get("outcome") or {}
+        oc = outcome.get("outcomeClass")
+        if oc == "win":
+            wins += 1
+        elif oc == "loss":
+            losses += 1
+        elif oc == "scratch":
+            scratches += 1
+        pnl = outcome.get("realizedPnl")
+        if pnl is not None:
+            pnl_list.append(float(pnl))
+        entry = t.get("entry") or {}
+        timing = str(entry.get("earningsTiming") or "UNK").upper()
+        if pnl is not None:
+            by_timing.setdefault(timing, []).append(float(pnl))
+            by_ticker.setdefault(str(t.get("ticker") or "?"), []).append(float(pnl))
+        # Calibration: compare actual realized P&L % to sim's meanPnlPct if available.
+        ctx = t.get("entryContext") or {}
+        scenario = ctx.get("engine15Scenario") or {}
+        ev = scenario.get("expectedValue") or {}
+        sim_mean = ev.get("meanPnlPct")
+        actual = outcome.get("pnlPct")
+        if (sim_mean is not None) and (actual is not None):
+            try:
+                sim_error_pp.append(float(actual) - float(sim_mean))
+            except (TypeError, ValueError):
+                pass
+
+    def _stats(xs: List[float]) -> Dict[str, Any]:
+        if not xs:
+            return {"n": 0}
+        return {
+            "n": len(xs),
+            "mean": round(statistics.mean(xs), 3),
+            "median": round(statistics.median(xs), 3),
+        }
+
+    return {
+        "totalClosed": len(closed),
+        "hasData": True,
+        "wins": wins, "losses": losses, "scratches": scratches,
+        "winRatePct": round((wins / len(closed)) * 100.0, 1) if closed else 0.0,
+        "avgPnl": _stats(pnl_list).get("mean"),
+        "medianPnl": _stats(pnl_list).get("median"),
+        "byTiming": {k: _stats(v) for k, v in by_timing.items()},
+        "byTicker": {k: _stats(v) for k, v in by_ticker.items() if len(v) >= 2},
+        "simErrorPP": _stats(sim_error_pp),  # (actual - predicted) in pp, mean/median/n
     }
 
 

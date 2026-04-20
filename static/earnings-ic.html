@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Engine 15 — Earnings IC Scenario | Raven-Tech.co</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="Raven-Tech.co — Engine 15: single-name earnings IC scenario simulator blending Engine 1 earnings data with Engine 14 style historical replay." />
+    <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=10" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <style>
+      .e15Grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 18px; }
+      .e15Card {
+        padding: 14px; border-radius: var(--radius-card);
+        border: 1px solid var(--border); background: var(--surfaceSolid);
+      }
+      .e15CardLabel {
+        font-size: 11px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.05em; color: var(--muted); margin-bottom: 6px;
+      }
+      .e15CardValue {
+        font-size: 22px; font-weight: 900;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: var(--text); line-height: 1.2;
+      }
+      .e15CardCaption { font-size: 11px; color: var(--muted); font-weight: 500; margin-top: 4px; line-height: 1.4; }
+
+      .e15Divider {
+        font-size: 11px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.06em; color: var(--muted);
+        margin: 24px 0 12px; padding-bottom: 6px;
+        border-bottom: 1px solid var(--border);
+        display: flex; align-items: center; gap: 8px;
+      }
+      .e15Divider > .e15DividerText { flex: 1 1 auto; min-width: 0; }
+
+      .e15Form { background: var(--surfaceSolid); border: 1px solid var(--border);
+        border-radius: var(--radius-card); padding: 18px; margin-bottom: 18px; }
+      .e15FormGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+      .e15FieldGroup { display: flex; flex-direction: column; gap: 10px; }
+      .e15FieldGroupLabel {
+        font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+        text-transform: uppercase; color: var(--muted);
+      }
+      .e15Field { display: flex; flex-direction: column; gap: 4px; }
+      .e15Field label { font-size: 11px; color: var(--muted); font-weight: 600; }
+      .e15Field input, .e15Field select {
+        padding: 8px 10px; border: 1px solid var(--border);
+        border-radius: 8px; background: var(--surfaceSolid);
+        color: var(--text); font-family: inherit; font-size: 14px;
+      }
+      .e15FormActions { margin-top: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+      .e15Outcomes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px; }
+      @media (max-width: 800px) { .e15Outcomes { grid-template-columns: repeat(2, 1fr); } }
+      .e15OutcomeCard {
+        padding: 14px; border-radius: var(--radius-card);
+        border: 1px solid var(--border); background: var(--surfaceSolid);
+        text-align: center;
+      }
+      .e15OutcomeCard.dominant { border-color: var(--blue); border-width: 2px; }
+      .e15OutcomeName {
+        font-size: 10px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.05em; color: var(--muted); margin-bottom: 6px;
+      }
+      .e15OutcomePct {
+        font-size: 24px; font-weight: 900;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        line-height: 1.2;
+      }
+      .e15OutcomeBar { height: 4px; border-radius: 2px; background: var(--line); margin-top: 10px; overflow: hidden; }
+      .e15OutcomeBarFill { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
+      .e15OutcomeMeta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+      .e15Banner {
+        padding: 12px 14px; border-radius: var(--radius-card);
+        background: rgba(217,119,6,0.08); color: #92400e;
+        border: 1px solid rgba(217,119,6,0.3);
+        margin-bottom: 14px; font-size: 13px;
+      }
+      .e15Banner.error { background: rgba(220,38,38,0.08); color: #b91c1c; border-color: rgba(220,38,38,0.3); }
+      .e15Banner.success { background: rgba(22,163,74,0.08); color: #15803d; border-color: rgba(22,163,74,0.3); }
+
+      .e15Caveat { background: rgba(0,122,255,0.06); border: 1px solid rgba(0,122,255,0.25);
+        border-radius: 10px; padding: 10px 12px; font-size: 12px; color: var(--text); line-height: 1.5; margin-bottom: 10px; }
+
+      .e15Table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      .e15Table th, .e15Table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: right; }
+      .e15Table th:first-child, .e15Table td:first-child { text-align: left; }
+      .e15Table thead th { font-weight: 700; color: var(--muted); text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; }
+      .e15Table td.win { color: #15803d; }
+      .e15Table td.loss { color: #b91c1c; }
+
+      .e15NoteList { list-style: none; padding: 0; margin: 0; font-size: 12px; color: var(--text); }
+      .e15NoteList li { padding: 6px 0; border-bottom: 1px dashed var(--border); line-height: 1.4; }
+      .e15NoteList li:last-child { border-bottom: none; }
+
+      .e15ChipRow { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+      .e15Chip {
+        padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+        border: 1px solid var(--border); background: var(--surfaceSolid); color: var(--muted);
+      }
+      .e15Chip.tailwind { background: rgba(22,163,74,0.1); color: #15803d; border-color: rgba(22,163,74,0.3); }
+      .e15Chip.headwind { background: rgba(220,38,38,0.1); color: #b91c1c; border-color: rgba(220,38,38,0.3); }
+      .e15Chip.neutral { background: var(--hover); }
+
+      .e15SectionSubtle { font-size: 11px; color: var(--muted); margin-top: -8px; margin-bottom: 10px; }
+
+      .e15BackfillBox { background: var(--hover); border: 1px dashed var(--border); border-radius: 10px;
+        padding: 10px 12px; font-size: 12px; color: var(--text); margin-top: 10px; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/RavenONLY.png" alt="Raven-Tech.co" />
+          <div class="appHeaderText">
+            <div class="appTitle">Raven-Tech.co</div>
+            <div class="appSubtitle">Engine 15 — Earnings IC Scenario Simulator</div>
+          </div>
+        </div>
+      </header>
+
+      <div id="banner" class="e15Banner" style="display:none;"></div>
+
+      <!-- Step 1: Ticker scan -->
+      <form id="scanForm" class="e15Form" aria-label="Ticker Scan">
+        <div class="e15FormGrid">
+          <div class="e15FieldGroup">
+            <div class="e15FieldGroupLabel">Step 1 — Ticker Scan</div>
+            <div class="e15Field">
+              <label for="ticker">Ticker</label>
+              <input type="text" id="ticker" placeholder="GE" maxlength="10" required style="text-transform:uppercase;" />
+            </div>
+            <div class="e15Field">
+              <label for="historyN">History events (max)</label>
+              <input type="number" id="historyN" min="4" max="40" value="20" />
+            </div>
+          </div>
+          <div class="e15FieldGroup">
+            <div class="e15FieldGroupLabel">&nbsp;</div>
+            <div class="e15Field">
+              <label>&nbsp;</label>
+              <button type="submit" id="scanBtn" class="primaryButton">Run Engine 1 Scan</button>
+            </div>
+            <div class="e15Field">
+              <div id="scanStatus" class="status">Ready</div>
+            </div>
+          </div>
+        </div>
+      </form>
+
+      <div id="e1Summary" class="hidden">
+        <div class="e15Divider" data-explain="e1_summary_strip"><span class="e15DividerText">Engine 1 Summary</span></div>
+        <div id="e1Cards" class="e15Grid"></div>
+        <div id="coverageBox" class="e15BackfillBox" style="display:none;"></div>
+      </div>
+
+      <!-- Step 2: Wings + planned-exit -->
+      <form id="scenarioForm" class="e15Form hidden" aria-label="Engine 15 Controls">
+        <div class="e15FormGrid">
+          <div class="e15FieldGroup">
+            <div class="e15FieldGroupLabel">Trade Window</div>
+            <div class="e15Field">
+              <label for="entryDate">Entry Date</label>
+              <input type="date" id="entryDate" required />
+            </div>
+            <div class="e15Field">
+              <label for="expiry">Expiry</label>
+              <input type="date" id="expiry" required />
+            </div>
+            <div class="e15Field">
+              <label for="creditReceived">Credit Received</label>
+              <input type="number" id="creditReceived" step="0.05" min="0" placeholder="1.20" required />
+            </div>
+          </div>
+
+          <div class="e15FieldGroup">
+            <div class="e15FieldGroupLabel">Earnings</div>
+            <div class="e15Field">
+              <label for="earningsDate">Earnings Date</label>
+              <input type="date" id="earningsDate" required />
+            </div>
+            <div class="e15Field">
+              <label for="earningsTiming">Timing</label>
+              <select id="earningsTiming">
+                <option value="BMO">BMO (Before open)</option>
+                <option value="AMC">AMC (After close)</option>
+                <option value="UNK">UNK (unknown)</option>
+              </select>
+            </div>
+            <div class="e15Field">
+              <label for="plannedExitDate">Planned Exit Date</label>
+              <input type="date" id="plannedExitDate" required />
+            </div>
+            <div class="e15Field">
+              <label for="plannedExitOffsetHours">Planned Exit (hours after open)</label>
+              <select id="plannedExitOffsetHours">
+                <option value="0.5">~30 min after open</option>
+                <option value="1.5" selected>~1.5 hr after open</option>
+                <option value="2.5">~2.5 hr after open</option>
+                <option value="4">~4 hr after open</option>
+                <option value="6.5">close</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="e15FieldGroup">
+            <div class="e15FieldGroupLabel">Strikes</div>
+            <div class="e15Field">
+              <label for="longPut">Long Put</label>
+              <input type="number" id="longPut" step="1" required />
+            </div>
+            <div class="e15Field">
+              <label for="shortPut">Short Put</label>
+              <input type="number" id="shortPut" step="1" required />
+            </div>
+            <div class="e15Field">
+              <label for="shortCall">Short Call</label>
+              <input type="number" id="shortCall" step="1" required />
+            </div>
+            <div class="e15Field">
+              <label for="longCall">Long Call</label>
+              <input type="number" id="longCall" step="1" required />
+            </div>
+          </div>
+
+          <div class="e15FieldGroup">
+            <div class="e15FieldGroupLabel">Exit Rules</div>
+            <div class="e15Field">
+              <label for="profitTargetPct">Profit Target %</label>
+              <input type="number" id="profitTargetPct" step="5" value="50" min="10" max="100" />
+            </div>
+            <div class="e15Field">
+              <label for="stopLossPct">Stop Loss %</label>
+              <input type="number" id="stopLossPct" step="25" value="150" min="50" max="500" />
+            </div>
+            <div class="e15Field">
+              <label for="seasonMode">Season</label>
+              <select id="seasonMode">
+                <option value="none">All</option>
+                <option value="quarter">Same quarter only</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="e15FormActions">
+          <button type="submit" id="runBtn" class="primaryButton">Run Scenario</button>
+          <button type="button" id="backfillBtn" class="primaryButton" style="background:var(--muted);">Warm cache (admin)</button>
+          <span id="runStatus" class="status">Ready</span>
+        </div>
+      </form>
+
+      <div class="results hidden" id="results">
+
+        <div class="e15Divider" data-explain="entry_state"><span class="e15DividerText">Entry State</span></div>
+        <div id="entryCards" class="e15Grid"></div>
+
+        <div class="e15Divider" data-explain="planned_exit_timing"><span class="e15DividerText">Planned Exit Timing</span></div>
+        <div id="plannedExitCaveat" class="e15Caveat"></div>
+        <div id="plannedExitCards" class="e15Grid"></div>
+
+        <div class="e15Divider" data-explain="planned_exit_outcome"><span class="e15DividerText">Outcome Distribution</span></div>
+        <div id="outcomePanel" class="e15Outcomes"></div>
+
+        <div class="e15Divider" id="adjustedDividerLabel" data-explain="conditioning_summary" style="display:none;"><span class="e15DividerText">Adjusted Distribution <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500;">(after earnings conditioning)</span></span></div>
+        <div id="conditioningSummary" class="e15Caveat" style="display:none;"></div>
+        <div id="adjustedOutcomePanel" class="e15Outcomes" style="display:none;"></div>
+
+        <div class="e15Divider" id="modifiersDivider" data-explain="conditioning_summary" style="display:none;"><span class="e15DividerText">Conditioning Modifiers</span></div>
+        <div id="modifiersPanel" class="e15Grid" style="display:none;"></div>
+
+        <div class="e15Divider" data-explain="planned_exit_outcome"><span class="e15DividerText">MTM Timeline (P10 / P50 / P90)</span></div>
+        <div style="background:var(--surfaceSolid);border:1px solid var(--border);border-radius:var(--radius-card);padding:12px;">
+          <canvas id="mtmChart" height="220"></canvas>
+        </div>
+
+        <div class="e15Divider" data-explain="vrp_crush_verdict"><span class="e15DividerText">Expected Value</span></div>
+        <div id="evPanel" class="e15Grid"></div>
+
+        <div class="e15Divider" data-explain="exit_rules_card"><span class="e15DividerText">Exit Rules (Planned Hold)</span></div>
+        <div id="exitRulesPanel" class="e15Grid"></div>
+
+        <div class="e15Divider"><span class="e15DividerText">Matched Events</span></div>
+        <div id="matchedEventsWrap"></div>
+
+        <div class="e15Divider" id="droppedDivider" style="display:none;"><span class="e15DividerText">Dropped Events</span></div>
+        <div id="droppedEventsWrap" style="display:none;"></div>
+
+        <div class="e15Divider"><span class="e15DividerText">Notes &amp; Caveats</span></div>
+        <ul id="notesList" class="e15NoteList"></ul>
+
+        <div class="e15Divider"><span class="e15DividerText">Actions</span></div>
+        <div class="e15Card">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <button type="button" id="journalBtn" class="primaryButton">Log to Journal</button>
+            <button type="button" id="advisorBtn" class="primaryButton" style="background:var(--blue);">Run LLM Advisor</button>
+            <button type="button" id="reconcileBtn" class="primaryButton" style="background:var(--muted);">Reconcile vs Live</button>
+          </div>
+          <div id="actionStatus" class="e15SectionSubtle" style="margin-top:10px;">&nbsp;</div>
+          <div id="advisorPanel" style="margin-top:14px;"></div>
+        </div>
+      </div>
+
+    </main>
+
+    <script src="/static/ui_kit.js?v=4"></script>
+    <script src="/static/nav.js"></script>
+    <script src="/static/earnings-ic.js?v=1"></script>
+  </body>
+</html>

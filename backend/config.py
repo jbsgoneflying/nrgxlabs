@@ -408,6 +408,32 @@ class FeatureFlags:
     ENGINE14_ENABLE_SIZING: bool = True
     ENGINE14_ENABLE_GREEKS_ATTRIBUTION: bool = True
 
+    # --- Engine 15: Earnings IC Scenario Simulator ---
+    # Blends Engine 1's single-name earnings data with Engine 14's replay
+    # machinery. Analogue pool = this ticker's prior earnings events; exit
+    # is a planned date + time-of-day (not expiry). Reuses the existing
+    # engine14 chain cache schema (ticker-keyed) — no new DB file.
+    ENABLE_ENGINE15_EARNINGS_IC: bool = False
+    ENGINE15_CACHE_TTL_SCAN: int = 10 * 60            # request-level TTL
+    ENGINE15_MIN_EVENTS: int = 8                       # min event pool to return a payload
+    ENGINE15_MAX_EVENTS: int = 20
+    ENGINE15_EVENT_BACKFILL_DAYS_BEFORE: int = 1       # biz days before earnDate to cache
+    ENGINE15_EVENT_BACKFILL_DAYS_AFTER: int = 2        # biz days after earnDate to cache
+    ENGINE15_FILL_MODEL: str = "nbbo"                 # mid|nbbo|mid_penalty
+    ENGINE15_FILL_PENALTY_PCT: float = 15.0
+    ENGINE15_STRIKE_SNAP_MAX_PTS: float = 2.5          # single names use tighter snap than SPX
+    ENGINE15_DEFAULT_PROFIT_TARGET_PCT: float = 50.0
+    ENGINE15_DEFAULT_STOP_LOSS_PCT: float = 150.0
+    ENGINE15_INTRADAY_CRUSH_FACTOR: float = 0.80       # EOD-close -> ~10:30AM exit approximation
+    ENGINE15_ENABLE_CONDITIONING: bool = True
+    ENGINE15_ADMIN_TOKEN: str = ""
+    ENGINE15_BACKFILL_DELAY_MS: int = 200              # throttle between ORATS calls during backfill
+    ENGINE15_MAX_EXPIRY_OFFSET_DAYS: int = 4           # tolerance when matching analogue expiries
+    ENGINE15_EM_MULTIPLE_TOL: float = 0.35             # sigma tol on short-strike placement
+    ENGINE15_ENABLE_EM_MULTIPLE_FILTER: bool = False
+    ENGINE15_ADVISOR_ENABLED: bool = True
+    ENGINE15_ADVISOR_MODEL: str = "gpt-5.4"
+
     # --- Gating (Engine 3 & 4) ---
     ENABLE_GATING: bool = True
     GATE_RD_REGIME_ALLOW: str = "Transitional,Stressed"
@@ -708,6 +734,28 @@ class FeatureFlags:
             ENGINE14_PER_DTE_EXITS=_get_bool("ENGINE14_PER_DTE_EXITS", True),
             ENGINE14_ENABLE_SIZING=_get_bool("ENGINE14_ENABLE_SIZING", True),
             ENGINE14_ENABLE_GREEKS_ATTRIBUTION=_get_bool("ENGINE14_ENABLE_GREEKS_ATTRIBUTION", True),
+
+            # --- Engine 15 ---
+            ENABLE_ENGINE15_EARNINGS_IC=_get_bool("ENABLE_ENGINE15_EARNINGS_IC", False),
+            ENGINE15_CACHE_TTL_SCAN=_get_int("ENGINE15_CACHE_TTL_SCAN", 10 * 60),
+            ENGINE15_MIN_EVENTS=_get_int("ENGINE15_MIN_EVENTS", 8),
+            ENGINE15_MAX_EVENTS=_get_int("ENGINE15_MAX_EVENTS", 20),
+            ENGINE15_EVENT_BACKFILL_DAYS_BEFORE=_get_int("ENGINE15_EVENT_BACKFILL_DAYS_BEFORE", 1),
+            ENGINE15_EVENT_BACKFILL_DAYS_AFTER=_get_int("ENGINE15_EVENT_BACKFILL_DAYS_AFTER", 2),
+            ENGINE15_FILL_MODEL=os.getenv("ENGINE15_FILL_MODEL", "nbbo"),
+            ENGINE15_FILL_PENALTY_PCT=_get_float("ENGINE15_FILL_PENALTY_PCT", 15.0),
+            ENGINE15_STRIKE_SNAP_MAX_PTS=_get_float("ENGINE15_STRIKE_SNAP_MAX_PTS", 2.5),
+            ENGINE15_DEFAULT_PROFIT_TARGET_PCT=_get_float("ENGINE15_DEFAULT_PROFIT_TARGET_PCT", 50.0),
+            ENGINE15_DEFAULT_STOP_LOSS_PCT=_get_float("ENGINE15_DEFAULT_STOP_LOSS_PCT", 150.0),
+            ENGINE15_INTRADAY_CRUSH_FACTOR=_get_float("ENGINE15_INTRADAY_CRUSH_FACTOR", 0.80),
+            ENGINE15_ENABLE_CONDITIONING=_get_bool("ENGINE15_ENABLE_CONDITIONING", True),
+            ENGINE15_ADMIN_TOKEN=os.getenv("ENGINE15_ADMIN_TOKEN", ""),
+            ENGINE15_BACKFILL_DELAY_MS=_get_int("ENGINE15_BACKFILL_DELAY_MS", 200),
+            ENGINE15_MAX_EXPIRY_OFFSET_DAYS=_get_int("ENGINE15_MAX_EXPIRY_OFFSET_DAYS", 4),
+            ENGINE15_EM_MULTIPLE_TOL=_get_float("ENGINE15_EM_MULTIPLE_TOL", 0.35),
+            ENGINE15_ENABLE_EM_MULTIPLE_FILTER=_get_bool("ENGINE15_ENABLE_EM_MULTIPLE_FILTER", False),
+            ENGINE15_ADVISOR_ENABLED=_get_bool("ENGINE15_ADVISOR_ENABLED", True),
+            ENGINE15_ADVISOR_MODEL=os.getenv("ENGINE15_ADVISOR_MODEL", os.getenv("E1_ADVISOR_MODEL", "gpt-5.4")),
 
             # --- Engine 8 ---
             ENABLE_ENGINE8_POST_EVENT=_get_bool("ENABLE_ENGINE8_POST_EVENT", True),
@@ -1020,6 +1068,26 @@ class FeatureFlags:
             ("ENGINE14_BOOTSTRAP_B", int(self.ENGINE14_BOOTSTRAP_B)),
             ("ENGINE14_BOOTSTRAP_SEED", int(self.ENGINE14_BOOTSTRAP_SEED)),
             ("ENGINE14_PER_DTE_EXITS", bool(self.ENGINE14_PER_DTE_EXITS)),
+        )
+
+    def cache_key_engine15(self) -> tuple:
+        """Engine 15 cache fingerprint (Earnings IC Scenario Simulator)."""
+        return (
+            ("ENABLE_ENGINE15_EARNINGS_IC", bool(self.ENABLE_ENGINE15_EARNINGS_IC)),
+            ("ENGINE15_MIN_EVENTS", int(self.ENGINE15_MIN_EVENTS)),
+            ("ENGINE15_MAX_EVENTS", int(self.ENGINE15_MAX_EVENTS)),
+            ("ENGINE15_FILL_MODEL", str(self.ENGINE15_FILL_MODEL)),
+            ("ENGINE15_FILL_PENALTY_PCT", float(self.ENGINE15_FILL_PENALTY_PCT)),
+            ("ENGINE15_STRIKE_SNAP_MAX_PTS", float(self.ENGINE15_STRIKE_SNAP_MAX_PTS)),
+            ("ENGINE15_DEFAULT_PROFIT_TARGET_PCT", float(self.ENGINE15_DEFAULT_PROFIT_TARGET_PCT)),
+            ("ENGINE15_DEFAULT_STOP_LOSS_PCT", float(self.ENGINE15_DEFAULT_STOP_LOSS_PCT)),
+            ("ENGINE15_INTRADAY_CRUSH_FACTOR", float(self.ENGINE15_INTRADAY_CRUSH_FACTOR)),
+            ("ENGINE15_ENABLE_CONDITIONING", bool(self.ENGINE15_ENABLE_CONDITIONING)),
+            ("ENGINE15_MAX_EXPIRY_OFFSET_DAYS", int(self.ENGINE15_MAX_EXPIRY_OFFSET_DAYS)),
+            ("ENGINE15_EM_MULTIPLE_TOL", float(self.ENGINE15_EM_MULTIPLE_TOL)),
+            ("ENGINE15_ENABLE_EM_MULTIPLE_FILTER", bool(self.ENGINE15_ENABLE_EM_MULTIPLE_FILTER)),
+            ("ENGINE15_EVENT_BACKFILL_DAYS_BEFORE", int(self.ENGINE15_EVENT_BACKFILL_DAYS_BEFORE)),
+            ("ENGINE15_EVENT_BACKFILL_DAYS_AFTER", int(self.ENGINE15_EVENT_BACKFILL_DAYS_AFTER)),
         )
 
     def cache_key_engine12(self) -> tuple:

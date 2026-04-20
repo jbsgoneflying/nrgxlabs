@@ -20,6 +20,7 @@
     { href: "/vix-fade",        label: "Engine 12",       desc: "VIX spike fade — vol dislocation engine" },
     { href: "/gap-regime",      label: "Engine 13",       desc: "Gap regime scanner — post-gap SPX analysis" },
     { href: "/ic-scenario",     label: "Engine 14",       desc: "IC scenario simulator — path-dependent outcome replay" },
+    { href: "/earnings-ic",     label: "Engine 15",       desc: "Earnings IC scenario — single-name planned-exit replay" },
   ];
 
   /* Which nav item matches the current URL? */
