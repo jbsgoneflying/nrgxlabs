@@ -7,19 +7,169 @@ from __future__ import annotations
 
 ENGINE_META = {
     "id":          "e14",
-    "name":        "Engine 14 — IC Scenario Simulator",
+    "name":        "Engine 14 v2 — IC Scenario Command Deck",
     "description": (
-        "SPX iron-condor scenario replay. Matches the user's proposed "
-        "structure against historical SPX weekly analogues via KNN regime "
-        "match, then evaluates outcome distribution, MTM path, exit "
-        "optimization, greeks attribution, sizing, and conditioning "
-        "adjustments."
+        "SPX iron-condor Command Deck. Ranks candidate "
+        "(EM-multiple × wing-width) placements via a deterministic "
+        "composite score (historical breach + intraweek touch + "
+        "empirical MAE + theta capture + credit ROC), overlays MI v2 "
+        "regime probabilities, layers a forward Monte Carlo on the "
+        "analogue pool so the desk sees predictive + realised "
+        "distributions side-by-side, and exposes a native LLM advisor "
+        "button (separate from the E2 advisor that /reconcile still "
+        "delegates to). Scenario simulator stays as the drill-down "
+        "for the selected placement: analogue replay, MTM percentile "
+        "timeline, exit-rule optimisation, sizing, greeks attribution, "
+        "and conditioning adjustments."
     ),
     "asset_class": "SPX weekly iron condors",
 }
 
 
 CATALOG = {
+
+    "wing_console": {
+        "title": "Wing Decision Console",
+        "spec": (
+            "Primary card on the /ic-scenario page. Ranks 12 candidate "
+            "placements (4 EM-multiples × 3 wing-widths by default) by "
+            "a deterministic composite score (0-100). Five inputs:\n"
+            "- breach_close_prob: MC P(close at expiry outside shorts), "
+            "bootstrapped from the analogue pool under today's regime.\n"
+            "- touch_intraweek_prob: MC P(spot touched short strike "
+            "midweek). A weekly IC's real failure mode.\n"
+            "- mae_p95 vs wing: empirical 95th-pct intraweek max "
+            "adverse excursion from the analogue pool, as a fraction "
+            "of wing width.\n"
+            "- theta_capture: expected % of entry credit retained by "
+            "the planned exit (BS approximation).\n"
+            "- credit_est / ROC: normal-IV closed-form proxy for entry "
+            "credit and return-on-capital.\n"
+            "Weights default to breach 25% / touch 20% / mae 25% / "
+            "theta 15% / credit 15% and are desk-tunable via "
+            "E14_WING_SCORE_WEIGHT_* env knobs. The desk click a "
+            "placement row to handoff into the Scenario drilldown "
+            "(existing analogue replay + MTM + exit optimiser + "
+            "sizing)."
+        ),
+        "related_cards": [
+            {"engine": "e14",          "slug": "placement_score",    "label": "Placement Scorecard"},
+            {"engine": "e14",          "slug": "mc_reading",         "label": "MC Reading"},
+            {"engine": "e14",          "slug": "mae_distribution",   "label": "MAE Pool"},
+            {"engine": "e14",          "slug": "regime_mi_v2",       "label": "MI v2 Regime"},
+            {"engine": "market-intel", "slug": "regime_card",        "label": "Market Intel Regime"},
+            {"engine": "e14",          "slug": "outcome_distribution","label": "Outcome Distribution"},
+        ],
+    },
+
+    "placement_score": {
+        "title": "Placement Scorecard",
+        "spec": (
+            "Row-level drill-down of one candidate placement from the "
+            "Wing Console grid. Each row shows:\n"
+            "- em_mult × wing_pts + absolute short/long strikes derived "
+            "from today's spot + 1σ EM.\n"
+            "- Three risk terms: breach_close_prob (MC), "
+            "touch_intraweek_prob (MC path), mae_p95_vs_wing.\n"
+            "- Three reward terms: theta_capture_pct, credit_dollars, "
+            "roc_est.\n"
+            "- Confidence chip: high when MC pool is deep + regime/"
+            "macro conditioned; low when bootstrap fell back to "
+            "unconditioned or historical-only.\n"
+            "- Composite breakdown so the desk can see which term "
+            "drove the score (close-safety vs MAE-safety vs credit-"
+            "richness).\n"
+            "Hand-tune via the EM and wing sliders under the table — "
+            "exact scores come from /api/ic-scenario/wing-console/"
+            "score-placement (re-uses the cached ScoringContext, so "
+            "slider moves are sub-200ms)."
+        ),
+        "related_cards": [
+            {"engine": "e14", "slug": "wing_console",    "label": "Wing Decision Console"},
+            {"engine": "e14", "slug": "mc_reading",      "label": "MC Reading"},
+            {"engine": "e14", "slug": "mae_distribution", "label": "MAE Pool"},
+        ],
+    },
+
+    "mc_reading": {
+        "title": "Monte Carlo Reading",
+        "spec": (
+            "Forward Monte Carlo on top of the analogue pool. For each "
+            "(em_mult, wing_pts) the simulator bootstraps weekly paths "
+            "from the conditioned analogue pool and aggregates:\n"
+            "- breach_close_prob: P(close at expiry outside shorts).\n"
+            "- touch_intraweek_prob: P(spot touched a short strike).\n"
+            "- outside_wings_prob: P(close outside the long strikes).\n"
+            "- mae_p50 / p75 / p90 / p95: intraweek excursion tail.\n"
+            "Conditioning hierarchy (same pattern as E2 v2):\n"
+            "1. (regime_bucket + macro_bucket) when pool >= min_pool.\n"
+            "2. regime_bucket only (falls back automatically).\n"
+            "3. Unconditioned pool with a conditioning_degraded note.\n"
+            "Deterministic seed from (entry_date, expiry_date, "
+            "strikes_fp, n_sims, flags_fp), so cache hits are "
+            "reproducible. Layered SEPARATELY from the analogue-only "
+            "outcomeDistribution which stays on the page as the "
+            "realised (empirical) reading. MC = predictive; "
+            "analogues = realised; no double counting."
+        ),
+        "related_cards": [
+            {"engine": "e14", "slug": "wing_console",        "label": "Wing Decision Console"},
+            {"engine": "e14", "slug": "outcome_distribution", "label": "Outcome Distribution (realised)"},
+            {"engine": "e14", "slug": "placement_score",     "label": "Placement Scorecard"},
+        ],
+    },
+
+    "mae_distribution": {
+        "title": "MAE Pool (intraweek)",
+        "spec": (
+            "Historical distribution of intraweek max adverse "
+            "excursion (worst |spot - entry_close| across the hold "
+            "window) across the analogue pool. For each past weekly "
+            "window:\n"
+            "``mae_pct = max(|high - entry|, |entry - low|) / entry * 100``\n"
+            "aggregated to p50/p75/p90/p95 + max. The Wing Console "
+            "composite uses p95 in the penalty term: placements whose "
+            "historical p95 MAE punched past the shorts and into wing "
+            "territory get a saturating penalty.\n"
+            "Source tags:\n"
+            "- 'daily_ohlc' (best): every hold day had high + low "
+            "from ORATS.\n"
+            "- 'open_close_fallback': weeks lacked intraday extremes, "
+            "so p95 under-estimates true intraweek MAE.\n"
+            "- 'mixed': partial coverage across the pool."
+        ),
+        "related_cards": [
+            {"engine": "e14", "slug": "wing_console", "label": "Wing Decision Console"},
+            {"engine": "e14", "slug": "mc_reading",   "label": "MC Reading"},
+        ],
+    },
+
+    "regime_mi_v2": {
+        "title": "MI v2 Regime (HMM)",
+        "spec": (
+            "Market Intelligence v2 regime snapshot — the single "
+            "regime source now shared across E1 / E2 / E15 / E14 "
+            "Command Decks. Replaces the E14-specific DMS-only regime "
+            "reader for forward-dated scenarios (historical entry "
+            "dates still benefit from the stored DMS as-of-day "
+            "snapshot).\n"
+            "- probabilities: 3-state HMM (Risk-On / Transitional / "
+            "Stressed) with posterior probabilities summing to 1.\n"
+            "- label: most-likely state.\n"
+            "- vol_state: aligned to the HMM state so the tracker + "
+            "sizing consensus keep the same volatility language.\n"
+            "- source: 'v2_hmm' when calibrated; 'default_model' "
+            "when MI v2 hasn't been fit yet.\n"
+            "E14's own regime_match card (next) describes how the "
+            "analogue pool is filtered off this label + the KNN "
+            "feature-store distance."
+        ),
+        "related_cards": [
+            {"engine": "market-intel", "slug": "regime_card", "label": "Market Intel Regime"},
+            {"engine": "e14",          "slug": "regime_match", "label": "Analogue Regime Match"},
+            {"engine": "e14",          "slug": "wing_console", "label": "Wing Decision Console"},
+        ],
+    },
 
     "entry_state": {
         "title": "Entry State",
@@ -52,27 +202,34 @@ CATALOG = {
     },
 
     "regime_match": {
-        "title": "Regime Match Quality",
+        "title": "Analogue Regime Match",
         "spec": (
-            "How the analogue pool was selected.\n"
-            "- Match Source = KNN: multi-factor nearest-neighbor match "
-            "over a feature store (RV20, term structure, skew, dealer "
-            "gamma, etc.) weighted by covariance. Distances are "
-            "weighted-L2; lower = closer.\n"
-            "- Match Source = RV20 bucket: legacy fallback — match on "
-            "the realized-vol percentile bucket only because the feature "
-            "store was unavailable.\n"
-            "- Distance (min / mean / max): spread of neighbor distances. "
-            "Wide spread means the analogue pool isn't cohesive.\n"
-            "- Feature Imputation: share of feature cells median-filled. "
-            "High imputation = brittle match.\n"
-            "- Admitted: how many analogues came from KNN vs legacy bucket "
-            "fallback — fallback rows are lower-confidence."
+            "v2 hierarchy:\n"
+            "1. **MI v2 HMM primary** — regime label comes from the "
+            "shared market_intel.regime_snapshot() (same source E1 / "
+            "E2 / E15 Command Decks consume). The label maps into "
+            "E14's LOW / MODERATE / ELEVATED bucket so the analogue "
+            "matcher filter stays apples-to-apples with pre-v2 pools.\n"
+            "2. **DMS secondary** — if MI v2 isn't calibrated, falls "
+            "back to the DailyMarketState regime (multi-factor trend + "
+            "volatility + stress + event + dispersion).\n"
+            "3. **KNN secondary** — when "
+            "ENGINE14_ENABLE_KNN_REGIME=1, a multi-factor nearest-"
+            "neighbor match over the feature store (RV20, term "
+            "structure, skew, dealer gamma, etc.) weighted L2 "
+            "distance. Distances are raw; lower = closer.\n"
+            "4. **EM-proxy last** — 1σ EM bucket only when nothing "
+            "else is available.\n"
+            "Distance / imputation stats remain valuable signal when "
+            "KNN is on: wide spread = pool isn't cohesive; high "
+            "imputation = brittle match."
         ),
         "related_cards": [
-            {"engine": "e14", "slug": "entry_state", "label": "Entry State"},
-            {"engine": "e14", "slug": "matched_analogues", "label": "Matched Analogues"},
-            {"engine": "e14", "slug": "conditioning_notes", "label": "Conditioning Notes"},
+            {"engine": "e14",          "slug": "regime_mi_v2",        "label": "MI v2 Regime (HMM)"},
+            {"engine": "e14",          "slug": "entry_state",         "label": "Entry State"},
+            {"engine": "e14",          "slug": "matched_analogues",   "label": "Matched Analogues"},
+            {"engine": "e14",          "slug": "conditioning_notes",  "label": "Conditioning Notes"},
+            {"engine": "market-intel", "slug": "regime_card",         "label": "Market Intel Regime"},
         ],
     },
 

@@ -1,8 +1,11 @@
 """Legacy thin shim for Engine 14 per-card LLM tooltips.
 
-The full catalog and LLM pipeline now live under
-:mod:`backend.desk_insight`. This module remains as a backwards-compat
-re-export so any stray import elsewhere in the codebase keeps working.
+The v2 **canonical catalog** lives at
+:mod:`backend.desk_insight.catalogs.e14_ic_scenario` — all new slugs
+(``wing_console``, ``placement_score``, ``mc_reading``,
+``mae_distribution``, ``regime_mi_v2``) are defined there. This
+module remains as a back-compat re-export so any stray import
+elsewhere in the codebase keeps working.
 
 Prefer the new API:
 

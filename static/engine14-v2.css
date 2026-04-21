@@ -1,0 +1,279 @@
+/* =============================================================
+   Engine 14 v2 — IC Scenario Command Deck
+   Parallel to engine2-v2.css: ranked placement grid + slider
+   tuner + source chip + always-on advisor panel. Reuses E1 v2
+   tokens for cross-engine visual parity.
+   ============================================================= */
+
+/* ----- Command Deck top form (reuses .e1SourceChip styles) --- */
+
+.e14CommandRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  padding: 14px;
+  border-radius: var(--radius-card, 12px);
+  background: var(--surfaceSolid, var(--surface, #121418));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  margin-bottom: 14px;
+}
+
+.e14CommandRow .e14Field {
+  flex: 1 1 140px;
+  min-width: 140px;
+}
+
+.e14CommandRow #e14EventSourceChip {
+  align-self: center;
+  margin-top: 20px;
+}
+
+.e14CommandRow .primaryButton {
+  flex: 0 0 auto;
+  min-width: 130px;
+}
+
+.e14AdvancedDetails {
+  padding: 12px 16px;
+  border: 1px dashed var(--border, rgba(255, 255, 255, 0.10));
+  border-radius: var(--radius-card, 12px);
+  margin-bottom: 16px;
+  background: var(--surface, rgba(255, 255, 255, 0.02));
+}
+
+.e14AdvancedDetails > summary {
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--muted, #9aa0a6);
+  padding: 4px 0;
+  list-style: none;
+}
+
+.e14AdvancedDetails > summary::-webkit-details-marker { display: none; }
+.e14AdvancedDetails > summary::after {
+  content: "▸";
+  float: right;
+  transition: transform 120ms ease;
+}
+.e14AdvancedDetails[open] > summary::after { transform: rotate(90deg); }
+
+/* ----- Wing Decision Console (ranked placements) ---------- */
+
+.e14Console {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border-radius: 14px;
+  background: var(--surface-1, var(--surfaceSolid, #121418));
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 14px;
+}
+
+.e14ConsoleHeader {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.e14ConsoleTitle {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.e14ConsoleSubtitle {
+  font-size: 12px;
+  color: var(--muted, #9aa0a6);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.e14ConsoleSubtitle strong {
+  color: var(--text-primary, #e6e6e6);
+  font-weight: 600;
+}
+
+.e14PlacementTable {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.e14PlacementTable thead th {
+  text-align: left;
+  padding: 8px 10px;
+  color: var(--muted, #9aa0a6);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.e14PlacementTable tbody td {
+  padding: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: var(--text-primary, #e6e6e6);
+  font-variant-numeric: tabular-nums;
+}
+
+.e14PlacementRow {
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.e14PlacementRow:hover { background: rgba(255, 255, 255, 0.03); }
+.e14PlacementRow--selected {
+  background: rgba(125, 182, 255, 0.08);
+  outline: 1px solid rgba(125, 182, 255, 0.35);
+  outline-offset: -1px;
+}
+.e14PlacementRow--top { background: rgba(60, 212, 169, 0.05); }
+
+.e14RankCell { font-weight: 700; text-align: center; width: 32px; }
+.e14StarTop { color: #ffd24a; margin-left: 4px; }
+.e14ScoreCell { font-weight: 700; color: #3cd4a9; }
+.e14ScoreCell--med { color: #f3a847; }
+.e14ScoreCell--low { color: #ff7a7a; }
+.e14MetricGood  { color: #3cd4a9; }
+.e14MetricMed   { color: #f3a847; }
+.e14MetricRisky { color: #ff7a7a; }
+
+/* ----- Slider tuner --------------------------------------- */
+
+.e14Tuner {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.e14TunerField { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.e14TunerField label {
+  color: var(--muted, #9aa0a6);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.e14TunerField input[type="range"] { width: 100%; }
+.e14TunerValue {
+  font-weight: 700;
+  color: var(--text-primary, #e6e6e6);
+  font-variant-numeric: tabular-nums;
+}
+
+.e14TunerScoreBox {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 13px;
+}
+
+.e14TunerScoreBox strong {
+  font-size: 18px;
+  color: #3cd4a9;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ----- Command Deck actions + warnings -------------------- */
+
+.e14ConsoleActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+}
+
+.e14ConsoleActions button {
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface-2, #1a1d24);
+  color: var(--text-primary, #e6e6e6);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.e14ConsoleActions button:hover:not(:disabled) {
+  background: rgba(125, 182, 255, 0.08);
+  border-color: rgba(125, 182, 255, 0.4);
+}
+
+.e14ConsoleActions button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.e14ConsoleActions .e14ConsoleActions--primary {
+  background: rgba(60, 212, 169, 0.12);
+  border-color: rgba(60, 212, 169, 0.45);
+  color: #3cd4a9;
+}
+
+.e14ConsoleActions .e14ConsoleActions--primary:hover:not(:disabled) {
+  background: rgba(60, 212, 169, 0.2);
+}
+
+.e14ConsoleWarnings {
+  font-size: 11px;
+  color: #f3a847;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(243, 168, 71, 0.08);
+  border: 1px solid rgba(243, 168, 71, 0.2);
+}
+
+.e14HandoffBanner {
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(60, 212, 169, 0.08);
+  border: 1px solid rgba(60, 212, 169, 0.25);
+  font-size: 12px;
+  margin-bottom: 12px;
+  color: #e6e6e6;
+}
+
+.e14AdvisorNarrative {
+  padding-top: 12px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  color: var(--text-primary, #e6e6e6);
+  line-height: 1.5;
+}
+
+.e14RegimeMiV2 {
+  display: inline-flex;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted, #9aa0a6);
+}
+
+.e14RegimeMiV2 .e14RegimeMiV2Bar {
+  height: 10px;
+  min-width: 24px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  display: inline-block;
+  position: relative;
+}
+
+.e14RegimeMiV2 .e14RegimeMiV2Fill {
+  height: 100%;
+  background: #3cd4a9;
+}

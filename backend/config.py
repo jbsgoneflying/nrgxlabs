@@ -424,7 +424,9 @@ class FeatureFlags:
     ENGINE14_DEFAULT_STOP_LOSS_PCT: float = 200.0     # stop at -200% of credit
     ENGINE14_SQLITE_PATH: str = "data/engine14_chains.db"
     ENGINE14_STRIKE_SNAP_MAX_PTS: float = 5.0         # max SPX points we will snap a strike
-    ENGINE14_BID_ASK_FILL_MODE: str = "mid"           # legacy key — use ENGINE14_FILL_MODEL
+    # NOTE (v2): retained for BC with env deployments; NOT consumed by v2.
+    # The canonical fill-model knob is ENGINE14_FILL_MODEL below.
+    ENGINE14_BID_ASK_FILL_MODE: str = "mid"           # legacy alias; use ENGINE14_FILL_MODEL
     ENGINE14_ENABLE_CONDITIONING: bool = True         # Phase 2 modifiers (calendar/gamma/stress/gap)
     ENGINE14_ADMIN_TOKEN: str = ""                    # header token for /api/ic-scenario/backfill
     ENGINE14_BACKFILL_MAX_YEARS: float = 3.0          # safety cap on admin-triggered backfills
@@ -433,7 +435,9 @@ class FeatureFlags:
     ENGINE14_FILL_MODEL: str = "nbbo"                 # mid|nbbo|mid_penalty
     ENGINE14_FILL_PENALTY_PCT: float = 15.0           # % of half-spread in mid_penalty mode
     ENGINE14_EMIT_LEGACY_MID_DIST: bool = True        # emit outcomeDistributionMid side-by-side
-    ENGINE14_ENTRY_FILL_CHECK: bool = False           # (future) validate entry credit vs NBBO
+    # NOTE (v2): retained for BC; NOT consumed by v2. Entry-fill validation
+    # lives in /api/ic-scenario/pre-check now.
+    ENGINE14_ENTRY_FILL_CHECK: bool = False           # (legacy) no-op in v2
     ENGINE14_EM_MULTIPLE_TOL: float = 0.25            # sigma tolerance on short-strike EM match
     ENGINE14_ENABLE_EM_MULTIPLE_FILTER: bool = True   # Phase A3 placement filter on/off
     ENGINE14_MAE_PROXY_ENABLED: bool = True           # inflate MAE using underlying OHLC range
@@ -455,6 +459,54 @@ class FeatureFlags:
     ENGINE14_PER_DTE_EXITS: bool = True
     ENGINE14_ENABLE_SIZING: bool = True
     ENGINE14_ENABLE_GREEKS_ATTRIBUTION: bool = True
+
+    # --- Engine 14 v2 — IC Scenario Command Deck ---
+    # Kill-switch. When False the new /wing-console + /wing-console/
+    # score-placement + /advisor routes 404 and the frontend reverts to
+    # the legacy form-first UX.
+    ENABLE_E14_V2: bool = True
+
+    # Parity with E1 / E15 / E2 — strips legacy verdict fields
+    # (reconcile.overall + echoed engine2 consensus) from the public
+    # /api/ic-scenario response. Advisor endpoint re-computes internally.
+    E14_EMIT_DESK_CONSENSUS: bool = False
+
+    # Wing Console grid (comma-separated floats).
+    E14_WING_EM_MULTS: str = "1.0,1.25,1.5,2.0"
+    E14_WING_PTS:      str = "5,10,15"
+
+    # Composite-score weights (renormalised at scoring time). Plan uses
+    # "breach" as the name of the close-breach weight; E2 uses "close".
+    # Both names are accepted by WingConsoleWeights.from_flags.
+    E14_WING_SCORE_WEIGHT_BREACH: float = 0.25
+    E14_WING_SCORE_WEIGHT_TOUCH:  float = 0.20
+    E14_WING_SCORE_WEIGHT_MAE:    float = 0.25
+    E14_WING_SCORE_WEIGHT_THETA:  float = 0.15
+    E14_WING_SCORE_WEIGHT_CREDIT: float = 0.15
+
+    # Score-normalisation targets.
+    E14_WING_MAX_TOLERABLE_MAE_PCT: float = 80.0
+    E14_WING_TARGET_THETA_PCT:      float = 60.0
+    E14_WING_TARGET_ROC_PCT:        float = 12.0
+
+    # Forward Monte Carlo (always on; flag is a kill-switch).
+    ENABLE_E14_MC: bool = True
+    E14_MC_N_SIMS: int = 5000
+    E14_MC_MIN_POOL: int = 20
+    E14_MC_SEED: int = 1337
+    E14_MC_CONDITION_ON_REGIME: bool = True
+    E14_MC_CONDITION_ON_MACRO: bool = True
+    E14_MC_GBM_FALLBACK: bool = True
+
+    # NYSE holiday calendar for chain_replay + simulator business-day
+    # math. When off, engine14 keeps its legacy session counting.
+    ENGINE14_HOLIDAY_CALENDAR: bool = True
+
+    # New E14-native advisor (separate from E2's advisor which /reconcile
+    # still calls for BC). Rate-limited per process.
+    E14_ADVISOR_ENABLED: bool = True
+    E14_ADVISOR_MODEL: str = "gpt-5.4"
+    E14_ADVISOR_MAX_CALLS_PER_MINUTE: int = 4
 
     # --- Engine 15: Earnings IC Scenario Simulator ---
     # Blends Engine 1's single-name earnings data with Engine 14's replay
@@ -850,6 +902,31 @@ class FeatureFlags:
             ENGINE14_BOOTSTRAP_B=_get_int("ENGINE14_BOOTSTRAP_B", 500),
             ENGINE14_BOOTSTRAP_SEED=_get_int("ENGINE14_BOOTSTRAP_SEED", 14),
             ENGINE14_THIN_SAMPLE_N=_get_int("ENGINE14_THIN_SAMPLE_N", 20),
+
+            # Engine 14 v2 Command Deck
+            ENABLE_E14_V2=_get_bool("ENABLE_E14_V2", True),
+            E14_EMIT_DESK_CONSENSUS=_get_bool("E14_EMIT_DESK_CONSENSUS", False),
+            E14_WING_EM_MULTS=os.getenv("E14_WING_EM_MULTS", "1.0,1.25,1.5,2.0"),
+            E14_WING_PTS=os.getenv("E14_WING_PTS", "5,10,15"),
+            E14_WING_SCORE_WEIGHT_BREACH=_get_float("E14_WING_SCORE_WEIGHT_BREACH", 0.25),
+            E14_WING_SCORE_WEIGHT_TOUCH=_get_float("E14_WING_SCORE_WEIGHT_TOUCH", 0.20),
+            E14_WING_SCORE_WEIGHT_MAE=_get_float("E14_WING_SCORE_WEIGHT_MAE", 0.25),
+            E14_WING_SCORE_WEIGHT_THETA=_get_float("E14_WING_SCORE_WEIGHT_THETA", 0.15),
+            E14_WING_SCORE_WEIGHT_CREDIT=_get_float("E14_WING_SCORE_WEIGHT_CREDIT", 0.15),
+            E14_WING_MAX_TOLERABLE_MAE_PCT=_get_float("E14_WING_MAX_TOLERABLE_MAE_PCT", 80.0),
+            E14_WING_TARGET_THETA_PCT=_get_float("E14_WING_TARGET_THETA_PCT", 60.0),
+            E14_WING_TARGET_ROC_PCT=_get_float("E14_WING_TARGET_ROC_PCT", 12.0),
+            ENABLE_E14_MC=_get_bool("ENABLE_E14_MC", True),
+            E14_MC_N_SIMS=_get_int("E14_MC_N_SIMS", 5000),
+            E14_MC_MIN_POOL=_get_int("E14_MC_MIN_POOL", 20),
+            E14_MC_SEED=_get_int("E14_MC_SEED", 1337),
+            E14_MC_CONDITION_ON_REGIME=_get_bool("E14_MC_CONDITION_ON_REGIME", True),
+            E14_MC_CONDITION_ON_MACRO=_get_bool("E14_MC_CONDITION_ON_MACRO", True),
+            E14_MC_GBM_FALLBACK=_get_bool("E14_MC_GBM_FALLBACK", True),
+            ENGINE14_HOLIDAY_CALENDAR=_get_bool("ENGINE14_HOLIDAY_CALENDAR", True),
+            E14_ADVISOR_ENABLED=_get_bool("E14_ADVISOR_ENABLED", True),
+            E14_ADVISOR_MODEL=os.getenv("E14_ADVISOR_MODEL", "gpt-5.4"),
+            E14_ADVISOR_MAX_CALLS_PER_MINUTE=_get_int("E14_ADVISOR_MAX_CALLS_PER_MINUTE", 4),
             ENGINE14_PER_DTE_EXITS=_get_bool("ENGINE14_PER_DTE_EXITS", True),
             ENGINE14_ENABLE_SIZING=_get_bool("ENGINE14_ENABLE_SIZING", True),
             ENGINE14_ENABLE_GREEKS_ATTRIBUTION=_get_bool("ENGINE14_ENABLE_GREEKS_ATTRIBUTION", True),

@@ -842,6 +842,30 @@ def _summarize_conditioning(
     }
 
 
+def _map_mi_v2_label_to_bucket(label: str) -> str:
+    """Map an MI v2 HMM label into E14's REGIME_BUCKETS taxonomy.
+
+    MI v2 emits three states (Risk-On / Transitional / Stressed). E14
+    has a four-bucket grid (LOW / MODERATE / ELEVATED / HIGH) inherited
+    from the pre-v2 DMS regime reader. We map conservatively:
+
+        Risk-On       -> LOW
+        Transitional  -> MODERATE
+        Stressed      -> ELEVATED
+
+    "HIGH" is reserved for the legacy DMS extreme tail and never
+    inferred from MI v2 alone (the HMM tops out at Stressed).
+    """
+    lab = (label or "").strip().lower()
+    if lab.startswith("risk"):
+        return "LOW"
+    if lab.startswith("trans"):
+        return "MODERATE"
+    if lab.startswith("stress"):
+        return "ELEVATED"
+    return "MODERATE"
+
+
 @dataclass(frozen=True)
 class _ResolvedRegime:
     bucket: str
@@ -857,23 +881,74 @@ def _resolve_entry_regime(
     request: IcScenarioRequest,
     store: Any,
     max_staleness_days: int = 3,
+    flags: Optional[FeatureFlags] = None,
 ) -> _ResolvedRegime:
     """Resolve the user's entry-day regime.
 
-    Priority order:
+    v2 priority order:
 
-    1. ``DailyMarketState`` loaded from Redis for ``request.entry_date``.
-       If not present, try the previous up-to ``max_staleness_days``
-       calendar days (the typical scenario: user is pricing a forward
-       Monday entry over the weekend, latest DMS is Friday's).
-    2. Fall back to the EM-proxy bucket (``_entry_regime_bucket``).
+    1. **Market Intelligence v2** ``regime_snapshot()`` when
+       ``ENABLE_MI_V2`` is on — the 3-state Gaussian HMM is now the
+       single source of truth across E1 / E2 / E15 consoles. E14 joins
+       the same source so the desk never sees a "scan said Transitional
+       but the scenario says Moderate" mismatch.
+    2. ``DailyMarketState`` loaded from Redis for ``request.entry_date``
+       (kept for back-compat; also used when MI v2 hasn't been
+       calibrated yet).
+    3. EM-proxy bucket (``_entry_regime_bucket``).
 
-    The DMS path is preferred because Engine 2's multi-component regime
-    (trend + volatility + stress + event + dispersion) is much richer
-    than a single IV-annualized number — it catches ELEVATED tape in
-    calm-vol windows like run-ups and geopolitical weeks.
+    The DMS tier is still valuable for **historical** entry dates
+    (MI v2 snapshot is today-only); for forward scenarios dated
+    "tomorrow", MI v2 is used.
     """
-    # Lazy import to avoid circular dep with callers that don't want the DMS module.
+    f = flags or get_flags()
+
+    # ---- Tier 1: MI v2 HMM snapshot (today) --------------------------------
+    # Only trust MI v2 when:
+    #   1. ENABLE_MI_V2 is on.
+    #   2. The snapshot source is the real calibrated HMM ('v2_hmm'), not
+    #      a degraded 'default_model' / 'legacy-style' fallback. When MI
+    #      v2 falls back, we let DMS win so the legacy regime semantics
+    #      stay intact for existing trades.
+    #   3. The entry date is forward-dated (today or within
+    #      max_staleness_days); historical entry dates use DMS's as-of-
+    #      day snapshot.
+    try:
+        if bool(getattr(f, "ENABLE_MI_V2", False)):
+            from backend.market_intel import regime_snapshot as _mi_snap
+            _mi = _mi_snap()
+            if _mi is not None:
+                _source = str(getattr(_mi, "source", "") or "").lower()
+                _is_calibrated = "v2_hmm" in _source
+                _label = str(getattr(_mi, "label", "") or "").strip()
+                _probs = getattr(_mi, "probabilities", None) or {}
+                try:
+                    _score = float(_probs.get(_label) or 0.0) * 100.0 if _label else None
+                except Exception:
+                    _score = None
+                bucket = _map_mi_v2_label_to_bucket(_label)
+                try:
+                    entry_dt = dt.date.fromisoformat(request.entry_date)
+                    today = dt.date.today()
+                    is_forward = entry_dt >= today - dt.timedelta(days=max_staleness_days)
+                except Exception:
+                    is_forward = True
+
+                if _is_calibrated and bucket in REGIME_BUCKETS and is_forward:
+                    return _ResolvedRegime(
+                        bucket=bucket,
+                        source="mi_v2_hmm",
+                        as_of=str(getattr(_mi, "as_of", "") or ""),
+                        score100=_score,
+                        note=(
+                            f"Regime from MI v2 HMM ({_label or 'unknown'}); "
+                            "shared with E1/E2/E15 command decks."
+                        ),
+                    )
+    except Exception as _mi_err:
+        LOG.debug("engine14: MI v2 regime overlay skipped: %s", _mi_err)
+
+    # ---- Tier 2: DMS (historical / fallback) -------------------------------
     try:
         from backend.daily_market_state import load_dms  # type: ignore
     except Exception:
@@ -968,8 +1043,30 @@ def run_scenario(
         user_em_pct=user_em_pct,
         request=request,
         store=store,
+        flags=flags,
     )
     user_regime = resolved_regime.bucket
+
+    # v2: capture the MI v2 HMM snapshot (independent of which tier won
+    # above) so the response can carry it alongside the legacy DMS regime.
+    # The Wing Console + Command Deck renderers key off this payload at
+    # entryState.regimeMiV2 + top-level regime.mi_v2 — same shape E1 / E2
+    # already emit, so the frontend source-chip + regime card reuse.
+    regime_mi_v2: Optional[Dict[str, Any]] = None
+    try:
+        if bool(getattr(flags, "ENABLE_MI_V2", False)):
+            from backend.market_intel import regime_snapshot as _mi_snap
+            _mi = _mi_snap()
+            if _mi is not None:
+                _probs = getattr(_mi, "probabilities", None) or {}
+                regime_mi_v2 = {
+                    "label":         str(getattr(_mi, "label", "") or "") or None,
+                    "probabilities": dict(_probs) if isinstance(_probs, dict) else {},
+                    "vol_state":     getattr(_mi, "vol_state", None),
+                    "source":        getattr(_mi, "source", "v2_hmm"),
+                }
+    except Exception as _mi_err:
+        LOG.debug("engine14: MI v2 snapshot capture skipped: %s", _mi_err)
 
     # 3. Build + filter analogue universe.
     entry_dow = 0
@@ -989,7 +1086,7 @@ def run_scenario(
     # used to build analogue windows — keeps the dte_sessions filter
     # apples-to-apples with what the enumerator emits.
     target_dte_sessions = _count_trading_sessions(
-        request.entry_date, request.expiry, closes_by_date
+        request.entry_date, request.expiry, closes_by_date, flags=flags
     )
 
     universe = build_analogue_universe(
@@ -1234,9 +1331,9 @@ def run_scenario(
         adjusted=adjusted_distribution,
     )
 
-    return {
+    out = {
         "engine": 14,
-        "version": "1.3.0",
+        "version": "2.0.0",
         "request": asdict(request),
         "analoguesUsed": len(paths),
         "analoguesConsidered": len(candidates),
@@ -1259,6 +1356,16 @@ def run_scenario(
                 else round(float(resolved_regime.score100), 2)
             ),
             "userEmMultiple": None if user_em_mult is None else round(float(user_em_mult), 2),
+            # v2: MI v2 HMM overlay (same shape E1 / E2 emit).
+            "regimeMiV2": regime_mi_v2,
+        },
+        # v2: top-level regime dict so consumers that treat it as a first-
+        # class field (parity with E2's regime.mi_v2) can read it directly.
+        "regime": {
+            "label":  user_regime,
+            "bucket": user_regime,
+            "source": resolved_regime.source,
+            "mi_v2":  regime_mi_v2,
         },
         "fillModel": {
             "mode": fill_model.mode,
@@ -1289,6 +1396,7 @@ def run_scenario(
         "conditioningNotes": notes,
         "matchedAnalogues": matched_analogues,
     }
+    return out
 
 
 def _neighbor_bucket(b: str) -> str:
@@ -1302,16 +1410,22 @@ def _neighbor_bucket(b: str) -> str:
 
 
 def _count_trading_sessions(
-    entry_iso: str, expiry_iso: str, trading_days: Dict[str, float]
+    entry_iso: str, expiry_iso: str, trading_days: Dict[str, float],
+    *,
+    flags: Optional[FeatureFlags] = None,
 ) -> int:
     """Count trading sessions from entry through expiry (inclusive both ends).
 
     Uses the caller's close series as the trading-day calendar so the value
     is consistent with what `_build_matching_windows` emits as dte_sessions.
     For dates beyond the historical series (common case: user prices a
-    forward-dated trade), we fall back to a weekday heuristic (Mon-Fri
-    count as sessions). This is ~perfect for the next couple of weeks —
-    long enough that any missed holiday is inside the ±2 DTE tolerance.
+    forward-dated trade), v2 consults
+    :mod:`backend.engine15.trading_calendar` when
+    ``ENGINE14_HOLIDAY_CALENDAR`` is on (the default) so forward-dated
+    entries correctly skip NYSE holidays + half-days instead of relying
+    on the weekday heuristic. Flag-off reverts to the legacy Mon-Fri
+    fallback to preserve back-compat for consumers that monkeypatched
+    the old behavior (notably E15's replay adapter test fixtures).
     """
     try:
         a = dt.date.fromisoformat(entry_iso)
@@ -1320,6 +1434,16 @@ def _count_trading_sessions(
         return 1
     if b < a:
         return 1
+    f = flags or get_flags()
+    use_cal = bool(getattr(f, "ENGINE14_HOLIDAY_CALENDAR", True))
+    cal_is_trading = None
+    if use_cal:
+        try:
+            from backend.engine15.trading_calendar import is_trading_day as _tc_is_trading_day
+            cal_is_trading = _tc_is_trading_day
+        except Exception:
+            cal_is_trading = None
+
     last_hist = max(trading_days.keys()) if trading_days else ""
     n = 0
     d = a
@@ -1327,9 +1451,18 @@ def _count_trading_sessions(
         ds = d.isoformat()
         if ds in trading_days:
             n += 1
-        elif ds > last_hist and d.weekday() < 5:
-            # Beyond the cached bar series — assume weekday = trading day.
-            n += 1
+        elif ds > last_hist:
+            # Beyond the cached bar series — consult the NYSE calendar
+            # when enabled, else fall back to the weekday heuristic.
+            if cal_is_trading is not None:
+                try:
+                    if cal_is_trading(d):
+                        n += 1
+                except Exception:
+                    if d.weekday() < 5:
+                        n += 1
+            elif d.weekday() < 5:
+                n += 1
         d += dt.timedelta(days=1)
     return max(1, n)
 

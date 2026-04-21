@@ -8,6 +8,8 @@
     <meta name="description" content="Raven-Tech.co — Engine 14: Path-dependent iron condor scenario simulator with empirical historical replay." />
     <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
     <link rel="stylesheet" href="/static/styles.css?v=10" />
+    <link rel="stylesheet" href="/static/engine1-v2.css?v=2" />
+    <link rel="stylesheet" href="/static/engine14-v2.css?v=1" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <style>
       .e14Grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 18px; }
@@ -353,6 +355,47 @@
 
       <div id="banner" class="e14Banner" style="display:none;"></div>
 
+      <!-- v2 Wing Decision Console — primary card. The scenario form
+           below is now the drilldown for the selected placement. -->
+      <section class="surface" id="e14WingConsoleSection" aria-label="Wing Decision Console" style="margin-bottom:16px;">
+        <div class="deskDivider e14Divider" data-insight="wing_console">
+          <span class="deskDividerText e14DividerText">Wing Decision Console</span>
+          <span id="e14EventSourceChip" class="e1SourceChip e1SourceChip--unknown" style="margin-left:10px" title="Scenario source"></span>
+        </div>
+        <div id="e14WingConsole"></div>
+      </section>
+
+      <!-- v2 MI v2 Regime card -->
+      <section class="surface" id="e14RegimeMiV2Section" aria-label="MI v2 Regime" style="display:none; margin-bottom:16px;">
+        <div class="deskDivider e14Divider" data-insight="regime_mi_v2">
+          <span class="deskDividerText e14DividerText">MI v2 Regime (HMM)</span>
+        </div>
+        <div id="e14RegimeMiV2Body"></div>
+      </section>
+
+      <!-- v2 MC Reading + MAE Pool drilldowns -->
+      <section class="surface" id="e14McReadingSection" aria-label="Monte Carlo Reading" style="display:none; margin-bottom:16px;">
+        <div class="deskDivider e14Divider" data-insight="mc_reading">
+          <span class="deskDividerText e14DividerText">Monte Carlo Reading</span>
+        </div>
+        <div id="e14McReadingBody"></div>
+      </section>
+
+      <section class="surface" id="e14MaeDistributionSection" aria-label="MAE Pool" style="display:none; margin-bottom:16px;">
+        <div class="deskDivider e14Divider" data-insight="mae_distribution">
+          <span class="deskDividerText e14DividerText">MAE Pool (intraweek)</span>
+        </div>
+        <div id="e14MaeDistributionBody"></div>
+      </section>
+
+      <!-- v2 E14-native advisor panel (always-on; separate from reconcile) -->
+      <section class="surface" id="e14AdvisorSection" aria-label="AI Advisor" style="display:none; margin-bottom:16px;">
+        <div class="deskDivider e14Divider" data-insight="ai_advisor">
+          <span class="deskDividerText e14DividerText">AI Advisor (Command Deck)</span>
+        </div>
+        <div id="e14AdvisorBody"></div>
+      </section>
+
       <form id="icForm" class="e14Form" aria-label="Engine 14 Controls">
         <div class="e14FormGrid">
           <div class="e14FieldGroup">
@@ -530,6 +573,7 @@
     <script src="/static/nav.js"></script>
     <script src="/static/raven-chat.js?v=3"></script>
     <script src="/static/desk-insight.js?v=2"></script>
-    <script src="/static/ic-scenario.js?v=14"></script>
+    <script src="/static/ic-scenario.js?v=15"></script>
+    <script src="/static/engine14-v2.js?v=1"></script>
   </body>
 </html>

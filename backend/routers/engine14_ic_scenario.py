@@ -136,9 +136,543 @@ def ic_scenario(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         LOG.exception("engine14: run_scenario failed")
         raise HTTPException(status_code=500, detail=f"Scenario replay failed: {type(e).__name__}: {e}")
 
+    # v2 response augmentation — Command Deck handoff fields + MI v2
+    # source chip + optional legacy-verdict strip.
+    f_v2 = get_flags()
+    result = _augment_scenario_v2(result, body=body, flags=f_v2)
+
     with _scenario_cache_lock:
         _scenario_cache[key] = result
     return result
+
+
+# ---------------------------------------------------------------------------
+# v2 response augmentation
+# ---------------------------------------------------------------------------
+
+
+def _augment_scenario_v2(
+    result: Dict[str, Any], *, body: Dict[str, Any], flags: Any,
+) -> Dict[str, Any]:
+    """Add Command Deck fields + strip legacy verdict when flag is off.
+
+    Fields added:
+
+    - ``wingConsoleCacheKey`` / ``placementRank`` — echoed from the
+      request body so the frontend can deep-link back to the Wing
+      Console card that produced the selected placement.
+    - ``mcResults`` — empty unless the scenario was entered via the
+      Wing Console handoff (the full MC distribution is already on
+      the Wing Console response). This keeps /api/ic-scenario
+      backward-compatible while letting the Command Deck render the
+      MC reading without a second call.
+    - ``sourceChip`` — ``desk_default`` unless the request body carried
+      a ``sourceChip`` override (matches the E2 / E15 chip semantics).
+
+    Strip (when ``E14_EMIT_DESK_CONSENSUS=False``):
+
+    - ``reconcile.overall`` (top-level verdict string only — per-chip
+      detail stays).
+    - Echoed ``engine2.deskConsensus`` / ``engine2.recSimple`` if the
+      scenario payload was chained through /reconcile.
+    """
+    try:
+        result["wingConsoleCacheKey"] = body.get("wingConsoleCacheKey") or None
+        result["placementRank"] = (
+            int(body["placementRank"])
+            if body.get("placementRank") is not None else None
+        )
+    except Exception:
+        result["wingConsoleCacheKey"] = None
+        result["placementRank"] = None
+
+    src_chip = str(body.get("sourceChip") or "").strip().lower()
+    if src_chip not in ("desk_default", "user_override"):
+        src_chip = "desk_default"
+    result["sourceChip"] = src_chip
+
+    if "mcResults" not in result:
+        result["mcResults"] = {}
+
+    if bool(getattr(flags, "ENABLE_E14_V2", False)) and not bool(
+        getattr(flags, "E14_EMIT_DESK_CONSENSUS", False)
+    ):
+        recon = result.get("reconcile")
+        if isinstance(recon, dict) and "overall" in recon:
+            # Preserve per-chip detail, strip just the top-level verdict.
+            recon.pop("overall", None)
+        e2 = result.get("engine2")
+        if isinstance(e2, dict):
+            e2.pop("deskConsensus", None)
+            e2.pop("recSimple", None)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# v2 Wing Decision Console + exact-slider scoring
+# ---------------------------------------------------------------------------
+
+
+def _ensure_v2_enabled() -> None:
+    f = get_flags()
+    if not bool(getattr(f, "ENABLE_E14_V2", False)):
+        raise HTTPException(status_code=404, detail="Engine 14 v2 disabled (ENABLE_E14_V2=0).")
+    _ensure_enabled()
+
+
+def _parse_wing_console_body(body: Dict[str, Any]) -> Dict[str, Any]:
+    underlying = str(body.get("underlying") or "SPX").upper()
+    if underlying != "SPX":
+        raise HTTPException(status_code=400, detail="Engine 14 supports SPX only in Phase 1.")
+    ed = str(body.get("entry_date") or body.get("entryDate") or "").strip()[:10]
+    xp = str(body.get("expiry_date") or body.get("expiry") or body.get("expiryDate") or "").strip()[:10]
+    if not ed or not xp:
+        raise HTTPException(status_code=400, detail="entry_date and expiry_date are required.")
+    try:
+        a = dt.date.fromisoformat(ed)
+        b = dt.date.fromisoformat(xp)
+    except Exception as _e:
+        raise HTTPException(status_code=400, detail=f"entry_date/expiry_date must be YYYY-MM-DD: {_e}") from _e
+    if b <= a:
+        raise HTTPException(status_code=400, detail="expiry_date must be after entry_date.")
+    return {"underlying": underlying, "entry_date": ed, "expiry_date": xp}
+
+
+def _build_e14_wing_console_payload(
+    *,
+    underlying:  str,
+    entry_date:  str,
+    expiry_date: str,
+    flags:       Any,
+    weights:     Any,
+) -> Dict[str, Any]:
+    """Run the full Wing Console pipeline for E14.
+
+    Loads SPX bars, builds the analogue universe, filters to the
+    user's entry-day regime, then hands off to
+    :func:`backend.engine14.wing_console.build_wing_console` for
+    scoring.
+    """
+    from backend.engine14 import (
+        build_wing_console as _build_wing_console,
+    )
+    from backend.engine14.analogue_matcher import (
+        MatchCriteria,
+        build_analogue_universe,
+        filter_analogues,
+    )
+    from backend.engine14.simulator import (
+        _infer_user_em_pct,
+        _resolve_entry_regime,
+        IcScenarioRequest,
+    )
+    from backend.spx_ic.ohlc import DailyOHLC, fetch_dailies_ohlc_range
+
+    client = get_client()
+    try:
+        store = get_store_optional()
+    except Exception:
+        store = None
+
+    today = dt.date.today()
+    lookback_start = today - dt.timedelta(days=int(flags.ENGINE14_LOOKBACK_YEARS) * 370)
+    bars = fetch_dailies_ohlc_range(
+        client, ticker=underlying, start=lookback_start, end=today,
+    )
+    closes_sorted = [
+        (b.trade_date, float(b.close)) for b in bars if b.close is not None
+    ]
+    closes_sorted.sort(key=lambda x: x[0])
+    closes_by_date = {d: c for d, c in closes_sorted}
+    ohlc_by_date: Dict[str, DailyOHLC] = {
+        b.trade_date: b for b in bars if b is not None
+    }
+    if len(closes_sorted) < 180:
+        raise HTTPException(
+            status_code=503,
+            detail="Insufficient SPX history loaded (need at least ~9 months of bars).",
+        )
+
+    # Minimal request proxy so _infer_user_em_pct + _resolve_entry_regime
+    # reuse the existing helpers. Strikes/credit are placeholders — the
+    # Wing Console doesn't need them to derive EM + regime.
+    pseudo_req = IcScenarioRequest(
+        underlying=underlying,
+        entry_date=entry_date,
+        expiry=expiry_date,
+        short_put=0.0, long_put=0.0, short_call=0.0, long_call=0.0,
+        credit_received=1.0,
+    )
+    user_spot, user_em_pct, em_source, user_spot_as_of = _infer_user_em_pct(
+        pseudo_req, closes_by_date,
+    )
+    resolved_regime = _resolve_entry_regime(
+        user_em_pct=user_em_pct, request=pseudo_req, store=store, flags=flags,
+    )
+    user_regime = resolved_regime.bucket
+
+    # Capture the MI v2 snapshot (same shape as simulator.py v2 overlay).
+    regime_mi_v2: Optional[Dict[str, Any]] = None
+    try:
+        if bool(getattr(flags, "ENABLE_MI_V2", False)):
+            from backend.market_intel import regime_snapshot as _mi_snap
+            _mi = _mi_snap()
+            if _mi is not None:
+                _probs = getattr(_mi, "probabilities", None) or {}
+                regime_mi_v2 = {
+                    "label":         str(getattr(_mi, "label", "") or "") or None,
+                    "probabilities": dict(_probs) if isinstance(_probs, dict) else {},
+                    "vol_state":     getattr(_mi, "vol_state", None),
+                    "source":        getattr(_mi, "source", "v2_hmm"),
+                }
+    except Exception:
+        regime_mi_v2 = None
+
+    # Build + filter analogue universe (no strike-map step — we just need
+    # the pool for MAE + MC + historical breach fallback).
+    entry_dow = 0
+    target_dte_calendar = 4
+    try:
+        entry_dow = dt.date.fromisoformat(entry_date).weekday()
+        if entry_dow > 4:
+            entry_dow = 2
+        target_dte_calendar = max(
+            1,
+            (dt.date.fromisoformat(expiry_date) - dt.date.fromisoformat(entry_date)).days,
+        )
+    except Exception:
+        pass
+
+    from backend.engine14.simulator import _count_trading_sessions
+    target_dte_sessions = _count_trading_sessions(
+        entry_date, expiry_date, closes_by_date, flags=flags,
+    )
+
+    universe = build_analogue_universe(
+        ticker=underlying,
+        closes_sorted=closes_sorted,
+        entry_dow=entry_dow,
+        target_dte_calendar_days=target_dte_calendar,
+        max_windows=int(flags.ENGINE14_MAX_ANALOGUES),
+    )
+    criteria = MatchCriteria(
+        target_regime=user_regime,
+        target_dte_sessions=target_dte_sessions,
+        regime_bucket_tol=float(flags.ENGINE14_REGIME_BUCKET_TOL),
+        season_mode="none",
+        season_value=None,
+        em_multiple_tol=float(flags.ENGINE14_EM_MULTIPLE_TOL),
+        enable_em_multiple_filter=bool(flags.ENGINE14_ENABLE_EM_MULTIPLE_FILTER),
+        enable_knn_regime=bool(getattr(flags, "ENGINE14_ENABLE_KNN_REGIME", False)),
+        knn_top_n=int(getattr(flags, "ENGINE14_KNN_TOP_N", 80)),
+    )
+    try:
+        candidates = filter_analogues(universe=universe, criteria=criteria, flags=flags)
+    except TypeError:
+        # Older signatures accepted positional only.
+        candidates = filter_analogues(universe, criteria=criteria, flags=flags)
+
+    # Translate AnalogueWindow -> dict pool for the scorer.
+    pool: List[Dict[str, Any]] = []
+    for w in candidates:
+        pool.append({
+            "entry_date":   getattr(w, "entry_date", None),
+            "expiry_date":  getattr(w, "expiry_date", None),
+            "regime_bucket": getattr(w, "regime_bucket", None) or user_regime,
+            "macro_bucket": "NORMAL",
+            "entry_close":  getattr(w, "entry_close", None),
+        })
+
+    macro_bucket = "NORMAL"
+    hold_days = max(1, target_dte_sessions)
+
+    payload, mae_dist, mc_result = _build_wing_console(
+        entry_date=entry_date,
+        expiry_date=expiry_date,
+        as_of_date=today.isoformat(),
+        spot=float(user_spot or 0.0),
+        em_pct=float(user_em_pct or 0.0),
+        hold_days=int(hold_days),
+        dte_calendar_days=int(target_dte_calendar),
+        analogue_pool=pool,
+        closes_by_date=closes_by_date,
+        ohlc_by_date=ohlc_by_date,
+        regime_label=user_regime,
+        regime_bucket=user_regime,
+        regime_mi_v2=regime_mi_v2,
+        macro_bucket=macro_bucket,
+        weights=weights,
+        flags=flags,
+    )
+
+    return {
+        "schemaVersion":    1,
+        "wingConsole":      payload.to_dict(),
+        "mcResults":        (mc_result.to_dict() if mc_result else {}),
+        "maeDistribution":  mae_dist.to_dict(),
+        "regime":           {"mi_v2": regime_mi_v2},
+        "entryState": {
+            "userSpot":       round(float(user_spot or 0.0), 2),
+            "userSpotAsOf":   user_spot_as_of,
+            "userSpotIsLive": bool(user_spot_as_of == entry_date),
+            "userEmPct":      round(float(user_em_pct or 0.0), 3),
+            "regimeBucket":   user_regime,
+            "regimeSource":   resolved_regime.source,
+            "regimeSourceAsOf": resolved_regime.as_of,
+            "regimeMiV2":     regime_mi_v2,
+        },
+    }
+
+
+# Cache for wing-console payloads keyed on (entry, expiry, as_of, weights, flags).
+_wc_cache_lock = threading.Lock()
+_wc_cache: TTLCache = TTLCache(maxsize=256, ttl=10 * 60)
+
+
+def _wc_cache_key(
+    *,
+    underlying: str, entry_date: str, expiry_date: str,
+    weights: Dict[str, float], flags: Any,
+) -> tuple:
+    import hashlib
+    import json as _json
+    wf = hashlib.sha256(
+        _json.dumps(weights or {}, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:10]
+    return (underlying, entry_date, expiry_date, wf, flags.cache_key_engine14())
+
+
+@router.post("/api/ic-scenario/wing-console")
+def ic_scenario_wing_console(body: Dict[str, Any] = Body(default_factory=dict)) -> Dict[str, Any]:
+    """v2 ranked placement grid. Returns wingConsole + mcResults +
+    maeDistribution + regime.mi_v2. Cached 10 min on
+    (underlying, entry_date, expiry_date, weights_fp, flags_fp).
+    """
+    _ensure_v2_enabled()
+    parsed = _parse_wing_console_body(body)
+
+    f = get_flags()
+    from backend.engine14.wing_console import WingConsoleWeights
+    weights = WingConsoleWeights.from_flags(f)
+    wopts = body.get("weights") or {}
+    if isinstance(wopts, dict):
+        for k_, v_ in wopts.items():
+            # Support both "breach" (plan) and "close" (E2 alias).
+            target = k_
+            if k_ == "breach":
+                target = "close"
+            if hasattr(weights, target):
+                try:
+                    setattr(weights, target, float(v_))
+                except Exception:
+                    pass
+
+    key = _wc_cache_key(
+        underlying=parsed["underlying"], entry_date=parsed["entry_date"],
+        expiry_date=parsed["expiry_date"], weights=weights.as_dict(), flags=f,
+    )
+    with _wc_cache_lock:
+        hit = _wc_cache.get(key)
+    if hit is not None:
+        return hit
+
+    try:
+        payload = _build_e14_wing_console_payload(
+            underlying=parsed["underlying"],
+            entry_date=parsed["entry_date"],
+            expiry_date=parsed["expiry_date"],
+            flags=f,
+            weights=weights,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOG.exception("engine14 wing-console failed")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Wing Console failed: {type(e).__name__}: {e}",
+        ) from e
+
+    payload["updatedAt"] = dt.datetime.utcnow().isoformat() + "Z"
+    payload["weightsUsed"] = weights.as_dict()
+    with _wc_cache_lock:
+        _wc_cache[key] = payload
+    return payload
+
+
+@router.post("/api/ic-scenario/wing-console/score-placement")
+def ic_scenario_score_placement(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """v2 exact-slider scoring against a cached ScoringContext.
+
+    Cold-start path rebuilds the context by running the full Wing
+    Console once so the slider still works on first click.
+    """
+    _ensure_v2_enabled()
+
+    underlying = str(body.get("underlying") or "SPX").strip().upper()
+    entry_date = str(body.get("entry_date") or body.get("entryDate") or "")[:10]
+    expiry_date = str(body.get("expiry_date") or body.get("expiry") or body.get("expiryDate") or "")[:10]
+    as_of_date = str(body.get("as_of_date") or "").strip()[:10] or dt.date.today().isoformat()
+    try:
+        em_mult = float(body["em_mult"])
+        wing_pts = float(body["wing_pts"])
+    except (TypeError, KeyError, ValueError) as _e:
+        raise HTTPException(status_code=400, detail="em_mult and wing_pts must be numeric") from _e
+    if not (0.25 <= em_mult <= 3.0):
+        raise HTTPException(status_code=400, detail="em_mult out of range [0.25, 3.0]")
+    if not (0.5 <= wing_pts <= 100.0):
+        raise HTTPException(status_code=400, detail="wing_pts out of range [0.5, 100.0]")
+
+    f = get_flags()
+    from backend.engine14 import (
+        WingConsoleWeights,
+        get_scoring_context,
+        score_single_placement,
+    )
+
+    weights = WingConsoleWeights.from_flags(f)
+    wopts = body.get("weights") or {}
+    if isinstance(wopts, dict):
+        for k_, v_ in wopts.items():
+            target = "close" if k_ == "breach" else k_
+            if hasattr(weights, target):
+                try:
+                    setattr(weights, target, float(v_))
+                except Exception:
+                    pass
+
+    refresh = bool(body.get("refresh"))
+    ctx = None if refresh else get_scoring_context(entry_date, expiry_date, as_of_date)
+    source = "cached_context"
+    if ctx is None:
+        try:
+            _build_e14_wing_console_payload(
+                underlying=underlying,
+                entry_date=entry_date,
+                expiry_date=expiry_date,
+                flags=f,
+                weights=weights,
+            )
+            ctx = get_scoring_context(entry_date, expiry_date, as_of_date)
+            if ctx is None:
+                # Cold start may have published under today.iso if caller left
+                # as_of blank; try that.
+                today_iso = dt.date.today().isoformat()
+                ctx = get_scoring_context(entry_date, expiry_date, today_iso)
+            source = "rebuilt_context"
+        except HTTPException:
+            raise
+        except Exception as e:
+            LOG.exception("engine14 score-placement cold start failed")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Cold start failed: {type(e).__name__}: {e}",
+            ) from e
+
+    if ctx is None:
+        raise HTTPException(status_code=500, detail="Unable to build E14 scoring context.")
+
+    placement = score_single_placement(
+        context=ctx, em_mult=em_mult, wing_pts=wing_pts,
+        weights_override=weights,
+    )
+    return {
+        "underlying":     underlying,
+        "entry_date":     ctx.entry_date,
+        "expiry_date":    ctx.expiry_date,
+        "as_of_date":     ctx.as_of_date,
+        "placement":      placement.to_dict(),
+        "context_source": source,
+        "weights_used":   weights.as_dict(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# v2 E14-native advisor endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.post("/api/ic-scenario/advisor")
+def ic_scenario_advisor(body: Dict[str, Any] = Body(default_factory=dict)) -> Dict[str, Any]:
+    """v2 E14-native advisor.
+
+    Request body forms:
+
+    1. ``{"scenario": {...}}`` — pass a pre-computed scenario payload
+       (typical Command Deck flow: the frontend already has the body
+       from a prior ``/api/ic-scenario`` call).
+    2. ``{"request": {...}}`` — re-run the scenario first, then
+       narrate. Useful for direct API consumers that don't want to
+       make two round-trips.
+
+    When ``E14_ADVISOR_ENABLED=0`` or the LLM call fails, returns a
+    deterministic fallback shell so the frontend UI never has to
+    special-case "no advisor".
+    """
+    _ensure_enabled()
+    f = get_flags()
+    if not bool(getattr(f, "E14_ADVISOR_ENABLED", False)):
+        raise HTTPException(status_code=404, detail="Engine 14 advisor disabled (E14_ADVISOR_ENABLED=0).")
+
+    from backend.e14_advisor import generate_scenario_advisor
+
+    scenario = body.get("scenario")
+    if not scenario:
+        req_body = body.get("request")
+        if req_body:
+            # Inline-compute the scenario. Delegate to the same parser +
+            # run_scenario path the main endpoint uses so behavior is
+            # identical (cache key included).
+            req = _parse_request(req_body)
+            key = _cache_key(req)
+            with _scenario_cache_lock:
+                cached = _scenario_cache.get(key)
+            if cached is not None:
+                scenario = cached
+            else:
+                try:
+                    client = get_client()
+                except Exception as e:
+                    raise HTTPException(status_code=503, detail=f"ORATS client unavailable: {e}") from e
+                try:
+                    bz = get_benzinga_client_optional()
+                except Exception:
+                    bz = None
+                try:
+                    store = get_store_optional()
+                except Exception:
+                    store = None
+                try:
+                    scenario = run_scenario(req, client=client, benzinga_client=bz, store=store)
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=str(e)) from e
+                except Exception as e:
+                    LOG.exception("engine14: run_scenario failed (advisor inline)")
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Scenario replay failed: {type(e).__name__}: {e}",
+                    ) from e
+                scenario = _augment_scenario_v2(scenario, body=req_body, flags=f)
+                with _scenario_cache_lock:
+                    _scenario_cache[key] = scenario
+
+    if not scenario:
+        raise HTTPException(
+            status_code=400,
+            detail="Advisor requires either {\"scenario\": {...}} or {\"request\": {...}} in the body.",
+        )
+
+    advisor = generate_scenario_advisor(scenario_payload=scenario, flags=f)
+    return {
+        "advisor":      advisor,
+        "scenarioEcho": {
+            "analoguesUsed":   scenario.get("analoguesUsed"),
+            "entryState":      scenario.get("entryState"),
+            "regime":          scenario.get("regime"),
+            "outcomeDistribution": scenario.get("outcomeDistribution"),
+        },
+        "generatedAt":  dt.datetime.utcnow().isoformat() + "Z",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -731,6 +1265,32 @@ def ic_scenario_review(trade_id: str = Query(..., alias="tradeId")) -> Dict[str,
 
     entry_reconcile = (trade.get("entryContext") or {}).get("reconcile")
 
+    # v2: surface the MI v2 regime-at-entry when the stored scenario
+    # carries it (post-refactor trades) so the verdict language matches
+    # the scan's. Pre-refactor trades keep the legacy DMS label via
+    # entryState.regimeBucket / regimeSource. New trades get MI v2 as
+    # the source of truth.
+    entry_state = scenario.get("entryState") or {}
+    regime_mi_v2 = None
+    regime_src = entry_state.get("regimeSource")
+    regime_at_entry = {
+        "bucket": entry_state.get("regimeBucket"),
+        "source": regime_src,
+        "mi_v2":  None,
+    }
+    scenario_regime = scenario.get("regime") if isinstance(scenario.get("regime"), dict) else None
+    if scenario_regime:
+        regime_mi_v2 = scenario_regime.get("mi_v2")
+    if regime_mi_v2 is None:
+        regime_mi_v2 = entry_state.get("regimeMiV2")
+    if isinstance(regime_mi_v2, dict):
+        regime_at_entry["mi_v2"] = regime_mi_v2
+        # Prefer MI v2 label as the canonical regime-at-entry when
+        # available (post-v2 scenarios). Pre-v2 trades keep regimeBucket.
+        if regime_mi_v2.get("label"):
+            regime_at_entry["label"] = regime_mi_v2.get("label")
+            regime_at_entry["source"] = regime_mi_v2.get("source") or "mi_v2"
+
     return {
         "tradeId": trade_id,
         "predicted": predicted,
@@ -740,6 +1300,7 @@ def ic_scenario_review(trade_id: str = Query(..., alias="tradeId")) -> Dict[str,
         "scenarioVersion": scenario.get("version"),
         "analoguesUsed": scenario.get("analoguesUsed"),
         "entryReconcile": entry_reconcile,
+        "regimeAtEntry":  regime_at_entry,
     }
 
 
