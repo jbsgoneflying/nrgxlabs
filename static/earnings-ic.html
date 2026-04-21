@@ -8,6 +8,8 @@
     <meta name="description" content="Raven-Tech.co — Engine 15: single-name earnings IC scenario simulator blending Engine 1 earnings data with Engine 14 style historical replay." />
     <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
     <link rel="stylesheet" href="/static/styles.css?v=10" />
+    <link rel="stylesheet" href="/static/engine1-v2.css?v=2" />
+    <link rel="stylesheet" href="/static/engine15-v2.css?v=1" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <style>
       .e15Grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 18px; }
@@ -120,136 +122,144 @@
 
       <div id="banner" class="e15Banner" style="display:none;"></div>
 
-      <!-- Step 1: Ticker scan -->
-      <form id="scanForm" class="e15Form" aria-label="Ticker Scan">
-        <div class="e15FormGrid">
-          <div class="e15FieldGroup">
-            <div class="e15FieldGroupLabel">Step 1 — Ticker Scan</div>
-            <div class="e15Field">
-              <label for="ticker">Ticker</label>
-              <input type="text" id="ticker" placeholder="GE" maxlength="10" required style="text-transform:uppercase;" />
-            </div>
-            <div class="e15Field">
-              <label for="historyN">History events (max)</label>
-              <input type="number" id="historyN" min="4" max="40" value="20" />
-            </div>
+      <!-- E15 v2 — single-page Command Deck form. One Calculate runs
+           scan + scenario end-to-end; strikes / expiry / PT-SL live in
+           the collapsed Advanced block. Ticker + earnings date + timing
+           are the only required inputs above the fold. -->
+      <form id="commandDeckForm" class="e15Form" aria-label="Earnings Command Deck">
+        <div class="e15CommandRow">
+          <div class="e15Field">
+            <label for="ticker">Ticker <span class="e1Req" aria-hidden="true">*</span></label>
+            <input type="text" id="ticker" placeholder="NVDA" maxlength="10"
+                   required aria-required="true" style="text-transform:uppercase;" />
           </div>
-          <div class="e15FieldGroup">
-            <div class="e15FieldGroupLabel">&nbsp;</div>
-            <div class="e15Field">
-              <label>&nbsp;</label>
-              <button type="submit" id="scanBtn" class="primaryButton">Run Engine 1 Scan</button>
-            </div>
-            <div class="e15Field">
-              <div id="scanStatus" class="status">Ready</div>
-            </div>
+          <div class="e15Field">
+            <label for="earningsDate">Earnings date <span class="e1Req" aria-hidden="true">*</span></label>
+            <input type="date" id="earningsDate" required aria-required="true" />
           </div>
+          <div class="e15Field">
+            <label for="earningsTiming">Timing <span class="e1Req" aria-hidden="true">*</span></label>
+            <select id="earningsTiming" required aria-required="true">
+              <option value="" selected disabled>Timing…</option>
+              <option value="AMC">AMC (After-Market Close)</option>
+              <option value="BMO">BMO (Before-Market Open)</option>
+              <option value="UNK">UNK (unknown)</option>
+            </select>
+          </div>
+          <span id="e15EventSourceChip" class="e1SourceChip e1SourceChip--unknown"
+                title="Source of the earnings date"></span>
+          <button type="submit" id="runBtn" class="primaryButton" disabled>
+            <span class="btnLabel">Calculate</span>
+          </button>
         </div>
+
+        <details id="e15Advanced" class="e15AdvancedDetails">
+          <summary>Advanced — strikes, expiry, exit rules, history</summary>
+          <div class="e15FormGrid" style="margin-top:12px;">
+            <div class="e15FieldGroup">
+              <div class="e15FieldGroupLabel">Trade Window</div>
+              <div class="e15Field">
+                <label for="entryDate">Entry Date</label>
+                <input type="date" id="entryDate" />
+              </div>
+              <div class="e15Field">
+                <label for="expiry">Expiry</label>
+                <input type="date" id="expiry" />
+              </div>
+              <div class="e15Field">
+                <label for="creditReceived">Credit Received</label>
+                <input type="number" id="creditReceived" step="0.05" min="0" placeholder="1.20" />
+              </div>
+              <div class="e15Field">
+                <label for="plannedExitDate">Planned Exit Date</label>
+                <input type="date" id="plannedExitDate" />
+              </div>
+              <div class="e15Field">
+                <label for="plannedExitOffsetHours">Exit (hrs after open)</label>
+                <select id="plannedExitOffsetHours">
+                  <option value="0.5">~30 min after open</option>
+                  <option value="1.5" selected>~1.5 hr after open</option>
+                  <option value="2.5">~2.5 hr after open</option>
+                  <option value="4">~4 hr after open</option>
+                  <option value="6.5">close</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="e15FieldGroup">
+              <div class="e15FieldGroupLabel">Strikes <span class="e15Hint">(auto-filled from E1 Wing Console top pick)</span></div>
+              <div class="e15Field">
+                <label for="longPut">Long Put</label>
+                <input type="number" id="longPut" step="1" />
+              </div>
+              <div class="e15Field">
+                <label for="shortPut">Short Put</label>
+                <input type="number" id="shortPut" step="1" />
+              </div>
+              <div class="e15Field">
+                <label for="shortCall">Short Call</label>
+                <input type="number" id="shortCall" step="1" />
+              </div>
+              <div class="e15Field">
+                <label for="longCall">Long Call</label>
+                <input type="number" id="longCall" step="1" />
+              </div>
+            </div>
+
+            <div class="e15FieldGroup">
+              <div class="e15FieldGroupLabel">Exit / History</div>
+              <div class="e15Field">
+                <label for="profitTargetPct">Profit Target %</label>
+                <input type="number" id="profitTargetPct" step="5" value="50" min="10" max="100" />
+              </div>
+              <div class="e15Field">
+                <label for="stopLossPct">Stop Loss %</label>
+                <input type="number" id="stopLossPct" step="25" value="150" min="50" max="500" />
+              </div>
+              <div class="e15Field">
+                <label for="seasonMode">Season</label>
+                <select id="seasonMode">
+                  <option value="none">All</option>
+                  <option value="quarter">Same quarter only</option>
+                </select>
+              </div>
+              <div class="e15Field">
+                <label for="historyN">History events (max)</label>
+                <input type="number" id="historyN" min="4" max="40" value="20" />
+              </div>
+              <div class="e15Field">
+                <label>&nbsp;</label>
+                <button type="button" id="backfillBtn" class="primaryButton"
+                        style="background:var(--muted); width: 100%;">Warm cache (admin)</button>
+              </div>
+            </div>
+          </div>
+          <div id="runStatus" class="status" style="margin-top:8px;">Ready</div>
+        </details>
       </form>
 
-      <div id="e1Summary" class="hidden">
-        <div class="deskDivider e15Divider" data-insight="e1_summary_strip"><span class="deskDividerText e15DividerText">Engine 1 Summary</span></div>
-        <div id="e1Cards" class="e15Grid"></div>
-        <div id="coverageBox" class="e15BackfillBox" style="display:none;"></div>
-      </div>
-
-      <!-- Step 2: Wings + planned-exit -->
-      <form id="scenarioForm" class="e15Form hidden" aria-label="Engine 15 Controls">
-        <div class="e15FormGrid">
-          <div class="e15FieldGroup">
-            <div class="e15FieldGroupLabel">Trade Window</div>
-            <div class="e15Field">
-              <label for="entryDate">Entry Date</label>
-              <input type="date" id="entryDate" required />
-            </div>
-            <div class="e15Field">
-              <label for="expiry">Expiry</label>
-              <input type="date" id="expiry" required />
-            </div>
-            <div class="e15Field">
-              <label for="creditReceived">Credit Received</label>
-              <input type="number" id="creditReceived" step="0.05" min="0" placeholder="1.20" required />
-            </div>
-          </div>
-
-          <div class="e15FieldGroup">
-            <div class="e15FieldGroupLabel">Earnings</div>
-            <div class="e15Field">
-              <label for="earningsDate">Earnings Date</label>
-              <input type="date" id="earningsDate" required />
-            </div>
-            <div class="e15Field">
-              <label for="earningsTiming">Timing</label>
-              <select id="earningsTiming">
-                <option value="BMO">BMO (Before open)</option>
-                <option value="AMC">AMC (After close)</option>
-                <option value="UNK">UNK (unknown)</option>
-              </select>
-            </div>
-            <div class="e15Field">
-              <label for="plannedExitDate">Planned Exit Date</label>
-              <input type="date" id="plannedExitDate" required />
-            </div>
-            <div class="e15Field">
-              <label for="plannedExitOffsetHours">Planned Exit (hours after open)</label>
-              <select id="plannedExitOffsetHours">
-                <option value="0.5">~30 min after open</option>
-                <option value="1.5" selected>~1.5 hr after open</option>
-                <option value="2.5">~2.5 hr after open</option>
-                <option value="4">~4 hr after open</option>
-                <option value="6.5">close</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="e15FieldGroup">
-            <div class="e15FieldGroupLabel">Strikes</div>
-            <div class="e15Field">
-              <label for="longPut">Long Put</label>
-              <input type="number" id="longPut" step="1" required />
-            </div>
-            <div class="e15Field">
-              <label for="shortPut">Short Put</label>
-              <input type="number" id="shortPut" step="1" required />
-            </div>
-            <div class="e15Field">
-              <label for="shortCall">Short Call</label>
-              <input type="number" id="shortCall" step="1" required />
-            </div>
-            <div class="e15Field">
-              <label for="longCall">Long Call</label>
-              <input type="number" id="longCall" step="1" required />
-            </div>
-          </div>
-
-          <div class="e15FieldGroup">
-            <div class="e15FieldGroupLabel">Exit Rules</div>
-            <div class="e15Field">
-              <label for="profitTargetPct">Profit Target %</label>
-              <input type="number" id="profitTargetPct" step="5" value="50" min="10" max="100" />
-            </div>
-            <div class="e15Field">
-              <label for="stopLossPct">Stop Loss %</label>
-              <input type="number" id="stopLossPct" step="25" value="150" min="50" max="500" />
-            </div>
-            <div class="e15Field">
-              <label for="seasonMode">Season</label>
-              <select id="seasonMode">
-                <option value="none">All</option>
-                <option value="quarter">Same quarter only</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <div class="e15FormActions">
-          <button type="submit" id="runBtn" class="primaryButton">Run Scenario</button>
-          <button type="button" id="backfillBtn" class="primaryButton" style="background:var(--muted);">Warm cache (admin)</button>
-          <span id="runStatus" class="status">Ready</span>
-        </div>
-      </form>
+      <!-- Hidden wing-console handoff state (populated from URL ?wc_key=...&rank=...) -->
+      <input type="hidden" id="wingConsoleCacheKey" value="" />
+      <input type="hidden" id="wingConsolePlacementRank" value="0" />
 
       <div class="results hidden" id="results">
+
+        <!-- E15 v2 — E1 Summary + Wing Console mini top-grid -->
+        <div id="e1Summary" class="hidden">
+          <div class="deskDivider e15Divider" data-insight="e1_summary_strip"><span class="deskDividerText e15DividerText">Engine 1 Summary</span></div>
+          <div id="e1Cards" class="e15Grid"></div>
+          <div id="coverageBox" class="e15BackfillBox" style="display:none;"></div>
+        </div>
+
+        <div class="deskDivider e15Divider" data-insight="wing_console_mini" id="wingConsoleMiniDivider" style="display:none;">
+          <span class="deskDividerText e15DividerText">Wing Console (E1 top picks)</span>
+        </div>
+        <div id="wingConsoleMiniPanel" class="e15Grid" style="display:none;"></div>
+
+        <div class="deskDivider e15Divider" data-insight="e1_wing_mae_crosscheck" id="crossCheckDivider" style="display:none;">
+          <span class="deskDividerText e15DividerText">E1 Cross-Check Badge</span>
+        </div>
+        <div id="crossCheckPanel" class="e15Grid" style="display:none;"></div>
 
         <div class="deskDivider e15Divider" data-insight="entry_state"><span class="deskDividerText e15DividerText">Entry State</span></div>
         <div id="entryCards" class="e15Grid"></div>
@@ -257,6 +267,16 @@
         <div class="deskDivider e15Divider" data-insight="planned_exit_timing"><span class="deskDividerText e15DividerText">Planned Exit Timing</span></div>
         <div id="plannedExitCaveat" class="e15Caveat"></div>
         <div id="plannedExitCards" class="e15Grid"></div>
+
+        <div class="deskDivider e15Divider" data-insight="crush_reading" id="crushReadingDivider" style="display:none;">
+          <span class="deskDividerText e15DividerText">Intraday Crush Reading</span>
+        </div>
+        <div id="crushReadingPanel" class="e15Grid" style="display:none;"></div>
+
+        <div class="deskDivider e15Divider" data-insight="credit_richness" id="creditRichnessDivider" style="display:none;">
+          <span class="deskDividerText e15DividerText">Credit Richness</span>
+        </div>
+        <div id="creditRichnessPanel" class="e15Grid" style="display:none;"></div>
 
         <div class="deskDivider e15Divider" data-insight="outcome_distribution_empirical"><span class="deskDividerText e15DividerText">Outcome Distribution</span></div>
         <div id="outcomePanel" class="e15Outcomes"></div>
@@ -306,6 +326,6 @@
     <script src="/static/ui_kit.js?v=4"></script>
     <script src="/static/nav.js"></script>
     <script src="/static/desk-insight.js?v=2"></script>
-    <script src="/static/earnings-ic.js?v=4"></script>
+    <script src="/static/earnings-ic.js?v=5"></script>
   </body>
 </html>

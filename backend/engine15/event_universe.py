@@ -103,12 +103,21 @@ def _parse_iso(s: Any) -> Optional[dt.date]:
 
 
 def biz_shift(d: dt.date, days: int) -> dt.date:
-    """Shift by ``days`` business days (Mon-Fri only, holiday-agnostic).
+    """Shift by ``days`` business days.
 
-    Holiday gaps are handled downstream by the chain-replay adapter,
-    which degrades gracefully when a specific trade_date has no cached
-    chain. Being exchange-calendar exact here would add no fidelity.
+    v2: when ``ENGINE15_HOLIDAY_CALENDAR`` is on, uses the NYSE trading
+    calendar (holidays + half-day handling) from
+    :mod:`backend.engine15.trading_calendar`. Falls back to the legacy
+    Mon-Fri heuristic when disabled so the desk can A/B the two.
     """
+    try:
+        from backend.config import get_flags
+        if bool(getattr(get_flags(), "ENGINE15_HOLIDAY_CALENDAR", True)):
+            from backend.engine15.trading_calendar import add_business_days
+            return add_business_days(d, int(days))
+    except Exception:
+        pass
+    # Legacy Mon-Fri heuristic (no holidays).
     step = 1 if days >= 0 else -1
     remaining = abs(int(days))
     cur = d
@@ -123,12 +132,21 @@ def biz_shift(d: dt.date, days: int) -> dt.date:
 
 def biz_diff(a: dt.date, b: dt.date) -> int:
     """Count business days from ``a`` to ``b`` (inclusive endpoints), or
-    negative if ``b < a``. Uses the same Mon-Fri heuristic as
-    :func:`biz_shift`."""
+    negative if ``b < a``.
+
+    v2: NYSE holiday-aware when flag is on; Mon-Fri heuristic otherwise.
+    """
     if b == a:
         return 0
     sign = 1 if b > a else -1
     x, y = (a, b) if sign > 0 else (b, a)
+    try:
+        from backend.config import get_flags
+        if bool(getattr(get_flags(), "ENGINE15_HOLIDAY_CALENDAR", True)):
+            from backend.engine15.trading_calendar import business_days_between
+            return sign * business_days_between(x, y)
+    except Exception:
+        pass
     n = 0
     cur = x + dt.timedelta(days=1)
     while cur <= y:

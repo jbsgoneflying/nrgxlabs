@@ -46,7 +46,13 @@ LOG = logging.getLogger("engine15.router")
 router = APIRouter()
 
 _SCENARIO_CACHE_LOCK = threading.Lock()
-_SCENARIO_CACHE: TTLCache = TTLCache(maxsize=256, ttl=10 * 60)
+# v2: TTL respects ENGINE15_CACHE_TTL_SCAN (default 600s); previously the
+# flag was declared in config but the cache was hard-coded.
+try:
+    _SCENARIO_CACHE_TTL = int(get_flags().ENGINE15_CACHE_TTL_SCAN or 10 * 60)
+except Exception:
+    _SCENARIO_CACHE_TTL = 10 * 60
+_SCENARIO_CACHE: TTLCache = TTLCache(maxsize=256, ttl=_SCENARIO_CACHE_TTL)
 
 _BACKFILL_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=2, thread_name_prefix="engine15-backfill",
@@ -263,65 +269,23 @@ def _discover_next_event(
 # ---------------------------------------------------------------------------
 
 def _run_engine1(ticker: str, *, n: int = 20, years: int = 5, k: float = 1.0) -> Dict[str, Any]:
-    """Run Engine 1's compute_breach_stats + VRP enrichment for a single ticker.
+    """Run Engine 1's enriched breach payload for a single ticker.
 
-    This is a superset of what ``/api/breach`` returns: it adds VRP, width
-    comparison, entry quality, desk consensus, and em preference, matching
-    what ``routers/engine1_breach.py::breach_compare::fetch_single`` does.
-    We inline it here (rather than HTTP-hopping to /api/breach) to avoid
-    rehydrating the FastAPI request cycle.
+    Thin wrapper around :func:`backend.engine1.get_or_compute_breach_stats`
+    (the shared cross-engine cache). Adds a ticker-specific ``nextEvent``
+    discovery hop for UI prefill when Engine 1 itself didn't populate it.
     """
-    from backend.e1_vrp_engine import (
-        compute_e1_desk_consensus,
-        compute_earnings_width_comparison,
-        compute_em_preference,
-        compute_entry_quality,
-        compute_vrp_score,
-    )
-    from backend.earnings_logic import compute_breach_stats
-    from backend.go_no_go import compute_go_no_go
+    from backend.engine1 import get_or_compute_breach_stats
 
     f = get_flags()
     client = get_client()
     benzinga_client = get_benzinga_client_optional()
 
-    payload = compute_breach_stats(
-        client=client,
-        ticker=ticker,
-        n=int(n),
-        years=int(years),
-        k=float(k),
+    payload = get_or_compute_breach_stats(
+        ticker=ticker, n=int(n), years=int(years), k=float(k),
         trade_builder_inputs=None,
-        flags_override=f,
-        benzinga_client=benzinga_client,
+        client=client, benzinga_client=benzinga_client, flags=f,
     )
-    try:
-        payload["goNoGo"] = compute_go_no_go(
-            client, ticker=ticker, payload=payload, benzinga_client=benzinga_client,
-        )
-    except Exception as e:
-        LOG.warning("scan goNoGo failed for %s: %s", ticker, e)
-
-    events = payload.get("events") or []
-    current = payload.get("current") or {}
-    current_em_pct: Optional[float] = None
-    try:
-        current_em_pct = float(current.get("impliedMovePct") or 0) or None
-    except Exception:
-        pass
-    # Pre-market on announcement day: ORATS' live /cores may publish
-    # ``impErnMv=null``. Engine 1 stores the last-known delayed snapshot
-    # under ``current.delayedImpliedMovePct``; fall back to it so the
-    # scan's VRP/breach-at-current-EM stats stay populated for the UI.
-    if current_em_pct is None:
-        try:
-            d = current.get("delayedImpliedMovePct")
-            if d is not None:
-                f_d = float(d)
-                if f_d > 0:
-                    current_em_pct = f_d
-        except Exception:
-            pass
 
     # Compute a minimal ``nextEvent`` for UI prefill without running the
     # full ENABLE_MONTE_CARLO_EARNINGS path. We pull ORATS /cores directly:
@@ -330,54 +294,11 @@ def _run_engine1(ticker: str, *, n: int = 20, years: int = 5, k: float = 1.0) ->
     try:
         next_event = _discover_next_event(client, ticker=ticker, payload=payload)
         if next_event:
-            # Honor Engine 1 if it already populated nextEvent (MC flag on).
             existing = payload.get("nextEvent") or {}
             if not existing.get("earnDateNext"):
                 payload["nextEvent"] = next_event
-    except Exception as e:
-        LOG.debug("scan nextEvent discovery failed for %s: %s", ticker, e)
-
-    try:
-        vrp = compute_vrp_score(events, current_implied_move_pct=current_em_pct)
-        payload["vrpAnalysis"] = vrp
-
-        em_mults = [float(x.strip()) for x in str(f.E1_EM_MULTS).split(",") if x.strip()]
-        wing_pts = [float(x.strip()) for x in str(f.E1_WING_WIDTH_PTS).split(",") if x.strip()]
-        stock_price: Optional[float] = None
-        try:
-            stock_price = float(current.get("stockPrice") or 0) or None
-        except Exception:
-            pass
-        wc, em_breach = compute_earnings_width_comparison(
-            events,
-            em_mults=em_mults, wing_pts=wing_pts,
-            current_implied_move_pct=current_em_pct, stock_price=stock_price,
-        )
-        payload["widthComparison"] = wc
-        payload["emBreachSummary"] = em_breach
-
-        eq = compute_entry_quality(
-            iv_elevation=vrp.get("ivElevation"),
-            skew_overlay=payload.get("skewOverlay"),
-            regime=payload.get("regime"),
-            ticker_dealer_gamma=payload.get("tickerDealerGamma"),
-            current=current,
-            go_no_go=payload.get("goNoGo"),
-        )
-        payload["entryQuality"] = eq
-
-        dc = compute_e1_desk_consensus(
-            vrp=vrp, entry_quality=eq, em_breach_summary=em_breach,
-            regime=payload.get("regime"), gap_vs_ctc=payload.get("gapVsCtc"),
-            event_risk=payload.get("eventRisk"),
-        )
-        payload["deskConsensus"] = dc
-
-        payload["emPreference"] = compute_em_preference(
-            em_breach, vrp.get("vrpScore"), eq.get("entryQuality"),
-        )
-    except Exception as e:
-        LOG.warning("scan VRP enrichment failed for %s: %s", ticker, e)
+    except Exception as err:
+        LOG.debug("scan nextEvent discovery failed for %s: %s", ticker, err)
 
     return payload
 
@@ -430,9 +351,98 @@ def earnings_ic_scan(body: Dict[str, Any] = Body(default_factory=dict)) -> Dict[
 # /api/earnings-ic/scenario — main entrypoint
 # ---------------------------------------------------------------------------
 
+def _hydrate_from_wing_console(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Pre-process the scenario body: when the caller supplies a
+    ``wingConsoleCacheKey`` (or the legacy ``wing_console_cache_key``)
+    plus an optional ``placementRank`` (default 0 = top pick), look up
+    the cached :class:`backend.engine1.ScoringContext` + the cached
+    :class:`backend.engine1.WingConsolePayload` for the same ticker /
+    event pair and fill in any missing strikes + creditReceived from
+    the selected placement.
+
+    User-supplied fields always win — this helper only populates gaps.
+    Silent no-op when the context/cache is missing so the legacy
+    full-form submit path still works.
+    """
+    from backend.engine1 import get_scoring_context, score_single_placement
+
+    wc_key = (
+        body.get("wingConsoleCacheKey")
+        or body.get("wing_console_cache_key")
+        or ""
+    ).strip() if isinstance(
+        body.get("wingConsoleCacheKey") or body.get("wing_console_cache_key"), str,
+    ) else ""
+    if not wc_key:
+        return body
+    try:
+        rank = int(body.get("placementRank") or body.get("placement_rank") or 0)
+    except (TypeError, ValueError):
+        rank = 0
+
+    ticker = str(body.get("ticker") or "").strip().upper()
+    event_date = str(body.get("earningsDate") or "").strip()[:10]
+    event_timing = str(body.get("earningsTiming") or "").strip().upper()
+    if not ticker or not event_date or not event_timing:
+        return body
+
+    ctx = get_scoring_context(ticker, event_date, event_timing)
+    if ctx is None:
+        return body
+
+    # Pick the top-N placements from the context's grid. The ScoringContext
+    # doesn't hold a pre-ranked list, so we compute on-demand from its
+    # cached pool. Keep it cheap: 5 EM * 3 wing = 15 at most.
+    from backend.engine1 import DEFAULT_WEIGHTS, score_placements
+    try:
+        placements, _ = score_placements(
+            ticker=ticker, spot=float(ctx.spot),
+            implied_move_pct=float(ctx.implied_move_pct),
+            events=list(ctx.events or []),
+            mae=ctx.mae,
+            weights=ctx.weights or DEFAULT_WEIGHTS,
+            median_credit_pts=ctx.median_credit_pts,
+        )
+    except Exception:
+        return body
+    if not placements:
+        return body
+    if rank < 0 or rank >= len(placements):
+        rank = 0
+    p = placements[rank]
+
+    # Fill missing fields from the selected placement. We never overwrite
+    # a user-supplied value — desk can always tune after the handoff.
+    def _maybe_set(key: str, val: Any) -> None:
+        cur = body.get(key)
+        if cur is None or cur == "" or (isinstance(cur, (int, float)) and float(cur) == 0.0):
+            body[key] = val
+
+    _maybe_set("shortPut",  float(p.short_put_strike))
+    _maybe_set("longPut",   float(p.long_put_strike))
+    _maybe_set("shortCall", float(p.short_call_strike))
+    _maybe_set("longCall",  float(p.long_call_strike))
+    # credit_dollars is per-contract dollars; credit_est is points.
+    if not body.get("creditReceived") and p.credit_est:
+        body["creditReceived"] = round(float(p.credit_est), 3)
+    # Record provenance so the response can echo it back to the UI.
+    body["_wingConsoleHandoff"] = {
+        "cacheKey":       wc_key,
+        "placementRank":  int(rank),
+        "placementCount": int(len(placements)),
+        "emMult":         float(p.em_mult),
+        "wingPts":        float(p.wing_pts),
+        "compositeScore": float(p.composite_score),
+    }
+    return body
+
+
 def _parse_scenario_body(body: Dict[str, Any]):
     """Validate + coerce the request body into an :class:`EarningsIcRequest`."""
     from backend.engine15.simulator import EarningsIcRequest
+    # v2: wing-console handoff fills missing strikes/credit from E1's
+    # cached ScoringContext. Must run before field validation below.
+    body = _hydrate_from_wing_console(body)
 
     def _req_float(k: str) -> float:
         v = body.get(k)
@@ -475,6 +485,11 @@ def _parse_scenario_body(body: Dict[str, Any]):
                 body.get("profitTargetPct", f.ENGINE15_DEFAULT_PROFIT_TARGET_PCT)
             ),
             stop_loss_pct=float(body.get("stopLossPct", f.ENGINE15_DEFAULT_STOP_LOSS_PCT)),
+            # v2: season_mode / season_value can restrict the replay pool
+            # to Q[1-4] or a specific month (Jan..Dec) when the desk wants
+            # to condition on earnings-season parity.
+            season_mode=str(body.get("seasonMode") or "none").strip().lower(),
+            season_value=(str(body.get("seasonValue")).strip() if body.get("seasonValue") else None),
             include_e1_payload=bool(body.get("includeE1Payload", True)),
             n_history=int(body.get("n") or 20),
             years_history=int(body.get("years") or 5),
@@ -522,14 +537,25 @@ def _cache_key(req) -> tuple:
 
 @router.post("/api/earnings-ic/scenario")
 def earnings_ic_scenario(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """Run the Engine 15 earnings IC replay."""
+    """Run the Engine 15 earnings IC replay.
+
+    v2: accepts optional ``wingConsoleCacheKey`` + ``placementRank`` so
+    the E1 Wing Console's "Simulate in E15" button can hand off a
+    scored placement without the desk re-typing strikes.
+    """
     _ensure_enabled()
+    # _hydrate_from_wing_console (inside _parse_scenario_body) may tuck a
+    # provenance block onto the body dict under ``_wingConsoleHandoff``;
+    # lift it out so we can echo it on the response regardless of cache path.
     req = _parse_scenario_body(body)
+    handoff_meta = body.get("_wingConsoleHandoff") if isinstance(body, dict) else None
     key = _cache_key(req)
 
     with _SCENARIO_CACHE_LOCK:
         cached = _SCENARIO_CACHE.get(key)
     if cached is not None:
+        if handoff_meta:
+            cached = {**cached, "wingConsoleHandoff": handoff_meta}
         return cached
 
     # Lazy import so the router stays importable when engine15 deps aren't warm.
@@ -565,6 +591,8 @@ def earnings_ic_scenario(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
             detail=f"Scenario replay failed: {type(e).__name__}: {e}",
         )
 
+    if handoff_meta:
+        result = {**result, "wingConsoleHandoff": handoff_meta}
     with _SCENARIO_CACHE_LOCK:
         _SCENARIO_CACHE[key] = result
     return result

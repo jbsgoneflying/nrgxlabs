@@ -1028,6 +1028,7 @@ function _renderTunerAndActions(data) {
 
     <div class="e1ConsoleActions">
       <button type="button" id="e1BuildTradeBtn" class="e1ConsoleActions--primary">Build Trade from selected</button>
+      <button type="button" id="e1SimulateE15Btn">Simulate Top Pick in E15</button>
       <button type="button" id="e1AdvisorBtn">Run LLM Advisor Narrative</button>
       <button type="button" id="e1ExportBtn">Export JSON</button>
     </div>
@@ -1128,10 +1129,33 @@ function _wireTuner(data) {
 }
 
 function _wireWingActions(data) {
-  const buildBtn = $("e1BuildTradeBtn");
-  const advBtn   = $("e1AdvisorBtn");
-  const expBtn   = $("e1ExportBtn");
+  const buildBtn  = $("e1BuildTradeBtn");
+  const simBtn    = $("e1SimulateE15Btn");
+  const advBtn    = $("e1AdvisorBtn");
+  const expBtn    = $("e1ExportBtn");
   const narrativeEl = $("e1AdvisorNarrative");
+
+  if (simBtn) {
+    simBtn.addEventListener("click", () => {
+      // v2 handoff to Engine 15: open the Command Deck with the
+      // selected placement's rank + the Wing Console cache key, so
+      // E15's router-level hydrator pre-fills strikes + credit.
+      const idx = _e1WingConsoleState.selectedIndex || 0;
+      const ticker = _e1WingConsoleState.ticker;
+      const eventDate = _e1WingConsoleState.event_date;
+      const eventTiming = _e1WingConsoleState.event_timing;
+      const cacheKey = (data && data.cache_key) || "handoff";
+      if (!ticker || !eventDate || !eventTiming) return;
+      const qs = new URLSearchParams({
+        ticker,
+        event_date: eventDate,
+        event_timing: eventTiming,
+        wc_key: cacheKey,
+        rank: String(idx),
+      });
+      window.open(`/earnings-ic?${qs.toString()}`, "_blank", "noopener,noreferrer");
+    });
+  }
 
   if (buildBtn) {
     buildBtn.addEventListener("click", () => {

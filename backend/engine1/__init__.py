@@ -30,6 +30,12 @@ from backend.engine1.theta_capture import (
     ThetaCaptureReading,
     estimate_theta_capture,
 )
+from backend.engine1.shared_cache import (
+    clear as clear_shared_cache,
+    get_or_compute_breach_stats,
+    get_stats_snapshot as get_shared_cache_stats,
+    reset_stats as reset_shared_cache_stats,
+)
 from backend.engine1.wing_console import (
     DEFAULT_WEIGHTS,
     PlacementScore,
@@ -52,10 +58,14 @@ __all__ = [
     "WingConsolePayload",
     "WingConsoleWeights",
     "build_wing_console",
+    "clear_shared_cache",
     "compute_mae_distribution",
     "estimate_theta_capture",
+    "get_or_compute_breach_stats",
     "get_scoring_context",
+    "get_shared_cache_stats",
     "mae_percentile_to_credit_pct",
+    "reset_shared_cache_stats",
     "score_placements",
     "score_single_placement",
     "store_scoring_context",

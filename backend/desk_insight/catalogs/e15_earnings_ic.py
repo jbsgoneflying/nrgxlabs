@@ -7,15 +7,16 @@ from __future__ import annotations
 
 ENGINE_META = {
     "id":          "e15",
-    "name":        "Engine 15 — Earnings IC Scenario Advisor",
+    "name":        "Engine 15 v2 — Earnings Scenario Command Deck",
     "description": (
-        "Single-name earnings iron-condor replay. Blends Engine 1's "
-        "earnings-breach payload with Engine 14's replay machinery, but "
-        "the analogue pool is THIS ticker's prior earnings events and "
-        "the exit is a planned date + time-of-day (not expiry). Surfaces "
-        "VRP / vol-crush verdict, planned-exit outcome distribution with "
-        "earnings conditioning, MTM timeline, and exit-rule "
-        "recommendations for the planned hold window."
+        "Single-name earnings iron-condor replay and validator. Runs "
+        "THIS ticker's prior earnings events through Engine 14's replay "
+        "machinery using the desk's chosen strikes and planned exit, "
+        "then cross-checks against Engine 1's Wing Console MAE pool. "
+        "Single-page command deck: required earnings date + timing, "
+        "optional handoff from E1 Wing Console top pick, MI v2 regime "
+        "probabilities, MTM timeline, outcome distribution, empirical "
+        "intraday-crush factor, and an E1 convergence/divergence badge."
     ),
     "asset_class": "single-name equities — earnings cycle",
 }
@@ -26,24 +27,98 @@ CATALOG = {
     "e1_summary_strip": {
         "title": "Engine 1 Summary",
         "spec": (
-            "Rolls up the single-name earnings context for the ticker: "
-            "current spot, 1σ EM %, VRP score, desk consensus (go / no-go), "
-            "next earnings date, anncTod (BMO/AMC), and IV-elevation stamp.\n"
-            "- spot: current close used as entry-anchor price.\n"
-            "- 1σ EM%: ATM-straddle expected move to expiry.\n"
+            "Condensed Engine 1 context for the ticker: current spot, 1σ EM "
+            "percent, VRP score, IV elevation, straddle EM, strike targets, "
+            "MI v2 regime probabilities, and breach-rate at 1.0x/1.5x/2.0x "
+            "EM multiples.\n"
+            "- spot: current close used as entry anchor.\n"
+            "- 1σ EM percent: ATM-straddle expected move to expiry.\n"
             "- VRP score (-100..+100): positive = IV pricier than realized "
-            "(tailwind for premium sellers); negative = IV cheap vs "
-            "realized (headwind).\n"
-            "- anncTod: BMO = announcement before Tuesday open; AMC = "
-            "after Monday close. Confirms entry/exit choreography.\n"
-            "- Desk consensus: qualitative verdict (Favorable / Neutral / "
-            "Fade) from E1's VRP + entry quality + regime + gap risk."
+            "(tailwind); negative = cheap IV (headwind).\n"
+            "- regimeMiV2: HMM state probabilities + vol_state (new in E15 "
+            "v2; replaces the scalar regime label).\n"
+            "- e1WingMAE: MAE p95 from E1's event pool (used by the E15 "
+            "cross-check badge).\n"
+            "E1 v2 deliberately suppresses the desk-consensus verdict "
+            "from this strip — the Command Deck runs ASSUMING the desk "
+            "has committed to the trade and is validating placement, "
+            "not re-litigating go/no-go."
         ),
         "related_cards": [
+            {"engine": "e15", "slug": "wing_console_mini", "label": "Wing Console (E1 top picks)"},
             {"engine": "e15", "slug": "entry_state", "label": "Entry State"},
-            {"engine": "e15", "slug": "vrp_crush_verdict", "label": "VRP / Crush Verdict"},
-            {"engine": "e1",  "slug": "vrp_analysis", "label": "VRP Analysis (E1)"},
-            {"engine": "e1",  "slug": "desk_consensus", "label": "E1 Desk Consensus"},
+            {"engine": "e15", "slug": "e1_wing_mae_crosscheck", "label": "E1 Cross-Check Badge"},
+            {"engine": "e1",  "slug": "wing_console", "label": "E1 Wing Decision Console"},
+            {"engine": "e1",  "slug": "vrp_analysis", "label": "E1 VRP Analysis"},
+        ],
+    },
+
+    "wing_console_mini": {
+        "title": "Wing Console (E1 top picks)",
+        "spec": (
+            "Compact top-3 slice of Engine 1's Wing Decision Console for "
+            "the same ticker + earnings event. Lets the desk see how the "
+            "scenario they're replaying compares to the ranked best "
+            "placements E1 scored — click any row to jump back to E1 or "
+            "press 'Simulate Top Pick' to re-run the Command Deck with "
+            "that placement's strikes pre-filled.\n"
+            "Each row: em_mult, wing_pts, short put / call strikes, "
+            "estimated credit (in dollars), composite score (0-100), "
+            "breach gap probability, and theta capture percent."
+        ),
+        "related_cards": [
+            {"engine": "e1",  "slug": "wing_console", "label": "Full E1 Wing Console"},
+            {"engine": "e15", "slug": "entry_state", "label": "Entry State"},
+            {"engine": "e15", "slug": "e1_wing_mae_crosscheck", "label": "Cross-Check Badge"},
+        ],
+    },
+
+    "e1_wing_mae_crosscheck": {
+        "title": "E1 Cross-Check Badge",
+        "spec": (
+            "Convergence / divergence badge that cross-validates E1's "
+            "MAE p95 pool (% price move at the 95th percentile worst "
+            "excursion) against E15's white-knuckle + breach bucket "
+            "percent.\n"
+            "Both pools are built from the same historical earnings "
+            "events for this ticker, so they should tell the same "
+            "story. When they agree (convergent, divergence < 0.25) "
+            "the desk has high confidence in the tail estimate. When "
+            "they disagree materially (divergent, divergence >= 0.5) "
+            "something is off — usually a stale chain cache for some "
+            "events, a bad EM override, or a placement E1 hasn't "
+            "re-scored against the desk's strikes. The badge says "
+            "'re-scan before acting on either' in that case."
+        ),
+        "related_cards": [
+            {"engine": "e15", "slug": "outcome_distribution_empirical", "label": "E15 Outcome Distribution"},
+            {"engine": "e1",  "slug": "mae_distribution", "label": "E1 MAE Pool"},
+            {"engine": "e1",  "slug": "wing_console", "label": "E1 Wing Console"},
+        ],
+    },
+
+    "crush_reading": {
+        "title": "Intraday Crush Reading",
+        "spec": (
+            "Per-ticker, tape-driven estimate of how much of the "
+            "close-to-close earnings move has played out by the desk's "
+            "planned AM exit.\n"
+            "- factor: 1.0 means the whole close-to-close move is "
+            "realized by morning; 0.5 means half. Computed as the "
+            "median |entry-day PnL / close PnL| ratio across the "
+            "analogue pool.\n"
+            "- source: 'empirical' when sample >= 3 analogue events, "
+            "'fixed' (0.80 default) when the pool is thin.\n"
+            "- n_events: number of analogues that contributed.\n"
+            "- p25/p50/p75: interquartile spread of the per-event "
+            "ratios so the desk can see how consistent the crush is "
+            "across history.\n"
+            "Replaces the legacy hard-coded 0.80 blend that the old "
+            "fidelity caveat called out as Phase 2 work."
+        ),
+        "related_cards": [
+            {"engine": "e15", "slug": "planned_exit_timing", "label": "Planned Exit Timing"},
+            {"engine": "e15", "slug": "mtm_timeline", "label": "MTM Timeline"},
         ],
     },
 

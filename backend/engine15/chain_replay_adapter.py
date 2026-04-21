@@ -246,9 +246,17 @@ class EventReplayResult:
 def _enumerate_biz_days(entry: dt.date, exit_: dt.date) -> List[str]:
     """Business-day sequence ``[entry, entry+1, ..., exit]`` inclusive.
 
-    We don't consult a holiday calendar. If the cache has no rows for a
-    given date we skip pricing it, same as Engine 14.
+    v2: NYSE holiday-aware when ``ENGINE15_HOLIDAY_CALENDAR`` is on so
+    Thanksgiving / July 4 / MLK / etc. don't show up as empty PnL points
+    in the MTM timeline. Legacy Mon-Fri fallback when the flag is off.
     """
+    try:
+        from backend.config import get_flags
+        if bool(getattr(get_flags(), "ENGINE15_HOLIDAY_CALENDAR", True)):
+            from backend.engine15.trading_calendar import business_days
+            return [d.isoformat() for d in business_days(entry, exit_, inclusive=True)]
+    except Exception:
+        pass
     days: List[str] = []
     cur = entry
     while cur <= exit_:

@@ -99,14 +99,19 @@ def _parse_iso_date(s: Any) -> Optional[dt.date]:
 
 
 def _biz_shift(d: dt.date, days: int) -> dt.date:
-    """Shift ``d`` by ``days`` *business days* (Mon-Fri). This is a
-    calendar-aware helper, but it is NOT exchange-holiday aware — the
-    ORATS fetch itself will simply return no rows for non-trading days,
-    which we detect and record.
+    """Shift ``d`` by ``days`` business days.
 
-    A positive ``days`` moves forward; negative moves backward; zero
-    returns a Mon-Fri snap of ``d`` (itself unless ``d`` is a weekend).
+    v2: NYSE holiday-aware when ``ENGINE15_HOLIDAY_CALENDAR`` is on so
+    the backfill plan doesn't schedule ORATS hits on closed sessions.
+    Falls back to Mon-Fri when disabled.
     """
+    try:
+        from backend.config import get_flags
+        if bool(getattr(get_flags(), "ENGINE15_HOLIDAY_CALENDAR", True)):
+            from backend.engine15.trading_calendar import add_business_days
+            return add_business_days(d, int(days))
+    except Exception:
+        pass
     step = 1 if days >= 0 else -1
     remaining = abs(int(days))
     cur = d
@@ -194,13 +199,26 @@ def plan_event_backfill(
     to_fetch: List[str] = []
     cached: List[str] = []
     skipped: List[str] = []
+    # v2: skip non-trading sessions (weekends + NYSE holidays) eagerly so
+    # the backfill plan doesn't schedule ORATS hits on closed days.
+    try:
+        from backend.config import get_flags
+        from backend.engine15.trading_calendar import is_trading_day
+        _holiday_aware = bool(getattr(get_flags(), "ENGINE15_HOLIDAY_CALENDAR", True))
+    except Exception:
+        is_trading_day = None  # type: ignore[assignment]
+        _holiday_aware = False
+
     for d in unique_dates:
-        # Drop weekends eagerly; ORATS would return empty anyway.
         try:
             dd = dt.date.fromisoformat(d)
         except Exception:
             continue
-        if dd.weekday() > 4:
+        if _holiday_aware and is_trading_day is not None:
+            if not is_trading_day(dd):
+                skipped.append(d)
+                continue
+        elif dd.weekday() > 4:
             skipped.append(d)
             continue
         if not force and chain_cache.has_trade_date(ticker=ticker, trade_date=d):

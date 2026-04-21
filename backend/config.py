@@ -436,6 +436,16 @@ class FeatureFlags:
     ENGINE15_ADVISOR_ENABLED: bool = True
     ENGINE15_ADVISOR_MODEL: str = "gpt-5.4"
 
+    # --- Engine 15 v2 — Earnings Scenario Command Deck ---
+    ENABLE_E15_V2: bool = True                         # kill-switch
+    ENGINE15_HOLIDAY_CALENDAR: bool = True             # use NYSE trading calendar for biz-day math
+    # "empirical" | "fixed" — empirical uses per-ticker historical open→close
+    # PnL collapse ratio; fixed falls back to ENGINE15_INTRADAY_CRUSH_FACTOR.
+    ENGINE15_INTRADAY_CRUSH_MODE: str = "empirical"
+    ENGINE15_GUIDANCE_RISK_ENABLED: bool = True        # Benzinga press/news risk modifier
+    E15_EMIT_DESK_CONSENSUS: bool = False              # parity with E1_EMIT_DESK_CONSENSUS
+    GUIDANCE_RISK_MAX_BUMP_PCT: float = 15.0           # cap for guidance-risk breach-rate bump
+
     # --- Gating (Engine 3 & 4) ---
     ENABLE_GATING: bool = True
     GATE_RD_REGIME_ALLOW: str = "Transitional,Stressed"
@@ -795,6 +805,14 @@ class FeatureFlags:
             ENGINE15_EM_MULTIPLE_TOL=_get_float("ENGINE15_EM_MULTIPLE_TOL", 0.35),
             ENGINE15_ENABLE_EM_MULTIPLE_FILTER=_get_bool("ENGINE15_ENABLE_EM_MULTIPLE_FILTER", False),
             ENGINE15_ADVISOR_ENABLED=_get_bool("ENGINE15_ADVISOR_ENABLED", True),
+
+            # Engine 15 v2
+            ENABLE_E15_V2=_get_bool("ENABLE_E15_V2", True),
+            ENGINE15_HOLIDAY_CALENDAR=_get_bool("ENGINE15_HOLIDAY_CALENDAR", True),
+            ENGINE15_INTRADAY_CRUSH_MODE=os.getenv("ENGINE15_INTRADAY_CRUSH_MODE", "empirical"),
+            ENGINE15_GUIDANCE_RISK_ENABLED=_get_bool("ENGINE15_GUIDANCE_RISK_ENABLED", True),
+            E15_EMIT_DESK_CONSENSUS=_get_bool("E15_EMIT_DESK_CONSENSUS", False),
+            GUIDANCE_RISK_MAX_BUMP_PCT=_get_float("GUIDANCE_RISK_MAX_BUMP_PCT", 15.0),
             ENGINE15_ADVISOR_MODEL=os.getenv("ENGINE15_ADVISOR_MODEL", os.getenv("E1_ADVISOR_MODEL", "gpt-5.4")),
 
             # --- Engine 8 ---

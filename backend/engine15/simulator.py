@@ -94,7 +94,11 @@ class EarningsIcRequest:
             return 7
 
     def planned_hold_biz_days(self) -> int:
-        """Business-day gap from entry to planned exit (≥0)."""
+        """Business-day gap from entry to planned exit (>=0).
+
+        v2: defers to :mod:`backend.engine15.event_universe` which in turn
+        uses the NYSE holiday calendar when the flag is on.
+        """
         try:
             a = dt.date.fromisoformat(self.entry_date)
             b = dt.date.fromisoformat(self.planned_exit_date)
@@ -102,7 +106,11 @@ class EarningsIcRequest:
             return 1
         if b <= a:
             return 0
-        # Same Mon-Fri heuristic used by the universe builder.
+        try:
+            from backend.engine15.event_universe import biz_diff
+            return max(0, biz_diff(a, b))
+        except Exception:
+            pass
         n = 0
         cur = a + dt.timedelta(days=1)
         while cur <= b:
@@ -137,91 +145,88 @@ def _run_engine1(
     client: Any,
     benzinga_client: Any,
     flags: FeatureFlags,
+    event_date: Optional[str] = None,
+    event_timing: Optional[str] = None,
+    trade_builder_inputs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Inline Engine 1 run — mirrors :func:`routers/engine15_earnings_ic._run_engine1`.
+    """Thin forwarder around :func:`backend.engine1.get_or_compute_breach_stats`.
 
-    Kept out of a shared util because the router call is public and
-    orchestration-heavy (handles HTTP shaping), while this one is
-    scoped to the simulator's need for VRP + events + next-event
-    metadata only.
+    E15 v2 uses the shared cross-engine cache so an E1 scan followed by
+    an E15 scenario on the same ticker + event (the primary desk flow)
+    only pays ORATS cost once. ``event_date`` / ``event_timing`` /
+    ``trade_builder_inputs`` participate in the cache key so overrides
+    or alternate wing-console placements correctly bust the slot.
     """
-    from backend.e1_vrp_engine import (
-        compute_e1_desk_consensus,
-        compute_earnings_width_comparison,
-        compute_em_preference,
-        compute_entry_quality,
-        compute_vrp_score,
+    from backend.engine1 import get_or_compute_breach_stats
+    return get_or_compute_breach_stats(
+        ticker=ticker, n=int(n), years=int(years), k=1.0,
+        event_date=event_date, event_timing=event_timing,
+        trade_builder_inputs=trade_builder_inputs,
+        client=client, benzinga_client=benzinga_client, flags=flags,
     )
-    from backend.earnings_logic import compute_breach_stats
-    from backend.go_no_go import compute_go_no_go
 
-    payload = compute_breach_stats(
-        client=client, ticker=ticker, n=int(n), years=int(years), k=1.0,
-        trade_builder_inputs=None, flags_override=flags,
-        benzinga_client=benzinga_client,
-    )
-    try:
-        payload["goNoGo"] = compute_go_no_go(
-            client, ticker=ticker, payload=payload, benzinga_client=benzinga_client,
-        )
-    except Exception as e:
-        LOG.debug("engine15: goNoGo failed for %s: %s", ticker, e)
 
-    events = payload.get("events") or []
-    current = payload.get("current") or {}
-    current_em_pct: Optional[float] = None
+def _resolve_exit_iv(
+    *,
+    ticker: str,
+    path: Any,
+    universe: Any,
+) -> Optional[float]:
+    """Look up ATM IV on an analogue path's exit trade date.
+
+    Used by greeks attribution so the vega term actually fires. Returns
+    a decimal IV (e.g. 0.28) or ``None`` when the chain cache has no
+    usable entry for the exit trade-date/expiry pair. Never raises.
+    """
     try:
-        current_em_pct = float(current.get("impliedMovePct") or 0) or None
+        from backend.engine14 import chain_cache
+        from backend.engine15.chain_replay_adapter import _atm_iv_from_chain
     except Exception:
-        pass
-    # Pre-market on announcement day ORATS live /cores can return a null
-    # implied move; fall back to the delayed snapshot so VRP re-scoring +
-    # breach-at-current-EM stats stay populated.
-    if current_em_pct is None:
-        try:
-            d = current.get("delayedImpliedMovePct")
-            if d is not None:
-                f = float(d)
-                if f > 0:
-                    current_em_pct = f
-        except Exception:
-            pass
+        return None
+
     try:
-        vrp = compute_vrp_score(events, current_implied_move_pct=current_em_pct)
-        payload["vrpAnalysis"] = vrp
-        em_mults = [float(x.strip()) for x in str(flags.E1_EM_MULTS).split(",") if x.strip()]
-        wing_pts = [float(x.strip()) for x in str(flags.E1_WING_WIDTH_PTS).split(",") if x.strip()]
-        stock_price: Optional[float] = None
-        try:
-            stock_price = float(current.get("stockPrice") or 0) or None
-        except Exception:
-            pass
-        wc, em_breach = compute_earnings_width_comparison(
-            events, em_mults=em_mults, wing_pts=wing_pts,
-            current_implied_move_pct=current_em_pct, stock_price=stock_price,
-        )
-        payload["widthComparison"] = wc
-        payload["emBreachSummary"] = em_breach
-        eq = compute_entry_quality(
-            iv_elevation=vrp.get("ivElevation"),
-            skew_overlay=payload.get("skewOverlay"),
-            regime=payload.get("regime"),
-            ticker_dealer_gamma=payload.get("tickerDealerGamma"),
-            current=current, go_no_go=payload.get("goNoGo"),
-        )
-        payload["entryQuality"] = eq
-        dc = compute_e1_desk_consensus(
-            vrp=vrp, entry_quality=eq, em_breach_summary=em_breach,
-            regime=payload.get("regime"), gap_vs_ctc=payload.get("gapVsCtc"),
-            event_risk=payload.get("eventRisk"),
-        )
-        payload["deskConsensus"] = dc
-        payload["emPreference"] = compute_em_preference(
-            em_breach, vrp.get("vrpScore"), eq.get("entryQuality"),
-        )
-    except Exception as e:
-        LOG.warning("engine15: VRP enrichment failed for %s: %s", ticker, e)
-    return payload
+        entry_d = dt.date.fromisoformat(str(path.entry_date))
+    except Exception:
+        return None
+    exit_day_idx = int(getattr(path, "exit_day", 0) or 0)
+
+    # Use the holiday-aware calendar if available.
+    try:
+        from backend.engine15.trading_calendar import add_business_days
+        exit_dt = add_business_days(entry_d, exit_day_idx)
+    except Exception:
+        cur = entry_d
+        step = exit_day_idx
+        while step > 0:
+            cur = cur + dt.timedelta(days=1)
+            if cur.weekday() <= 4:
+                step -= 1
+        exit_dt = cur
+
+    try:
+        rows = chain_cache.fetch_chain_slice(
+            ticker=str(ticker).upper(),
+            trade_date=exit_dt.isoformat(),
+            expiry=str(path.expiry_date),
+        ) or []
+    except Exception:
+        return None
+
+    if not rows:
+        return None
+    try:
+        spot = float(path.exit_close or path.entry_close or 0.0)
+        if spot <= 0:
+            return None
+        iv = _atm_iv_from_chain(rows, spot)
+        if iv is None:
+            return None
+        iv_f = float(iv)
+        if not (0.0 < iv_f < 5.0):
+            return None
+        return iv_f
+    except Exception:
+        return None
 
 
 def _infer_user_em_pct(
@@ -462,15 +467,180 @@ def _summarize_engine1(e1: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         # --- Regime / event risk chips ---
         "regimeLabel": regime.get("label"),
         "regimeTailMultiplier": regime.get("tailMultiplier"),
+        # v2: expose the full MI v2 HMM reading (probabilities, vol_state,
+        # source) so the Entry State card can render the regime chip + a
+        # probability band rather than the scalar label alone.
+        "regimeMiV2": (regime.get("mi_v2") or None),
         "eventRiskLabel": event_risk.get("label"),
         # --- Breach summary (supports both float-map and legacy dict shape) ---
         "emBreachRate1xPct": breach_rate_1x if breach_rate_1x is not None else breach_rate_fallback,
         "emBreachRate15xPct": breach_rate_15x,
         "emBreachRate2xPct": breach_rate_2x,
         "emBreachN": summary.get("events_used"),
+        # --- E1 v2 cross-validation anchors ---
+        # Exposed here so the E15 advisor + the Command Deck's "cross-check"
+        # badge can confirm / diverge from E1's MAE pool.
+        "e1WingMAE": (e1.get("e1WingMAE") or None),
+        "nextEventOverrideSource": ((e1.get("nextEvent") or {}).get("override_source") or None),
         # Back-compat fields (older callers).
         "emBreachPct": em_breach.get("breachRatePct") or em_breach.get("breachPct") if isinstance(em_breach, dict) else None,
     }
+
+
+def _wing_console_mini(request: "EarningsIcRequest") -> Optional[Dict[str, Any]]:
+    """Build a compact top-3 Wing Console slice for the Command Deck.
+
+    Reads :func:`backend.engine1.get_scoring_context` for the same
+    ticker + event + timing; if cached, re-scores the grid once and
+    returns the top 3 placements + key metadata so the E15 frontend
+    can render a cross-nav card without a separate fetch.
+
+    Returns ``None`` when the Wing Console context cache is cold —
+    not an error, just "nothing to show here yet."
+    """
+    try:
+        from backend.engine1 import (
+            DEFAULT_WEIGHTS, get_scoring_context, score_placements,
+        )
+    except Exception:
+        return None
+    ctx = get_scoring_context(
+        request.ticker, request.earnings_date, request.earnings_timing,
+    )
+    if ctx is None:
+        return None
+    try:
+        placements, _theta = score_placements(
+            ticker=request.ticker, spot=float(ctx.spot),
+            implied_move_pct=float(ctx.implied_move_pct),
+            events=list(ctx.events or []),
+            mae=ctx.mae,
+            weights=ctx.weights or DEFAULT_WEIGHTS,
+            median_credit_pts=ctx.median_credit_pts,
+        )
+    except Exception:
+        return None
+    if not placements:
+        return None
+    top = placements[:3]
+    return {
+        "ticker":       request.ticker,
+        "event_date":   request.earnings_date,
+        "event_timing": request.earnings_timing,
+        "placements": [
+            {
+                "rank":              i,
+                "em_mult":           float(p.em_mult),
+                "wing_pts":          float(p.wing_pts),
+                "short_put_strike":  p.short_put_strike,
+                "short_call_strike": p.short_call_strike,
+                "long_put_strike":   p.long_put_strike,
+                "long_call_strike":  p.long_call_strike,
+                "credit_est":        float(p.credit_est or 0.0),
+                "credit_dollars":    float(p.credit_dollars or 0.0),
+                "composite_score":   float(p.composite_score or 0.0),
+                "breach_gap_prob":   float(p.breach_gap_prob or 0.0),
+                "theta_capture_pct": float(p.theta_capture_pct or 0.0),
+                "confidence":        str(p.confidence or ""),
+            }
+            for i, p in enumerate(top)
+        ],
+        "grid_size":     int(len(placements)),
+        "context_age_s": 0,  # TTL is short; treat cached context as fresh
+    }
+
+
+def _compute_e1_wing_mae_crosscheck(
+    engine1: Dict[str, Any],
+    outcome_summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Cross-validate E1's MAE p95 pool against E15's replay outcomes.
+
+    E1's ``e1WingMAE.p95`` is the 95th-percentile max adverse excursion
+    (in % move) across the last N earnings events. E15's
+    ``whiteKnuckle + breach`` outcome pcts measure how often the desk's
+    chosen placement was forced into a scary/losing exit on the same
+    pool.
+
+    Both pools tell the same story when they're correlated. When they
+    diverge materially (>= 20 percentage points of white_knuckle+breach
+    vs a naive MAE-implied threshold hit), something is off — usually a
+    stale chain cache, a bad EM override, or a placement that E1 hasn't
+    re-scored against the desk's chosen strikes.
+
+    Returns ``{ e1_mae_p95_pct, e15_white_knuckle_pct, e15_breach_pct,
+    divergence, note, source }`` — ``divergence`` is the absolute
+    percentage-point gap normalised to [0, 1] so the UI can render a
+    "match / diverge" badge.
+    """
+    out: Dict[str, Any] = {
+        "e1_mae_p95_pct":        None,
+        "e15_white_knuckle_pct": None,
+        "e15_breach_pct":        None,
+        "divergence":            None,
+        "note":                  "",
+        "source":                "unavailable",
+    }
+
+    mae = (engine1 or {}).get("e1WingMAE") or {}
+    try:
+        p95 = mae.get("p95")
+        if p95 is not None:
+            out["e1_mae_p95_pct"] = round(float(p95), 2)
+    except Exception:
+        out["e1_mae_p95_pct"] = None
+
+    wk = ((outcome_summary or {}).get("whiteKnuckle") or {}).get("pct")
+    br = ((outcome_summary or {}).get("breach") or {}).get("pct")
+    try:
+        if wk is not None:
+            out["e15_white_knuckle_pct"] = round(float(wk), 2)
+        if br is not None:
+            out["e15_breach_pct"] = round(float(br), 2)
+    except Exception:
+        pass
+
+    if out["e1_mae_p95_pct"] is None or out["e15_white_knuckle_pct"] is None:
+        out["source"] = "missing_inputs"
+        out["note"] = "Cross-check skipped: E1 MAE or E15 outcome buckets missing."
+        return out
+
+    # Convergence heuristic: if E1's MAE p95 is low (< 8% move) the
+    # desk should see a low whiteKnuckle+breach pct (< 25%). If E1
+    # MAE p95 is high (>= 15%), we expect whiteKnuckle+breach >= 35%.
+    # Score the magnitude of the mismatch on a 0..1 scale.
+    combined_risk = float(out["e15_white_knuckle_pct"]) + float(out["e15_breach_pct"] or 0.0)
+    mae_level = float(out["e1_mae_p95_pct"])
+    # Rough expectation band: whiteKnuckle+breach ~ 2.0 * MAE p95
+    # (empirically calibrated; a 10% MAE p95 typically lines up with a
+    # ~20% combined panic-exit rate in the replay pool).
+    expected = max(0.0, min(80.0, 2.0 * mae_level))
+    raw_gap = abs(combined_risk - expected)
+    # Divergence: 0 when gap is 0, 1 when gap >= 40 percentage points.
+    divergence = max(0.0, min(1.0, raw_gap / 40.0))
+    out["divergence"] = round(float(divergence), 3)
+
+    if divergence < 0.25:
+        out["source"] = "convergent"
+        out["note"] = (
+            f"E1 MAE p95 ({mae_level:.1f}%) and E15 whiteKnuckle+breach "
+            f"({combined_risk:.1f}%) agree — both pools paint the same tail."
+        )
+    elif divergence < 0.5:
+        out["source"] = "mild_divergence"
+        out["note"] = (
+            f"E1 MAE p95 ({mae_level:.1f}%) and E15 whiteKnuckle+breach "
+            f"({combined_risk:.1f}%) differ modestly; check event-pool "
+            "overlap and strike mapping."
+        )
+    else:
+        out["source"] = "divergent"
+        out["note"] = (
+            f"E1 MAE p95 ({mae_level:.1f}%) and E15 whiteKnuckle+breach "
+            f"({combined_risk:.1f}%) diverge materially; likely chain-cache "
+            "gap or stale event pool. Re-scan before acting on either."
+        )
+    return out
 
 
 def _planned_exit_fidelity_caveat(req: EarningsIcRequest, crush_factor: float) -> str:
@@ -508,6 +678,17 @@ def run_earnings_scenario(
     ticker = request.ticker.upper()
 
     # --- 1. Engine 1 pull ------------------------------------------------
+    # Feed the scenario's strikes into trade_builder_inputs so E1's credit
+    # estimator shapes its output around the desk's chosen placement.
+    _tb_inputs: Dict[str, Any] = {
+        "symmetry":   "symmetric",
+        "wing_width": float(request.wing_width() or 0) or None,
+        "exp":        str(request.expiry or "") or None,
+    }
+    # Drop None entries so the cache key stays stable across requests
+    # that omit optional trade-builder fields.
+    _tb_inputs = {k: v for k, v in _tb_inputs.items() if v is not None}
+
     try:
         engine1 = _run_engine1(
             ticker=ticker,
@@ -516,6 +697,9 @@ def run_earnings_scenario(
             client=client,
             benzinga_client=benzinga_client,
             flags=flags,
+            event_date=request.earnings_date,
+            event_timing=request.earnings_timing,
+            trade_builder_inputs=(_tb_inputs or None),
         )
     except Exception as e:
         LOG.exception("engine15: Engine 1 pull failed for %s", ticker)
@@ -654,13 +838,30 @@ def run_earnings_scenario(
         penalty_pct=float(getattr(flags, "ENGINE15_FILL_PENALTY_PCT", 15.0)),
     )
 
+    # v2: intraday crush mode. In "empirical" mode we run the replay with
+    # no crush blend (factor=1.0) so the pool reflects raw close-to-close
+    # PnL, then compute a per-ticker crush factor from the resulting paths
+    # and apply it post-hoc. In "fixed" mode we stay on the hard-coded
+    # ENGINE15_INTRADAY_CRUSH_FACTOR (legacy behaviour).
+    _crush_mode = str(getattr(flags, "ENGINE15_INTRADAY_CRUSH_MODE", "empirical") or "fixed").strip().lower()
+    _crush_fixed = float(flags.ENGINE15_INTRADAY_CRUSH_FACTOR)
+    _replay_crush = 1.0 if _crush_mode == "empirical" else _crush_fixed
+
     paths: List[AnaloguePath] = []
     matched_events_ui: List[Dict[str, Any]] = []
     replay_drops: List[Dict[str, str]] = []
     analogue_entry_credits: List[float] = []
     user_strikes = request.strike_tuple()
-    for ctx in contexts:
-        res = simulate_event(
+
+    # v2: replay events in parallel. Each simulate_event is mostly
+    # I/O-bound (chain_cache.fetch_chain_slice over SQLite). max_workers=5
+    # is a sensible cap — SQLite serialises at the DB layer, so adding
+    # more workers mostly queues. Determinism preserved by storing results
+    # keyed by context index and reassembling in order.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _simulate_one(idx: int, ctx: Any) -> Tuple[int, Any]:
+        return idx, simulate_event(
             ctx,
             ticker=ticker,
             user_spot=user_spot,
@@ -671,8 +872,29 @@ def run_earnings_scenario(
             stop_loss_pct=float(request.stop_loss_pct),
             snap_max_pts=float(flags.ENGINE15_STRIKE_SNAP_MAX_PTS),
             fill_model=fill_model,
-            intraday_crush_factor=float(flags.ENGINE15_INTRADAY_CRUSH_FACTOR),
+            intraday_crush_factor=_replay_crush,
         )
+
+    results_by_idx: Dict[int, Any] = {}
+    with ThreadPoolExecutor(max_workers=min(5, max(1, len(contexts)))) as pool:
+        futures = [pool.submit(_simulate_one, i, ctx) for i, ctx in enumerate(contexts)]
+        for fut in as_completed(futures):
+            try:
+                idx, res = fut.result()
+                results_by_idx[idx] = res
+            except Exception as err:
+                LOG.warning("engine15: event simulate future failed: %s", err)
+
+    # Reassemble in deterministic (input) order so downstream caching
+    # and MTM timeline stays stable across runs.
+    for i, ctx in enumerate(contexts):
+        res = results_by_idx.get(i)
+        if res is None:
+            replay_drops.append({
+                "earnDate": ctx.window.earn_date_hist,
+                "reason": "simulate_event worker failed",
+            })
+            continue
         if res.path is None:
             replay_drops.append({
                 "earnDate": ctx.window.earn_date_hist,
@@ -725,6 +947,57 @@ def run_earnings_scenario(
             },
         )
 
+    # --- 6a. Empirical intraday crush (if mode=empirical) ----------------
+    # Compute the per-ticker crush factor from the raw close-to-close paths
+    # and apply it post-hoc to every path's planned-exit PnL (only paths
+    # that ran to time-stop — early-exit paths already captured PT/SL).
+    crush_reading_dict: Dict[str, Any] = {}
+    if _crush_mode == "empirical":
+        try:
+            from backend.engine15.intraday_crush import compute_crush_factor
+            _reading = compute_crush_factor(
+                paths=paths, fallback=_crush_fixed, min_sample=3,
+            )
+            crush_reading_dict = _reading.to_dict()
+            _emp_factor = float(_reading.factor)
+            if _reading.source == "empirical":
+                # Apply crush to each path's exit PnL when it ran to the
+                # time-stop boundary (exit_day == last day of daily_pnl_pct).
+                _applied = 0
+                for p in paths:
+                    try:
+                        daily = list(getattr(p, "daily_pnl_pct", []) or [])
+                        if not daily or getattr(p, "exit_day", None) is None:
+                            continue
+                        # Only re-blend time-stop exits; early PT/SL exits stay as-is.
+                        if int(p.exit_day) != len(daily) - 1:
+                            continue
+                        entry_pnl = float(daily[0][1])
+                        close_pnl = float(daily[-1][1])
+                        new_pnl = entry_pnl + _emp_factor * (close_pnl - entry_pnl)
+                        # Attempt in-place update on the dataclass (frozen=False
+                        # in engine14.AnaloguePath; if frozen, catch + skip).
+                        try:
+                            p.exit_pnl_pct = float(new_pnl)
+                            _applied += 1
+                        except Exception:
+                            pass
+                    except Exception:
+                        continue
+                if _applied > 0:
+                    crush_reading_dict["paths_adjusted"] = int(_applied)
+        except Exception as e:
+            LOG.debug("engine15: empirical crush computation failed: %s", e)
+            crush_reading_dict = {
+                "factor": _crush_fixed, "n_events": 0, "source": "fixed",
+                "fallback_reason": f"{type(e).__name__}: {e}",
+            }
+    else:
+        crush_reading_dict = {
+            "factor": _crush_fixed, "n_events": 0, "source": "fixed",
+            "fallback_reason": "ENGINE15_INTRADAY_CRUSH_MODE=fixed",
+        }
+
     # --- 6. Aggregate ---------------------------------------------------
     outcome_summary = _summarize_outcomes(paths)
     outcome_ci = _bootstrap_outcome_ci(paths)
@@ -753,13 +1026,22 @@ def run_earnings_scenario(
             continue
         try:
             days_held = max(1, int(p.exit_day) + 1)
+            # v2: resolve exit_iv from the cached chain at the actual exit
+            # trade date so greeks attribution captures the IV crush (vega)
+            # component. Falls back to None (legacy behaviour) when the
+            # chain slice for that date has no usable ATM IV.
+            exit_iv = _resolve_exit_iv(
+                ticker=ticker,
+                path=p,
+                universe=universe,
+            )
             attributions.append(attribute_path(
                 entry_date=str(p.entry_date),
                 entry_credit=float(p.entry_credit),
                 entry_spot=float(p.entry_close),
                 exit_spot=float(p.exit_close),
                 entry_iv=float(p.entry_iv),
-                exit_iv=None,
+                exit_iv=exit_iv,
                 days_held=days_held,
                 years_to_expiry=float(p.years_to_expiry),
                 mapped_strikes=p.mapped_strikes,
@@ -887,7 +1169,7 @@ def run_earnings_scenario(
         if note and note not in notes:
             notes.append(f"creditRichness: {note}")
 
-    return {
+    response: Dict[str, Any] = {
         "engine": 15,
         "version": __version__,
         "request": asdict(request),
@@ -903,9 +1185,15 @@ def run_earnings_scenario(
             "plannedExitDate": request.planned_exit_date,
             "plannedExitOffsetHours": float(request.planned_exit_offset_hours),
             "holdBizDays": int(request.planned_hold_biz_days()),
-            "intradayCrushFactor": float(crush_factor),
-            "fidelityCaveat": _planned_exit_fidelity_caveat(request, crush_factor),
+            # crush_factor here reflects what was used for the per-event
+            # loop (1.0 in empirical mode, the fixed config default in
+            # fixed mode). The actual applied crush is in crushReading.
+            "intradayCrushFactor": float(crush_reading_dict.get("factor") or crush_factor),
+            "fidelityCaveat": _planned_exit_fidelity_caveat(
+                request, float(crush_reading_dict.get("factor") or crush_factor),
+            ),
         },
+        "crushReading": crush_reading_dict,
         "fillModel": {
             "mode": fill_model.mode,
             "penaltyPct": float(fill_model.penalty_pct),
@@ -913,6 +1201,8 @@ def run_earnings_scenario(
         "creditRichness": credit_richness,
         "outcomeDistribution": outcome_summary,
         "outcomeDistributionCI": outcome_ci,
+        # v2: cross-validation badge against E1's Wing Console MAE pool.
+        "e1WingMAECrossCheck": _compute_e1_wing_mae_crosscheck(engine1, outcome_summary),
         "adjustedOutcomeDistribution": adjusted_distribution,
         "conditioningModifiers": conditioning,
         "conditioningSummary": conditioning_summary,
@@ -928,7 +1218,23 @@ def run_earnings_scenario(
         "matchedEvents": matched_events_ui,
         "droppedEvents": dropped + no_chain_drops + replay_drops,
         "engine1Summary": _summarize_engine1(engine1),
+        # v2: mini grid of the E1 Wing Console top placements for the
+        # same ticker + event so the Command Deck can render a cross-nav
+        # card without a separate fetch. ``None`` when the ScoringContext
+        # cache is cold (fresh page load on E15 without prior E1 pass).
+        "wingConsoleMini": _wing_console_mini(request),
         "engine1": engine1 if request.include_e1_payload else None,
         "dataQuality": data_quality,
         "notes": notes,
     }
+    # v2: strip legacy desk-consensus verdict fields from the riding E1
+    # payload when the E15 flag is off (parity with E1_EMIT_DESK_CONSENSUS).
+    # Keeps the response surface clean of TRADE / LEAN_PASS / PASS / FADE
+    # strings when the primary output is the replay + cross-check.
+    if not bool(getattr(flags, "E15_EMIT_DESK_CONSENSUS", False)):
+        e1 = response.get("engine1") if isinstance(response.get("engine1"), dict) else None
+        if e1 is not None:
+            for _k in ("deskConsensus", "emPreference",
+                       "e1DeskConsensus", "e1EmPreference"):
+                e1.pop(_k, None)
+    return response

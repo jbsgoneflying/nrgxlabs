@@ -103,26 +103,86 @@
   // ------------------------------------------------------------------
   // Step 1: /api/earnings-ic/scan
   // ------------------------------------------------------------------
+  // E15 v2 — single-page Command Deck. doCalculate runs scan + scenario
+  // end-to-end from one form submit. doScan is retained only as a silent
+  // helper for the scan pass when the desk hasn't yet completed the form.
   async function doScan(evt) {
     if (evt) evt.preventDefault();
     const t = ($('ticker').value || '').trim().toUpperCase();
-    if (!t) return;
+    if (!t) return null;
     $('ticker').value = t;
-
-    setStatus('scanStatus', 'Running Engine 1…');
-    $('scanBtn').disabled = true;
-    banner('');
     try {
       const n = parseInt($('historyN').value || '20', 10);
       const data = await postJson('/api/earnings-ic/scan', { ticker: t, n, years: 5 });
       state.scan = data;
       renderScanResult(data);
-      setStatus('scanStatus', 'Done.');
+      return data;
     } catch (err) {
       banner('Scan failed: ' + err.message, 'error');
-      setStatus('scanStatus', 'Error');
+      return null;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Single Calculate entry point. Runs scan first (if missing), then
+  // scenario, then paints the full Command Deck. Also echoes the
+  // wing-console handoff metadata back in the status bar when present.
+  async function doCalculate(evt) {
+    if (evt) evt.preventDefault();
+    const t = ($('ticker').value || '').trim().toUpperCase();
+    if (!t) {
+      banner('Enter a ticker.', 'error');
+      return;
+    }
+    $('ticker').value = t;
+
+    // Require earnings date + timing before continuing (matches E1 v2).
+    const evDate = $('earningsDate').value || '';
+    const evTiming = String($('earningsTiming').value || '').toUpperCase();
+    if (!evDate || !['AMC', 'BMO', 'UNK'].includes(evTiming)) {
+      banner('Enter earnings date + timing before running.', 'error');
+      return;
+    }
+
+    setStatus('runStatus', 'Running Engine 1 scan…');
+    $('runBtn').disabled = true;
+    banner('');
+    hide('results');
+    hide('e1Summary');
+
+    try {
+      // Always run (or re-run) the scan to keep E1 and E15 in lock-step.
+      const scan = await doScan();
+      if (!scan) {
+        setStatus('runStatus', 'Error');
+        return;
+      }
+      // Prefill strikes / expiry from the scan when the desk left them blank.
+      prefillScenarioForm(scan);
+
+      setStatus('runStatus', 'Running Command Deck replay…');
+      const body = collectScenarioBody();
+      if (!body) {
+        setStatus('runStatus', 'Error');
+        return;
+      }
+      const data = await postJson('/api/earnings-ic/scenario', body);
+      state.scenario = data;
+      if (window.DeskInsight) {
+        window.DeskInsight.clearCache();
+        window.DeskInsight.refresh();
+      }
+      renderScenario(data);
+      setStatus('runStatus', data.wingConsoleHandoff
+        ? `Done — simulated E1 Wing Console rank ${Number(data.wingConsoleHandoff.placementRank) + 1} pick.`
+        : 'Done.'
+      );
+      show('results');
+    } catch (err) {
+      banner('Command Deck failed: ' + err.message, 'error');
+      setStatus('runStatus', 'Error');
     } finally {
-      $('scanBtn').disabled = false;
+      $('runBtn').disabled = false;
     }
   }
 
@@ -321,37 +381,12 @@
   }
 
   // ------------------------------------------------------------------
-  // Step 2: /api/earnings-ic/scenario
+  // Legacy two-step runner — kept for callers that still expect this
+  // name; the v2 Command Deck calls doCalculate directly. Retained in
+  // case any bookmarks or tests still reference the old entry point.
   // ------------------------------------------------------------------
   async function doScenario(evt) {
-    if (evt) evt.preventDefault();
-    if (!state.scan) {
-      banner('Run Step 1 (ticker scan) first.', 'error');
-      return;
-    }
-    const body = collectScenarioBody();
-    if (!body) return;
-
-    setStatus('runStatus', 'Running replay…');
-    $('runBtn').disabled = true;
-    banner('');
-    hide('results');
-    try {
-      const data = await postJson('/api/earnings-ic/scenario', body);
-      state.scenario = data;
-      if (window.DeskInsight) {
-        window.DeskInsight.clearCache();
-        window.DeskInsight.refresh();
-      }
-      renderScenario(data);
-      setStatus('runStatus', 'Done.');
-      show('results');
-    } catch (err) {
-      banner('Scenario failed: ' + err.message, 'error');
-      setStatus('runStatus', 'Error');
-    } finally {
-      $('runBtn').disabled = false;
-    }
+    return doCalculate(evt);
   }
 
   function collectScenarioBody() {
@@ -371,10 +406,20 @@
       creditReceived: parseFloat($('creditReceived').value),
       profitTargetPct: parseFloat($('profitTargetPct').value),
       stopLossPct: parseFloat($('stopLossPct').value),
-      includeE1Payload: false,
+      // v2: Command Deck always includes the E1 summary + wingConsoleMini
+      // in the response body. includeE1Payload retained for legacy cache
+      // parity but now defaults true.
+      includeE1Payload: true,
     };
     const season = $('seasonMode').value;
     if (season === 'quarter') body.seasonMode = 'quarter';
+    // E1 Wing Console handoff (populated from URL ?wc_key=...&rank=...).
+    const wcKey = ($('wingConsoleCacheKey').value || '').trim();
+    if (wcKey) {
+      body.wingConsoleCacheKey = wcKey;
+      const rank = parseInt($('wingConsolePlacementRank').value || '0', 10);
+      body.placementRank = Number.isFinite(rank) ? rank : 0;
+    }
 
     for (const k of ['entryDate','expiry','earningsDate','plannedExitDate',
                       'longPut','shortPut','shortCall','longCall','creditReceived']) {
@@ -399,6 +444,18 @@
     if ((d.eventsUsed || 0) === 0) {
       banner((d.notes || ['No events used.'])[0], 'error');
     }
+    // v2 Command Deck cards (new): E1 summary + Wing Console mini grid
+    // + cross-check badge + crush reading live at the top. The rest of
+    // the render pipeline stays unchanged.
+    if (d.engine1Summary) {
+      renderScanResult({ engine1Summary: d.engine1Summary, engine1: d.engine1 || null });
+      show('e1Summary');
+    }
+    renderWingConsoleMini(d);
+    renderCrossCheck(d);
+    renderCrushReading(d);
+    refreshE15SourceChip(d);
+    renderHandoffBanner(d);
     renderEntryState(d);
     renderPlannedExit(d);
     renderCreditRichness(d);
@@ -411,6 +468,160 @@
     renderMatchedEvents(d);
     renderDroppedEvents(d);
     renderNotes(d);
+  }
+
+  // ------------------------------------------------------------------
+  // v2 Command Deck renderers
+  // ------------------------------------------------------------------
+
+  function refreshE15SourceChip(d) {
+    const chip = $('e15EventSourceChip');
+    if (!chip) return;
+    // Pull from engine1.nextEvent.override_source if it rode along;
+    // default to user_override when the handoff banner is present.
+    let src = 'unknown';
+    const e1 = d && d.engine1 || {};
+    const ne = e1.nextEvent || {};
+    if (ne.override_source) src = String(ne.override_source).toLowerCase();
+    if (d && d.wingConsoleHandoff) src = 'user_override';
+    const allowed = new Set([
+      'user_override', 'orats_cores', 'benzinga', 'cadence_estimate', 'unknown',
+    ]);
+    const s = allowed.has(src) ? src : 'unknown';
+    chip.className = `e1SourceChip e1SourceChip--${s}`;
+    const labels = {
+      user_override: 'Override',
+      orats_cores:   'ORATS',
+      benzinga:      'Benzinga',
+      cadence_estimate: 'Estimated',
+      unknown:       '',
+    };
+    chip.textContent = labels[s] || '';
+    chip.title = labels[s] ? `Earnings-date source: ${labels[s].toLowerCase()}` : '';
+  }
+
+  function renderHandoffBanner(d) {
+    const host = $('banner');
+    if (!host) return;
+    if (!d || !d.wingConsoleHandoff) {
+      if (host.classList.contains('e15HandoffBanner')) {
+        host.classList.remove('e15HandoffBanner');
+        host.style.display = 'none';
+        host.textContent = '';
+      }
+      return;
+    }
+    const h = d.wingConsoleHandoff;
+    host.className = 'e15HandoffBanner';
+    host.style.display = 'flex';
+    host.textContent = (
+      `Simulated E1 Wing Console rank ${Number(h.placementRank) + 1} pick — ` +
+      `EM ${Number(h.emMult).toFixed(2)} × ${Number(h.wingPts).toFixed(1)}pt wings · ` +
+      `composite ${Number(h.compositeScore).toFixed(1)}.`
+    );
+  }
+
+  function renderWingConsoleMini(d) {
+    const divider = $('wingConsoleMiniDivider');
+    const panel = $('wingConsoleMiniPanel');
+    if (!panel || !divider) return;
+    const wc = d && d.wingConsoleMini;
+    if (!wc || !Array.isArray(wc.placements) || wc.placements.length === 0) {
+      divider.style.display = 'none';
+      panel.style.display = 'none';
+      panel.innerHTML = '';
+      return;
+    }
+    divider.style.display = '';
+    panel.style.display = 'grid';
+    panel.innerHTML = '';
+    wc.placements.forEach(function (p, i) {
+      const row = el('div', 'e15WingMini' + (i === 0 ? ' e15WingMini--top' : ''));
+      row.innerHTML = (
+        `<div class="e15WingMiniRank">#${i + 1}${i === 0 ? ' ★' : ''}</div>` +
+        `<div>EM ${Number(p.em_mult).toFixed(2)}</div>` +
+        `<div>${Number(p.wing_pts).toFixed(1)}pt</div>` +
+        `<div>${Number(p.short_put_strike).toFixed(0)} / ${Number(p.short_call_strike).toFixed(0)}</div>` +
+        `<div>$${Number(p.credit_dollars).toFixed(0)}</div>` +
+        `<div class="e15WingMiniScore">${Number(p.composite_score).toFixed(1)}</div>` +
+        `<button type="button" class="e15WingMiniSimulate" data-rank="${i}">Simulate</button>`
+      );
+      panel.appendChild(row);
+    });
+    panel.querySelectorAll('.e15WingMiniSimulate').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const rank = Number(btn.getAttribute('data-rank') || 0);
+        // Use the same scenario body but re-run with the selected rank —
+        // the backend's hydrator will replace strikes/credit from that
+        // placement's slot before validating.
+        $('wingConsolePlacementRank').value = String(rank);
+        doCalculate();
+      });
+    });
+  }
+
+  function renderCrossCheck(d) {
+    const divider = $('crossCheckDivider');
+    const panel = $('crossCheckPanel');
+    if (!panel || !divider) return;
+    const cx = d && d.e1WingMAECrossCheck;
+    if (!cx || cx.source === 'unavailable' || cx.source === 'missing_inputs') {
+      divider.style.display = 'none';
+      panel.style.display = 'none';
+      panel.innerHTML = '';
+      return;
+    }
+    divider.style.display = '';
+    panel.style.display = 'grid';
+    const badgeClass = `e15CrossCheckBadge e15CrossCheckBadge--${cx.source}`;
+    const labels = {
+      convergent:       'MATCH',
+      mild_divergence:  'MILD GAP',
+      divergent:        'DIVERGE',
+    };
+    const label = labels[cx.source] || cx.source.toUpperCase();
+    panel.innerHTML = (
+      `<div class="${badgeClass}">` +
+        `<span class="e15CrossCheckLabel">${label}</span>` +
+        `<div>${cx.note || ''}` +
+        (cx.divergence != null
+          ? `<div style="font-size:11px;opacity:0.8;margin-top:4px;">` +
+              `divergence=${Number(cx.divergence).toFixed(2)} · ` +
+              `E1 MAE p95=${fmtPct(cx.e1_mae_p95_pct, 1)} · ` +
+              `E15 WK+breach=${fmtPct((cx.e15_white_knuckle_pct || 0) + (cx.e15_breach_pct || 0), 1)}` +
+            `</div>`
+          : ''
+        ) +
+        `</div>` +
+      `</div>`
+    );
+  }
+
+  function renderCrushReading(d) {
+    const divider = $('crushReadingDivider');
+    const panel = $('crushReadingPanel');
+    if (!panel || !divider) return;
+    const cr = d && d.crushReading;
+    if (!cr || cr.factor == null) {
+      divider.style.display = 'none';
+      panel.style.display = 'none';
+      panel.innerHTML = '';
+      return;
+    }
+    divider.style.display = '';
+    panel.style.display = 'grid';
+    const source = cr.source || 'fixed';
+    const factor = Number(cr.factor);
+    const detail = source === 'empirical'
+      ? `n=${cr.n_events} analogues · IQR ${fmtNum(cr.p25, 2)}–${fmtNum(cr.p75, 2)}`
+      : (cr.fallback_reason || 'fixed default');
+    panel.innerHTML = (
+      `<div class="e15CrushCard">` +
+        `<div class="e15CrushCard__label">Intraday crush factor</div>` +
+        `<div class="e15CrushCard__factor">${factor.toFixed(2)}×</div>` +
+        `<div class="e15CrushCard__detail">source: <strong>${source}</strong> · ${detail}</div>` +
+      `</div>`
+    );
   }
 
   function renderEntryState(d) {
@@ -914,6 +1125,35 @@
     switch (slug) {
       case 'e1_summary_strip':
         return payload.engine1Summary || {};
+      case 'wing_console_mini':
+        return payload.wingConsoleMini || {};
+      case 'e1_wing_mae_crosscheck':
+        return payload.e1WingMAECrossCheck || {};
+      case 'crush_reading':
+        return payload.crushReading || {};
+      case 'event_analogue_row': {
+        // Sample first-and-last matched events so the card has something
+        // to render even before the desk clicks a specific row.
+        const rows = payload.matchedEvents || [];
+        return {
+          total: rows.length,
+          sample: rows.length > 0 ? [rows[0], rows[rows.length - 1]] : [],
+          note: 'Each analogue row replays the desk\'s chosen strikes through that historical earnings event.',
+        };
+      }
+      case 'planned_exit_outcome': {
+        const dist = payload.outcomeDistribution || {};
+        const ci = payload.outcomeDistributionCI || {};
+        return {
+          plannedExit: payload.plannedExit || {},
+          fullCollect: dist.fullCollect || null,
+          earlyTarget: dist.earlyTarget || null,
+          whiteKnuckle: dist.whiteKnuckle || null,
+          stopOut: dist.stopOut || null,
+          breach: dist.breach || null,
+          ci: ci,
+        };
+      }
       case 'entry_state':
         return {
           entryState: payload.entryState || {},
@@ -1057,13 +1297,32 @@
   // ------------------------------------------------------------------
   // Init
   // ------------------------------------------------------------------
+  function refreshCalculateEnabled() {
+    const btn = $('runBtn');
+    if (!btn) return;
+    const t = ($('ticker').value || '').trim();
+    const d = $('earningsDate').value || '';
+    const tm = String($('earningsTiming').value || '').toUpperCase();
+    btn.disabled = !(t && d && ['AMC', 'BMO', 'UNK'].includes(tm));
+  }
+
   function init() {
-    $('scanForm').addEventListener('submit', doScan);
-    $('scenarioForm').addEventListener('submit', doScenario);
+    const form = $('commandDeckForm');
+    if (form) form.addEventListener('submit', doCalculate);
+
     $('journalBtn').addEventListener('click', doJournal);
     $('advisorBtn').addEventListener('click', doAdvisor);
     $('reconcileBtn').addEventListener('click', doReconcile);
-    $('backfillBtn').addEventListener('click', doBackfill);
+    const backfillBtn = $('backfillBtn');
+    if (backfillBtn) backfillBtn.addEventListener('click', doBackfill);
+
+    // Calculate enablement tracks ticker + earnings date + timing.
+    ['ticker', 'earningsDate', 'earningsTiming'].forEach(function (id) {
+      const el = $(id);
+      if (el) el.addEventListener('input', refreshCalculateEnabled);
+      if (el) el.addEventListener('change', refreshCalculateEnabled);
+    });
+    refreshCalculateEnabled();
 
     if (window.DeskInsight) {
       window.DeskInsight.bind({
@@ -1071,6 +1330,9 @@
         dividerSelector:    '.deskDivider[data-insight]',
         slugTitles: {
           e1_summary_strip:               'Engine 1 Summary',
+          wing_console_mini:              'Wing Console (E1 top picks)',
+          e1_wing_mae_crosscheck:         'E1 Cross-Check Badge',
+          crush_reading:                  'Intraday Crush Reading',
           entry_state:                    'Entry State',
           planned_exit_timing:            'Planned Exit Timing',
           outcome_distribution_empirical: 'Outcome Distribution (Empirical)',
@@ -1096,16 +1358,40 @@
     getJson('/api/earnings-ic/health').then(h => {
       if (!h.enabled) {
         banner('Engine 15 is disabled on the server (ENABLE_ENGINE15_EARNINGS_IC=0).', 'error');
-        $('scanBtn').disabled = true;
+        if ($('runBtn')) $('runBtn').disabled = true;
       }
     }).catch(() => { /* ignore */ });
 
-    // Support deep-link: /earnings-ic?ticker=GE
+    // Deep-links:
+    //   /earnings-ic?ticker=NVDA                             — prefill ticker, run scan
+    //   /earnings-ic?ticker=NVDA&event_date=2026-05-28&event_timing=AMC  — full prefill
+    //   /earnings-ic?ticker=NVDA&wc_key=...&rank=0          — Wing Console handoff
+    //   /earnings-ic?tradeId=...                             — journal replay (legacy)
     try {
       const q = new URLSearchParams(window.location.search);
       const t = (q.get('ticker') || '').trim().toUpperCase();
-      if (t) {
-        $('ticker').value = t;
+      const ed = (q.get('event_date') || q.get('eventDate') || q.get('earningsDate') || '').trim();
+      const et = (q.get('event_timing') || q.get('eventTiming') || q.get('earningsTiming') || '').trim().toUpperCase();
+      const wcKey = (q.get('wc_key') || q.get('wing_console_cache_key') || '').trim();
+      const rank = (q.get('rank') || q.get('placement_rank') || '0').trim();
+
+      if (t) $('ticker').value = t;
+      if (ed) $('earningsDate').value = ed;
+      if (et && ['AMC', 'BMO', 'UNK'].includes(et)) $('earningsTiming').value = et;
+      if (wcKey) {
+        $('wingConsoleCacheKey').value = wcKey;
+        $('wingConsolePlacementRank').value = String(parseInt(rank, 10) || 0);
+      }
+      refreshCalculateEnabled();
+
+      // Auto-run Command Deck when the handoff or full prefill is present.
+      const canAutorun = !!(t && ed && ['AMC', 'BMO', 'UNK'].includes(et));
+      if (canAutorun) {
+        doCalculate();
+      } else if (t) {
+        // Ticker-only deep link: kick off a scan so the desk sees E1
+        // summary + has Advanced prefilled; they still need to enter
+        // date + timing before the full Calculate fires.
         doScan();
       }
     } catch (e) { /* ignore */ }

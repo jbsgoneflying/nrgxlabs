@@ -26,7 +26,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from backend.engine14.conditioning import (
     Modifier,
@@ -138,49 +138,190 @@ def annc_confidence_modifier(
     )
 
 
-def guidance_risk_modifier(engine1: Dict[str, Any]) -> Modifier:
+# Keywords that signal elevated pre-earnings guidance risk. Scanned against
+# Benzinga news headlines in the (earnings_date - 10d .. earnings_date) window.
+# Ranked roughly by severity: high-severity hits are rare and trigger the
+# largest bump; medium-severity hits accumulate additively.
+_HIGH_SEVERITY_KEYWORDS = (
+    "sec investigation", "subpoena", "fraud", "accounting irregular",
+    "restate", "restatement", "class action", "material weakness",
+    "going concern", "bankruptcy", "chapter 11",
+    "ceo resign", "ceo steps down", "cfo resign", "cfo steps down",
+    "ceo replaced", "cfo replaced", "auditor dismiss",
+)
+_MEDIUM_SEVERITY_KEYWORDS = (
+    "downgrade", "cut price target", "guidance cut", "lowers guidance",
+    "warns", "warning", "preannounce", "pre-announce", "profit warning",
+    "revenue warning", "miss", "shortfall",
+    "delay", "postpone", "pushed back",
+    "regulatory probe", "antitrust", "doj inquiry", "ftc inquiry",
+    "labor dispute", "strike", "recall", "safety concern",
+    "short seller", "short report", "short-seller",
+)
+_LOW_SEVERITY_KEYWORDS = (
+    "activist", "activist investor", "board shake", "ceo transition",
+    "restructuring", "layoff", "layoffs",
+    "analyst skeptical", "bear thesis",
+)
+
+
+def _scan_headlines_for_guidance_risk(headlines: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Classify a list of Benzinga news rows into a guidance-risk score.
+
+    Each hit contributes to a score in [0, 100]. Score is capped at 100
+    even when multiple keywords fire on the same headline.
+    """
+    if not headlines:
+        return {"score": 0.0, "hits": [], "n_scanned": 0}
+
+    hits: List[Dict[str, Any]] = []
+    score = 0.0
+    for row in headlines:
+        title = str((row or {}).get("title") or "").lower()
+        teaser = str((row or {}).get("teaser") or "").lower()
+        text = f"{title} {teaser}"
+        if not text.strip():
+            continue
+        matched: List[Tuple[str, int]] = []
+        for kw in _HIGH_SEVERITY_KEYWORDS:
+            if kw in text:
+                matched.append((kw, 35))
+        for kw in _MEDIUM_SEVERITY_KEYWORDS:
+            if kw in text:
+                matched.append((kw, 15))
+        for kw in _LOW_SEVERITY_KEYWORDS:
+            if kw in text:
+                matched.append((kw, 5))
+        if matched:
+            kw_total = sum(w for _, w in matched)
+            hits.append({
+                "title": str((row or {}).get("title") or "")[:140],
+                "publishedAt": str((row or {}).get("created") or (row or {}).get("date") or ""),
+                "keywords": [k for k, _ in matched][:3],
+                "weight": int(kw_total),
+            })
+            score += float(kw_total)
+
+    return {
+        "score": round(float(min(100.0, score)), 2),
+        "hits": hits[:8],                     # keep top 8 for tooltip
+        "n_scanned": int(len(headlines)),
+    }
+
+
+def guidance_risk_modifier(
+    engine1: Dict[str, Any],
+    *,
+    benzinga_client: Any = None,
+    ticker: Optional[str] = None,
+    earnings_date: Optional[str] = None,
+    max_bump_pct: float = 15.0,
+) -> Modifier:
     """Encode desk-level guidance / pre-release leak risk.
 
-    Currently a conservative shim: if E1 exposes an ``eventRisk`` block
-    with a score, we pass it through; otherwise return ``unavailable``.
-    This keeps a hook for future wiring without introducing fake
-    tailwinds/headwinds.
+    v2 wiring:
+
+    1. Scan Benzinga news headlines in the (earnings_date - 10d,
+       earnings_date) window for a curated keyword set covering SEC
+       investigations, guidance cuts, analyst downgrades, executive
+       departures, and activist / short-seller chatter.
+    2. Combine with Engine 1's ``eventRisk`` score when present (the
+       legacy signal).
+    3. Scale the tail multiplier and win-rate shift proportionally to
+       the combined score, capped by ``max_bump_pct``
+       (``GUIDANCE_RISK_MAX_BUMP_PCT``).
+
+    When Benzinga is unavailable the modifier still reads the E1
+    eventRisk block, preserving the previous behaviour. When both are
+    absent, status is ``unavailable``.
     """
-    if not engine1:
+    headline_scan: Dict[str, Any] = {}
+    if benzinga_client is not None and ticker and earnings_date:
+        try:
+            ed = dt.date.fromisoformat(str(earnings_date)[:10])
+            d_from = (ed - dt.timedelta(days=10)).isoformat()
+            d_to = ed.isoformat()
+            resp = benzinga_client.news(
+                tickers=str(ticker).upper(),
+                date_from=d_from,
+                date_to=d_to,
+                display_output="headline",
+                page_size=30,
+            )
+            rows = getattr(resp, "rows", None) or []
+            headline_scan = _scan_headlines_for_guidance_risk(rows)
+        except Exception as err:
+            LOG.debug("guidance_risk: benzinga scan failed: %s", err)
+            headline_scan = {"score": 0.0, "hits": [], "error": f"{type(err).__name__}"}
+
+    if not engine1 and not headline_scan:
         return Modifier(
             name="guidanceRisk", status="unavailable",
-            note="Engine 1 payload missing; guidance risk skipped.",
+            note="No E1 payload or Benzinga headlines available.",
         )
-    er = engine1.get("eventRisk") or {}
-    if not er:
-        return Modifier(
-            name="guidanceRisk", status="unavailable",
-            note="E1 eventRisk block absent.",
-        )
-    score = er.get("score") or er.get("riskScore")
+
+    er = (engine1 or {}).get("eventRisk") or {}
+    e1_score: Optional[float] = None
+    raw = er.get("score") or er.get("riskScore")
     try:
-        s = float(score) if score is not None else None
+        if raw is not None:
+            e1_score = float(raw)
     except (TypeError, ValueError):
-        s = None
-    if s is None:
+        e1_score = None
+
+    headline_score = float(headline_scan.get("score") or 0.0)
+    # Combine: max of (E1 score, headline score). Keeps simple semantics
+    # and avoids double-counting the same underlying risk.
+    combined = max(float(e1_score or 0.0), headline_score)
+
+    if combined <= 0.0:
         return Modifier(
             name="guidanceRisk", status="ok", severity="low",
             tail_multiplier=1.0, win_rate_shift_pct=0.0,
-            note="E1 eventRisk present but no numeric score; neutral treatment.",
-            details=er,
+            note=(
+                "No elevated guidance-risk signals detected"
+                f"{' (Benzinga scanned ' + str(headline_scan.get('n_scanned') or 0) + ' headlines)' if headline_scan else ''}."
+            ),
+            details={
+                "eventRisk": er, "headlineScan": headline_scan,
+                "combinedScore": 0.0,
+            },
         )
-    s_norm = max(-1.0, min(1.0, s / 100.0))
-    tail = float(1.0 + 0.08 * max(0.0, s_norm))  # only penalize, never reward
-    wr = float(-2.0 * max(0.0, s_norm))
+
+    s_norm = max(0.0, min(1.0, combined / 100.0))
+    # Cap the tail bump at max_bump_pct expressed as a percent.
+    max_bump = max(0.0, float(max_bump_pct)) / 100.0
+    tail = float(1.0 + max_bump * s_norm)
+    # Win-rate shift is half the tail-multiplier impact, capped at -5pp.
+    wr = float(-5.0 * s_norm)
     severity = "elevated" if s_norm >= 0.5 else "moderate" if s_norm >= 0.2 else "low"
+
+    drivers: List[str] = []
+    if e1_score is not None:
+        drivers.append(f"E1 eventRisk={e1_score:.0f}")
+    if headline_score > 0:
+        drivers.append(
+            f"Benzinga headlines={headline_score:.0f} "
+            f"({len(headline_scan.get('hits') or [])} hits)"
+        )
+
     return Modifier(
         name="guidanceRisk",
         status="ok",
         severity=severity,
-        tail_multiplier=float(min(1.20, tail)),
-        win_rate_shift_pct=float(max(-4.0, wr)),
-        note=f"E1 eventRisk score {s:.0f} → tail ×{tail:.2f}, WR {wr:+.1f}pp.",
-        details=er,
+        tail_multiplier=float(min(1.0 + max_bump, tail)),
+        win_rate_shift_pct=float(max(-5.0, wr)),
+        note=(
+            f"Combined guidance-risk score {combined:.0f}/100 "
+            f"(sources: {', '.join(drivers) or 'none'}) → "
+            f"tail ×{tail:.2f}, WR {wr:+.1f}pp."
+        ),
+        details={
+            "eventRisk":     er,
+            "headlineScan":  headline_scan,
+            "combinedScore": round(float(combined), 2),
+            "maxBumpPct":    float(max_bump_pct),
+        },
     )
 
 
@@ -220,6 +361,21 @@ def compute_earnings_conditioning(
     ``request`` is the :class:`backend.engine15.simulator.EarningsIcRequest`
     (we only read a handful of fields off it, so we duck-type).
     """
+    # v2: read flags so the guidance-risk wire can reach Benzinga + cap
+    # the max bump at GUIDANCE_RISK_MAX_BUMP_PCT.
+    try:
+        from backend.config import get_flags
+        _f = get_flags()
+        _guidance_enabled = bool(getattr(_f, "ENGINE15_GUIDANCE_RISK_ENABLED", True))
+        _max_bump = float(getattr(_f, "GUIDANCE_RISK_MAX_BUMP_PCT", 15.0))
+    except Exception:
+        _guidance_enabled = True
+        _max_bump = 15.0
+
+    guidance_bz = benzinga_client if _guidance_enabled else None
+    ticker = str(getattr(request, "ticker", "") or "").upper() or None
+    earnings_date = str(getattr(request, "earnings_date", "") or "") or None
+
     mods: Dict[str, Modifier] = {
         "calendar": compute_calendar_modifier(
             entry_date=str(getattr(request, "entry_date", "")),
@@ -231,6 +387,12 @@ def compute_earnings_conditioning(
             user_annc_tod=str(getattr(request, "earnings_timing", "")),
             engine1=engine1,
         ),
-        "guidanceRisk": guidance_risk_modifier(engine1),
+        "guidanceRisk": guidance_risk_modifier(
+            engine1,
+            benzinga_client=guidance_bz,
+            ticker=ticker,
+            earnings_date=earnings_date,
+            max_bump_pct=_max_bump,
+        ),
     }
     return _combine_modifiers(mods)
