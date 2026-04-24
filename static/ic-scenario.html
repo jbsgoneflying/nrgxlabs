@@ -9,7 +9,7 @@
     <link rel="icon" type="image/png" href="/static/RavenONLY.png" />
     <link rel="stylesheet" href="/static/styles.css?v=10" />
     <link rel="stylesheet" href="/static/engine1-v2.css?v=2" />
-    <link rel="stylesheet" href="/static/engine14-v2.css?v=2" />
+    <link rel="stylesheet" href="/static/engine14-v2.css?v=3" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <style>
       .e14Grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 18px; }
@@ -355,87 +355,11 @@
 
       <div id="banner" class="e14Banner" style="display:none;"></div>
 
-      <!-- v2 Scan Window row: prominently shows what the Wing Console's
-           auto-run is based on + lets the desk override entry/expiry
-           without scrolling to the manual form below. Editing either
-           field re-runs the Wing Console (debounced 400ms). -->
-      <section class="surface" id="e14ScanWindowRow" aria-label="Scan Window" style="margin-bottom:12px; padding: 12px 16px;">
-        <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;">
-          <div style="flex:0 0 auto">
-            <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:var(--muted); margin-bottom:4px;">Scan Window</div>
-            <div id="e14ScanWindowLabel" style="font-size:12px; color:var(--text); opacity:.8">Pick entry + expiry, then the Wing Console ranks placements for that window.</div>
-          </div>
-          <div class="e14Field" style="flex:0 0 auto; min-width:150px;">
-            <label for="e14ScanEntryDate">Entry Date</label>
-            <input type="date" id="e14ScanEntryDate" />
-          </div>
-          <div class="e14Field" style="flex:0 0 auto; min-width:150px;">
-            <label for="e14ScanExpiryDate">Expiry</label>
-            <input type="date" id="e14ScanExpiryDate" />
-          </div>
-          <button type="button" id="e14ScanRunBtn" class="primaryButton" style="flex:0 0 auto;">Re-scan</button>
-        </div>
-      </section>
-
-      <!-- v2 Wing Decision Console — primary card. The scenario form
-           below is now the drilldown for the selected placement. -->
-      <section class="surface" id="e14WingConsoleSection" aria-label="Wing Decision Console" style="margin-bottom:16px;">
-        <div class="deskDivider e14Divider" data-insight="wing_console">
-          <span class="deskDividerText e14DividerText">Wing Decision Console</span>
-          <span id="e14EventSourceChip" class="e1SourceChip e1SourceChip--unknown" style="margin-left:10px" title="Scenario source"></span>
-        </div>
-        <div id="e14WingConsole"></div>
-      </section>
-
-      <!-- v2 MI v2 Regime card -->
-      <section class="surface" id="e14RegimeMiV2Section" aria-label="MI v2 Regime" style="display:none; margin-bottom:16px;">
-        <div class="deskDivider e14Divider" data-insight="regime_mi_v2">
-          <span class="deskDividerText e14DividerText">MI v2 Regime (HMM)</span>
-        </div>
-        <div id="e14RegimeMiV2Body"></div>
-      </section>
-
-      <!-- v2 MC Reading + MAE Pool drilldowns -->
-      <section class="surface" id="e14McReadingSection" aria-label="Monte Carlo Reading" style="display:none; margin-bottom:16px;">
-        <div class="deskDivider e14Divider" data-insight="mc_reading">
-          <span class="deskDividerText e14DividerText">Monte Carlo Reading</span>
-        </div>
-        <div id="e14McReadingBody"></div>
-      </section>
-
-      <section class="surface" id="e14MaeDistributionSection" aria-label="MAE Pool" style="display:none; margin-bottom:16px;">
-        <div class="deskDivider e14Divider" data-insight="mae_distribution">
-          <span class="deskDividerText e14DividerText">MAE Pool (intraweek)</span>
-        </div>
-        <div id="e14MaeDistributionBody"></div>
-      </section>
-
-      <!-- v2 E14-native advisor panel (always-on; separate from reconcile) -->
-      <section class="surface" id="e14AdvisorSection" aria-label="AI Advisor" style="display:none; margin-bottom:16px;">
-        <div class="deskDivider e14Divider" data-insight="ai_advisor">
-          <span class="deskDividerText e14DividerText">AI Advisor (Command Deck)</span>
-        </div>
-        <div id="e14AdvisorBody"></div>
-      </section>
-
-      <!-- v2 Active Trades: open positions logged from the Wing Console,
-           each with a "Run Check-In" button that narrates the hold/cut
-           recommendation against current market conditions. -->
-      <section class="surface" id="e14ActiveTradesSection" aria-label="Active Trades" style="display:none; margin-bottom:16px;">
-        <div class="deskDivider e14Divider" data-insight="actions">
-          <span class="deskDividerText e14DividerText">Active Trades (Open Positions)</span>
-        </div>
-        <div id="e14ActiveTradesBody"></div>
-      </section>
-
-      <!-- v2: Legacy manual entry form. The Wing Console above is the
-           primary path; this form is kept for desks that want to run a
-           specific 4-strike structure by hand. Auto-opens when a
-           placement is handed off from the Wing Console ("Simulate This
-           Pick") or from E2 ("Simulate in E14"). -->
-      <details id="e14ManualScenarioDetails" class="e14AdvancedDetails" style="margin-bottom:16px;">
-        <summary>Manual Scenario Entry (advanced) — enter strikes + credit + dates by hand</summary>
-      <form id="icForm" class="e14Form" aria-label="Engine 14 Controls" style="margin-top:12px;">
+      <!-- v2 Command Deck form — the desk fills in entry/expiry + 4 strikes
+           + credit + exit rules upfront, then a single Calculate button
+           fires the Wing Console AND the scenario drilldown together.
+           No auto-run on page load (matches E1/E15 pattern). -->
+      <form id="icForm" class="e14Form" aria-label="Engine 14 Controls" style="margin-bottom:16px;">
         <div class="e14FormGrid">
           <div class="e14FieldGroup">
             <div class="e14FieldGroupLabel">Trade Window</div>
@@ -495,13 +419,62 @@
         </div>
 
         <div class="e14FormActions">
-          <button type="submit" id="runBtn" class="primaryButton">Run Scenario</button>
+          <button type="submit" id="runBtn" class="primaryButton">Calculate</button>
           <span id="status" class="status">Ready</span>
         </div>
 
         <div id="preCheckBanner"></div>
       </form>
-      </details>
+
+      <!-- v2 Wing Decision Console — renders after Calculate. -->
+      <section class="surface" id="e14WingConsoleSection" aria-label="Wing Decision Console" style="margin-bottom:16px;">
+        <div class="deskDivider e14Divider" data-insight="wing_console">
+          <span class="deskDividerText e14DividerText">Wing Decision Console</span>
+          <span id="e14EventSourceChip" class="e1SourceChip e1SourceChip--unknown" style="margin-left:10px" title="Scenario source"></span>
+        </div>
+        <div id="e14WingConsole"></div>
+      </section>
+
+      <!-- v2 MI v2 Regime card -->
+      <section class="surface" id="e14RegimeMiV2Section" aria-label="MI v2 Regime" style="display:none; margin-bottom:16px;">
+        <div class="deskDivider e14Divider" data-insight="regime_mi_v2">
+          <span class="deskDividerText e14DividerText">MI v2 Regime (HMM)</span>
+        </div>
+        <div id="e14RegimeMiV2Body"></div>
+      </section>
+
+      <!-- v2 MC Reading + MAE Pool drilldowns -->
+      <section class="surface" id="e14McReadingSection" aria-label="Monte Carlo Reading" style="display:none; margin-bottom:16px;">
+        <div class="deskDivider e14Divider" data-insight="mc_reading">
+          <span class="deskDividerText e14DividerText">Monte Carlo Reading</span>
+        </div>
+        <div id="e14McReadingBody"></div>
+      </section>
+
+      <section class="surface" id="e14MaeDistributionSection" aria-label="MAE Pool" style="display:none; margin-bottom:16px;">
+        <div class="deskDivider e14Divider" data-insight="mae_distribution">
+          <span class="deskDividerText e14DividerText">MAE Pool (intraweek)</span>
+        </div>
+        <div id="e14MaeDistributionBody"></div>
+      </section>
+
+      <!-- v2 E14-native advisor panel (always-on; separate from reconcile) -->
+      <section class="surface" id="e14AdvisorSection" aria-label="AI Advisor" style="display:none; margin-bottom:16px;">
+        <div class="deskDivider e14Divider" data-insight="ai_advisor">
+          <span class="deskDividerText e14DividerText">AI Advisor (Command Deck)</span>
+        </div>
+        <div id="e14AdvisorBody"></div>
+      </section>
+
+      <!-- v2 Active Trades: open positions logged from the Wing Console,
+           each with a "Run Check-In" button that narrates the hold/cut
+           recommendation against current market conditions. -->
+      <section class="surface" id="e14ActiveTradesSection" aria-label="Active Trades" style="display:none; margin-bottom:16px;">
+        <div class="deskDivider e14Divider" data-insight="actions">
+          <span class="deskDividerText e14DividerText">Active Trades (Open Positions)</span>
+        </div>
+        <div id="e14ActiveTradesBody"></div>
+      </section>
 
       <div id="reconcileWrap" class="e14ReconcileWrap" style="display:none;">
         <div class="e14ReconcileHead">
@@ -614,6 +587,6 @@
     <script src="/static/raven-chat.js?v=3"></script>
     <script src="/static/desk-insight.js?v=2"></script>
     <script src="/static/ic-scenario.js?v=15"></script>
-    <script src="/static/engine14-v2.js?v=3"></script>
+    <script src="/static/engine14-v2.js?v=4"></script>
   </body>
 </html>

@@ -67,7 +67,7 @@
   gap: 14px;
   padding: 20px;
   border-radius: 14px;
-  background: var(--surface-1, var(--surfaceSolid, #121418));
+  background: var(--surface-1, #121418);
   border: 1px solid rgba(255, 255, 255, 0.06);
   margin-bottom: 14px;
 }

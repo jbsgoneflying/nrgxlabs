@@ -71,22 +71,6 @@
     return d.toISOString().slice(0, 10);
   }
 
-  function businessDaysBetween(isoStart, isoEnd) {
-    try {
-      var a = new Date(isoStart + "T00:00:00");
-      var b = new Date(isoEnd + "T00:00:00");
-      if (b <= a) return 0;
-      var n = 0;
-      var d = new Date(a);
-      while (d < b) {
-        d.setDate(d.getDate() + 1);
-        var day = d.getDay();
-        if (day !== 0 && day !== 6) n++;
-      }
-      return n;
-    } catch (e) { return 0; }
-  }
-
   function setSourceChip(source) {
     var chip = $("e14EventSourceChip");
     if (!chip) return;
@@ -115,42 +99,21 @@
     if (!host) return;
     host.innerHTML = '<div class="e14ConsoleWarnings">Scoring wing placements…</div>';
 
-    // v2: Prefer the visible Scan Window inputs at the top of the page
-    // so the desk can see + override the dates at a glance. Fall back to
-    // the legacy manual form, then today+4biz days.
-    var scanEntryEl  = $("e14ScanEntryDate");
-    var scanExpiryEl = $("e14ScanExpiryDate");
+    // v2: Command Deck pattern — read the single unified form at the
+    // top of the page. Falls back to today+4biz days only if the desk
+    // somehow triggered this path without filling the form (shouldn't
+    // happen since Calculate is gated on required fields).
     var entryEl  = $("entryDate");
     var expiryEl = $("expiry");
-    var entryDate = (scanEntryEl && scanEntryEl.value) ||
-                    (entryEl && entryEl.value) ||
-                    todayIso();
-    var expiryDate = (scanExpiryEl && scanExpiryEl.value) ||
-                     (expiryEl && expiryEl.value) ||
-                     addBusinessDays(entryDate, 4);
+    var entryDate  = (entryEl  && entryEl.value)  || todayIso();
+    var expiryDate = (expiryEl && expiryEl.value) || addBusinessDays(entryDate, 4);
 
-    // Mirror back into both input surfaces so the manual form and the
-    // top scan row stay in sync regardless of which one the desk
-    // edited.
-    if (scanEntryEl && !scanEntryEl.value) scanEntryEl.value = entryDate;
-    if (scanExpiryEl && !scanExpiryEl.value) scanExpiryEl.value = expiryDate;
-    if (entryEl && !entryEl.value) entryEl.value = entryDate;
+    if (entryEl  && !entryEl.value)  entryEl.value  = entryDate;
     if (expiryEl && !expiryEl.value) expiryEl.value = expiryDate;
 
     State.entryDate  = entryDate;
     State.expiryDate = expiryDate;
     State.asOfDate   = todayIso();
-
-    // Update the prominent "Scan Window" subtitle so the desk always
-    // knows what window the Wing Console is scoring.
-    var lbl = $("e14ScanWindowLabel");
-    if (lbl) {
-      lbl.textContent =
-        "Scoring placements for entry " + entryDate +
-        " -> expiry " + expiryDate +
-        " (" + businessDaysBetween(entryDate, expiryDate) + " business days). " +
-        "Edit the dates to re-rank.";
-    }
 
     setSourceChip("desk_default");
 
@@ -741,53 +704,29 @@
     // /ic-scenario page can be opened from E2's "Simulate in E14"
     // button carrying entry_date, expiry, and a specific 4-strike
     // structure (plus optional credit). When those params are
-    // present we pre-fill the manual scenario form + skip the
-    // Wing Console auto-run, then trigger Run Scenario so the
-    // desk lands directly on the replay drilldown.
+    // present we pre-fill the scenario form and trigger submit so
+    // the desk lands directly on the replay drilldown + Wing Console.
     var handoff = parseHandoffQuery();
     if (handoff && handoff.valid) {
       applyHandoffToForm(handoff);
       showHandoffBanner(handoff);
-      // Auto-open the manual scenario details so the desk sees the
-      // pre-filled strikes + dates, then trigger submit.
-      expandManualForm();
       triggerIcFormSubmit();
       loadActiveTrades();
       return;
     }
 
-    // Default path: auto-run the Wing Console with today's date + 4
-    // business-day expiry, surface that window prominently, and let the
-    // desk override via the visible Scan Window inputs above the console.
-    fetchAndPaintWingConsole();
-    loadActiveTrades();
-
-    // Two input surfaces stay in sync (top Scan Window + legacy manual
-    // form). Editing either one mirrors to the other, then re-runs the
-    // Wing Console debounced 400ms.
-    var debounceTimer = null;
-    function schedule() {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(fetchAndPaintWingConsole, 400);
+    // Default path: NO auto-run. The desk fills entry/expiry + 4
+    // strikes + credit in #icForm, then clicks Calculate. The
+    // capture-phase submit listener below fires the Wing Console +
+    // Active Trades alongside ic-scenario.js's own submit handler
+    // (which runs the scenario drilldown).
+    var form = $("icForm");
+    if (form) {
+      form.addEventListener("submit", function () {
+        fetchAndPaintWingConsole();
+        loadActiveTrades();
+      }, { capture: true });
     }
-    function mirror(fromId, toId) {
-      var from = $(fromId);
-      var to = $(toId);
-      if (!from || !to) return;
-      from.addEventListener("change", function () {
-        if (from.value) to.value = from.value;
-        schedule();
-      });
-    }
-    mirror("e14ScanEntryDate", "entryDate");
-    mirror("e14ScanExpiryDate", "expiry");
-    mirror("entryDate", "e14ScanEntryDate");
-    mirror("expiry", "e14ScanExpiryDate");
-
-    var runBtn = $("e14ScanRunBtn");
-    if (runBtn) runBtn.addEventListener("click", function () {
-      fetchAndPaintWingConsole();
-    });
   }
 
   // ---------------------------------------------------------------
@@ -859,11 +798,6 @@
       (h.composite ? (" · composite " + Number(h.composite).toFixed(1)) : "");
     banner.style.display = "";
     banner.classList.remove("error");
-  }
-
-  function expandManualForm() {
-    var details = $("e14ManualScenarioDetails");
-    if (details) details.open = true;
   }
 
   function triggerIcFormSubmit() {
