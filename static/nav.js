@@ -4,27 +4,18 @@
 (function () {
   "use strict";
 
-  // E14 (ic-scenario) is the SPX IC scenario-replay sibling of E2's
-  // scanner; E15 (earnings-ic) is the earnings IC scenario-replay
-  // sibling of E1's breach engine. Rendered inset below their parent
-  // so the desk reads them as paired tools, not standalone engines.
+  // Desk-trimmed nav: only the engines the desk uses daily. E1b and
+  // E2b remain inset under their parent scanners. Other engines still
+  // work via direct URL; they're just hidden from the drawer to
+  // reduce noise. To re-expose one, add it back here.
   var NAV_ITEMS = [
     { href: "/",                label: "Market Intelligence", desc: "Pre-open roadmap and cross-asset stress" },
     { href: "/breach",          label: "Engine 1",  desc: "Earnings hold risk with Monte Carlo" },
     { href: "/earnings-ic",     label: "Engine 1b", desc: "Earnings IC scenario replay",        sub: true },
     { href: "/spx",             label: "Engine 2",  desc: "SPX/SPY iron condor scanner" },
     { href: "/ic-scenario",     label: "Engine 2b", desc: "SPX/SPY IC scenario replay",         sub: true },
-    { href: "/lead-lag",        label: "Engine 3",  desc: "Global lead-lag regime intelligence" },
-    { href: "/red-dog",         label: "Engine 4",  desc: "Mean-reversion scanner (SP500 + NDX)" },
-    { href: "/ichimoku",        label: "Engine 5",  desc: "Trend-continuation scanner" },
-    { href: "/pairs",           label: "Engine 6",  desc: "Thematic relative value pairs scanner" },
     { href: "/post-event",      label: "Engine 7",  desc: "Post-event trade extension evaluator" },
-    { href: "/credit-stress",   label: "Engine 8",  desc: "Credit stress drift detection" },
-    { href: "/calendar",        label: "Engine 9",  desc: "Mega-cap earnings dates and compare workflow" },
     { href: "/compare",         label: "Engine 10", desc: "Multi-ticker side-by-side" },
-    { href: "/news-risk",       label: "Engine 11", desc: "Macro events and headline risk" },
-    { href: "/vix-fade",        label: "Engine 12", desc: "VIX spike fade — vol dislocation engine" },
-    { href: "/gap-regime",      label: "Engine 13", desc: "Gap regime scanner — post-gap SPX analysis" },
   ];
 
   /* Which nav item matches the current URL? */
