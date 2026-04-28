@@ -338,7 +338,7 @@ def stream_chat_response(
         response = client.chat.completions.create(
             model=model,
             messages=llm_messages,
-            temperature=0.4,
+            temperature=1,
             max_completion_tokens=2000,
             timeout=90,
             stream=True,

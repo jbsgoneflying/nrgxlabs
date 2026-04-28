@@ -796,7 +796,7 @@ def engine12_explain(body: dict):
                 {"role": "system", "content": _E12_SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
             ],
-            temperature=0.3,
+            temperature=1,
             max_completion_tokens=1500,
             response_format={"type": "json_object"},
         )

@@ -288,7 +288,7 @@ def engine7_desk_view(body: dict):
                 {"role": "system", "content": _E7_DESK_VIEW_SYSTEM},
                 {"role": "user", "content": payload},
             ],
-            temperature=0.3,
+            temperature=1,
             max_completion_tokens=1200,
             timeout=30,
             response_format={"type": "json_object"},

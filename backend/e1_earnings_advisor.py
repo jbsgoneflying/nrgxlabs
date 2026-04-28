@@ -353,7 +353,7 @@ def generate_e1_trade_analysis(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": payload_str},
             ],
-            temperature=0.3,
+            temperature=1,
             max_completion_tokens=1800,
             timeout=45,
             response_format={"type": "json_object"},
@@ -450,7 +450,7 @@ def generate_e1_post_mortem(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": payload_str},
             ],
-            temperature=0.3,
+            temperature=1,
             max_completion_tokens=800,
             timeout=30,
             response_format={"type": "json_object"},
@@ -653,8 +653,8 @@ def generate_live_review_v2(
 
     system_prompt = _live_review_system_prompt(phase)
     # Match the rest of the E1 advisor stack: read from E1_ADVISOR_MODEL and
-    # use temperature=0.3 (some gpt-5.x deployments reject temperature=0.0
-    # with `unsupported_value`, which silently nukes the narrative).
+    # use temperature=1 (gpt-5.5 only accepts the default temperature; any
+    # other value triggers an `unsupported_value` 400 that nukes the narrative).
     model = str(getattr(f, "E1_ADVISOR_MODEL", None) or "gpt-5.5").strip()
 
     try:
@@ -664,7 +664,7 @@ def generate_live_review_v2(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": payload_str},
             ],
-            temperature=0.3,
+            temperature=1,
             max_completion_tokens=900,
             timeout=30,
             response_format={"type": "json_object"},

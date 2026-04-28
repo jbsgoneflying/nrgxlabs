@@ -594,7 +594,7 @@ def generate_portfolio_advisor(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": payload_str},
             ],
-            temperature=0.3,
+            temperature=1,
             max_completion_tokens=2500,
             timeout=60,
             response_format={"type": "json_object"},

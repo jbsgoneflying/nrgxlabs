@@ -261,7 +261,7 @@ def analyze_transcript_llm(
                 {"role": "system", "content": _TRANSCRIPT_ANALYSIS_SYSTEM},
                 {"role": "user", "content": f"Ticker: {ticker} | {year} Q{quarter}\n\n{trimmed}"},
             ],
-            temperature=0.2,
+            temperature=1,
             max_tokens=800,
             response_format={"type": "json_object"},
         )
@@ -883,7 +883,7 @@ def score_news_with_llm(headlines: List[dict], api_key: str) -> dict:
                 )},
                 {"role": "user", "content": headline_text},
             ],
-            temperature=0.2,
+            temperature=1,
             max_tokens=1000,
             response_format={"type": "json_object"},
         )

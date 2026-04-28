@@ -1171,7 +1171,7 @@ async def e1_trade_live_review(trade_id: str, request: Request):
                     {"role": "system", "content": "You are a vol-crush desk analyst reviewing an OPEN earnings iron condor. Be concise, decisive, and cite the numbers."},
                     {"role": "user", "content": prompt},
                 ],
-                temperature=0.25, max_completion_tokens=500, timeout=25,
+                temperature=1, max_completion_tokens=500, timeout=25,
                 response_format={"type": "json_object"},
             )
             llm = _parse_llm_json(resp.choices[0].message.content.strip())
@@ -1268,7 +1268,7 @@ async def e1_trade_checkin(trade_id: str, request: Request):
                     {"role": "system", "content": "You are a vol-crush desk analyst reviewing a post-earnings outcome. Be concise."},
                     {"role": "user", "content": prompt},
                 ],
-                temperature=0.2, max_completion_tokens=300, timeout=20,
+                temperature=1, max_completion_tokens=300, timeout=20,
                 response_format={"type": "json_object"},
             )
             llm_assessment = _parse_llm_json(resp.choices[0].message.content.strip())

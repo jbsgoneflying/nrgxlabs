@@ -1193,7 +1193,34 @@ function _wireWingActions(data) {
         });
         if (!resp.ok) throw new Error(`advisor ${resp.status}`);
         const body = await resp.json();
-        const narrative = body?.analysis || body?.advisor || body?.narrative || JSON.stringify(body).slice(0, 1200);
+        // The /api/breach/advisor response can be either a flat string under
+        // analysis/narrative or a structured object under `advisor` (verdict,
+        // confidence, tradeTicket, rationale sections, etc.). Extract a
+        // human-readable narrative for both shapes — never render an object
+        // directly (that produces "[object Object]").
+        const adv = body?.advisor;
+        let narrative;
+        if (typeof body?.analysis === "string" && body.analysis) {
+          narrative = body.analysis;
+        } else if (typeof body?.narrative === "string" && body.narrative) {
+          narrative = body.narrative;
+        } else if (adv && typeof adv === "object") {
+          const parts = [];
+          if (adv.verdict) parts.push(`Verdict: ${adv.verdict}`);
+          if (adv.confidence != null) parts.push(`Confidence: ${adv.confidence}/100`);
+          if (adv.wingWidthRationale) parts.push(`\nWing Width — ${adv.wingWidthRationale}`);
+          if (adv.riskContext) parts.push(`\nRisk Context — ${adv.riskContext}`);
+          if (adv.entryPlan) parts.push(`\nEntry Plan — ${adv.entryPlan}`);
+          if (adv.managementPlan) parts.push(`\nManagement — ${adv.managementPlan}`);
+          if (adv.exitRules) parts.push(`\nExit Rules — ${adv.exitRules}`);
+          if (adv.passReason) parts.push(`\nPass Reason — ${adv.passReason}`);
+          if (adv.deskNote) parts.push(`\nDesk Note — ${adv.deskNote}`);
+          narrative = parts.length ? parts.join("\n") : JSON.stringify(adv, null, 2).slice(0, 2000);
+        } else if (typeof adv === "string") {
+          narrative = adv;
+        } else {
+          narrative = JSON.stringify(body).slice(0, 1200);
+        }
         narrativeEl.textContent = "";
         narrativeEl.innerHTML = `<strong>LLM Advisor</strong><br/>${_escape(String(narrative)).replace(/\n/g, "<br/>")}`;
       } catch (err) {

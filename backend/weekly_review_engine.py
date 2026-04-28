@@ -200,7 +200,7 @@ def generate_weekly_review(
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": payload_str},
             ],
-            temperature=0.3,
+            temperature=1,
             max_completion_tokens=1500,
             timeout=60,
             response_format={"type": "json_object"},

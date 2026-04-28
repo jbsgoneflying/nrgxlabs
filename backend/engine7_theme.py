@@ -7,7 +7,7 @@ rules, no external calls, no randomness).  This is the sole gating truth used
 for eligibility and scoring decisions.
 
 Layer 2 – ``annotate_themes_llm`` is an **optional enrichment** layer.  It
-calls OpenAI with temperature=0, a fixed prompt, and sorted input.  Results
+calls OpenAI with temperature=1, a fixed prompt, and sorted input.  Results
 are persisted to Redis keyed by ``date + sha256(sorted_headlines + model)``.
 Re-runs and backtests always replay from storage.  If OpenAI is unavailable
 the annotation is ``None``; scoring and eligibility are unaffected.
@@ -544,7 +544,7 @@ def annotate_themes_llm(
         resp = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0,
+            temperature=1,
             max_tokens=500,
             timeout=15,
         )
@@ -676,7 +676,7 @@ def enhance_themes_with_llm(
             resp = client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0,
+                temperature=1,
                 max_tokens=800,
                 timeout=20,
             )

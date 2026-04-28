@@ -372,7 +372,7 @@ def _call_llm(headlines: List[str]) -> List[dict]:
                 {"role": "system", "content": _REVIEW_SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
             ],
-            temperature=0,
+            temperature=1,
             max_tokens=2000,
             timeout=60,
         )

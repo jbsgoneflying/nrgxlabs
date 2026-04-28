@@ -621,7 +621,7 @@ Respond ONLY with valid JSON containing these fields:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_msg},
             ],
-            temperature=0.4,
+            temperature=1,
             max_tokens=2000,
             response_format={"type": "json_object"},
         )
@@ -688,7 +688,7 @@ Be direct, specific, and actionable. No hedging language. Speak like money is on
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_msg},
             ],
-            temperature=0.3,
+            temperature=1,
             max_tokens=1200,
             response_format={"type": "json_object"},
         )
@@ -809,7 +809,7 @@ Where does liquidity break first?"""
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_msg},
             ],
-            temperature=0.5,
+            temperature=1,
             max_tokens=3000,
             response_format={"type": "json_object"},
         )

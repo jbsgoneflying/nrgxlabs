@@ -497,7 +497,7 @@ def generate_desk_insight(
                 {"role": "system", "content": system_prompt},
                 {"role": "user",   "content": user_str},
             ],
-            temperature=0.3,
+            temperature=1,
             max_completion_tokens=1200,  # up from 700 — now 9 fields
             timeout=40,
             response_format={"type": "json_object"},

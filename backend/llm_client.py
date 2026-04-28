@@ -196,7 +196,7 @@ def generate_desk_brief(context: Dict[str, Any]) -> Dict[str, str]:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": payload_str},
             ],
-            temperature=0.3,
+            temperature=1,
             max_completion_tokens=600,
             timeout=30,
             response_format={"type": "json_object"},

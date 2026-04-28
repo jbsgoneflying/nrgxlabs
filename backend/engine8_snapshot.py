@@ -10,8 +10,8 @@ Determinism guarantees
 * Annotation fields (LLM sentiment, Benzinga headlines) are persisted to
   Redis on first capture and replayed for subsequent calls with the same
   ``(ticker, earnings_date)`` tuple.
-* LLM calls use ``temperature=0``, a fixed model version, and
-  lexicographically sorted inputs.  Results are keyed by
+* LLM calls use the default ``temperature=1`` (gpt-5.5 rejects others),
+  a fixed model version, and lexicographically sorted inputs. Results are keyed by
   ``engine8:llm:{ticker}:{date}:{input_hash}:{model_version}``.
 """
 
@@ -130,7 +130,7 @@ def _call_llm_classify(
     input_json: str,
     model: str,
 ) -> Optional[dict]:
-    """Call OpenAI with temperature=0 for event classification."""
+    """Call OpenAI for event classification (gpt-5.5 only accepts default temperature=1)."""
     try:
         import openai
     except ImportError:
@@ -157,7 +157,7 @@ def _call_llm_classify(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": input_json},
             ],
-            temperature=0,
+            temperature=1,
             max_completion_tokens=400,
             timeout=15,
             response_format={"type": "json_object"},
