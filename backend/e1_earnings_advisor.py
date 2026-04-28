@@ -354,17 +354,27 @@ def generate_e1_trade_analysis(
                 {"role": "user", "content": payload_str},
             ],
             temperature=1,
-            max_completion_tokens=1800,
-            timeout=45,
+            max_completion_tokens=5000,
+            timeout=60,
             response_format={"type": "json_object"},
         )
 
-        content = response.choices[0].message.content.strip()
+        raw_content = response.choices[0].message.content or ""
+        content = raw_content.strip()
+        finish_reason = getattr(response.choices[0], "finish_reason", None)
+        usage = getattr(response, "usage", None)
         result = _parse_llm_json(content)
 
         if result is None:
-            LOG.warning("E1 advisor: LLM response unparseable; raw (first 400): %s", content[:400])
-            fallback["_fallback_reason"] = "LLM returned unparseable JSON"
+            LOG.warning(
+                "E1 advisor: LLM response unparseable; finish=%s usage=%s raw(first400)=%r",
+                finish_reason, getattr(usage, "model_dump", lambda: usage)() if usage else None,
+                content[:400],
+            )
+            fallback["_fallback_reason"] = (
+                f"LLM returned unparseable JSON (finish={finish_reason}, "
+                f"len={len(content)}). Head: {content[:200]!r}"
+            )
             return fallback
 
         # Tolerant schema: gpt-5.5 sometimes omits optional rationale fields.
