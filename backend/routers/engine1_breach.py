@@ -660,6 +660,70 @@ def breach_compare(
 # Engine 10 Portfolio Advisor (multi-ticker allocation game plan)
 # ---------------------------------------------------------------------------
 
+def _ensure_desk_consensus_on_rankings(rankings: list) -> None:
+    """Re-attach ``deskConsensus`` + ``emPreference`` to each ranking in place.
+
+    The public ``/api/breach-compare`` response strips these blocks when
+    ``E1_EMIT_DESK_CONSENSUS=False`` (the v2 default), but the E10 portfolio
+    advisor's deterministic allocator keys off ``deskConsensus.verdict`` to
+    decide which names are tradeable. When the client sends pre-computed
+    rankings to the advisor's fast path, the stripped payloads cause every
+    ticker to default to ``PASS`` and the allocator returns zero deploy.
+
+    Recompute the verdict locally from the per-ticker enrichment fields the
+    client preserves (``vrpAnalysis`` / ``entryQuality`` / ``emBreachSummary``,
+    plus ``regime`` / ``gapVsCtc`` / ``eventRisk`` when available). Slow-path
+    rankings already carry the consensus, so this is a no-op for them.
+    """
+    if not rankings:
+        return
+    try:
+        from backend.e1_vrp_engine import (
+            compute_e1_desk_consensus,
+            compute_em_preference,
+        )
+    except Exception:  # pragma: no cover - import safety
+        return
+
+    for r in rankings:
+        if not isinstance(r, dict):
+            continue
+        fp = r.get("fullPayload")
+        if not isinstance(fp, dict):
+            continue
+        dc = fp.get("deskConsensus")
+        if isinstance(dc, dict) and dc.get("verdict"):
+            continue  # already populated (slow path or flag-on response)
+
+        vrp = fp.get("vrpAnalysis") or {}
+        eq = fp.get("entryQuality") or {}
+        embs = fp.get("emBreachSummary") or {}
+        if not vrp and not embs:
+            continue  # no signal to recompute from — leave as-is
+
+        try:
+            recomputed_dc = compute_e1_desk_consensus(
+                vrp=vrp,
+                entry_quality=eq,
+                em_breach_summary=embs,
+                regime=fp.get("regime") or {},
+                gap_vs_ctc=fp.get("gapVsCtc") or {},
+                event_risk=fp.get("eventRisk") or {},
+            )
+            fp["deskConsensus"] = recomputed_dc
+        except Exception as e:
+            LOG.warning("E10 advisor: failed to recompute deskConsensus for %s: %s", r.get("ticker"), e)
+            continue
+
+        if not isinstance(fp.get("emPreference"), dict):
+            try:
+                fp["emPreference"] = compute_em_preference(
+                    embs, vrp.get("vrpScore"), eq.get("entryQuality")
+                )
+            except Exception as e:
+                LOG.debug("E10 advisor: failed to recompute emPreference for %s: %s", r.get("ticker"), e)
+
+
 @router.post("/api/breach-compare/advisor")
 async def e10_portfolio_advisor(request: Request):
     """Run the Engine 10 Portfolio Advisor: deterministic allocation + LLM game plan.
@@ -798,6 +862,11 @@ async def e10_portfolio_advisor(request: Request):
                     regime_label = (_d.get("regime") or {}).get("label", "moderate")
         except Exception:
             pass
+
+        # Re-enrich any rankings that arrived stripped of deskConsensus
+        # (the public /api/breach-compare scrubs verdict fields when
+        # E1_EMIT_DESK_CONSENSUS=False, which is the v2 default).
+        _ensure_desk_consensus_on_rankings(rankings)
 
         det_alloc = compute_portfolio_allocation(rankings, market_regime_label=regime_label)
         advisor = generate_portfolio_advisor(

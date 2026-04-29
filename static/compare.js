@@ -480,9 +480,15 @@
   // -----------------------------------------------------------------
 
   function stripRankingsForAdvisor(rankings) {
+    // KEEP enough per-ticker context for the server to recompute
+    // deskConsensus/emPreference if the public /api/breach-compare
+    // response stripped them (E1_EMIT_DESK_CONSENSUS=False default).
+    // regime / gapVsCtc / eventRisk feed the regime-stress + macro
+    // LEAN_PASS nudges in compute_e1_desk_consensus.
     const KEEP_KEYS = [
       "deskConsensus", "vrpAnalysis", "entryQuality", "emPreference",
       "widthComparison", "emBreachSummary", "nextEvent",
+      "regime", "gapVsCtc", "eventRisk",
     ];
     return (rankings || []).map((r) => {
       const fp = r.fullPayload || {};

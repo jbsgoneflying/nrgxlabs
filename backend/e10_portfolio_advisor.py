@@ -595,7 +595,12 @@ def generate_portfolio_advisor(
                 {"role": "user", "content": payload_str},
             ],
             temperature=1,
-            max_completion_tokens=2500,
+            # gpt-5.5 is a reasoning model — internal reasoning tokens are charged
+            # against this budget. Multi-ticker allocationPlan + 5+ narrative
+            # fields can exceed the old 2500 cap and silently truncate, dropping
+            # the LLM into the deterministic fallback. Match peer advisors
+            # (E1=5000, E2/E13/E14/E15=3000-4000) post-gpt-5.5 bump.
+            max_completion_tokens=4000,
             timeout=60,
             response_format={"type": "json_object"},
         )
