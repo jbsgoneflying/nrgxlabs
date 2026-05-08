@@ -360,3 +360,121 @@ def archive_trades_to_json(
     except Exception as exc:
         LOG.warning("Trade archive failed: %s", exc)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Trade-log enrichment — ensures the predicted breach probability lands in
+# entryContext.breachPct on every advisor-sourced trade. Without this, the
+# v2 conformal calibrator can't observe the (prediction, realized) pair.
+# ---------------------------------------------------------------------------
+
+
+def derive_breach_pct(trade_data: Dict[str, Any]) -> tuple[Optional[float], str]:
+    """Search a trade payload for the predicted breach probability.
+
+    Mirrors the exact logic used by the v2 v1_mirror so server-side
+    enrichment and the v2 backfill stay in sync. All v1 values live on
+    a 0..100 percent scale; we keep that scale here.
+
+    Returns ``(breach_pct, source_label)``. ``breach_pct`` is ``None`` if
+    no path produced an in-range value; ``source_label`` is e.g.
+    ``"breachSnapshot.breachRatePct"`` for diagnostics.
+
+    Order of preference:
+      1. entryContext.breachPct           (already-canonical; nothing to do)
+      2. breachSnapshot.breachRatePct
+      3. breachSnapshot.breachRate
+      4. breachSnapshot.breachPct
+      5. breachSnapshot.emBreachPct
+      6. predictionSnapshot.breachProb     (E1)
+      7. predictionSnapshot.breachPct
+      8. entry.emBreachPct                 (some E1 advisor paths)
+      9. entry.breachPct
+     10. entryContext.emBreachSummary[min] (E1 EM-bucketed → tightest wing)
+     11. marketSnapshot.breachPct          (rare fallback)
+    """
+    candidates: List[tuple[str, Any]] = [
+        ("entryContext.breachPct", _safe_get(trade_data, "entryContext", "breachPct")),
+        ("breachSnapshot.breachRatePct", _safe_get(trade_data, "breachSnapshot", "breachRatePct")),
+        ("breachSnapshot.breachRate", _safe_get(trade_data, "breachSnapshot", "breachRate")),
+        ("breachSnapshot.breachPct", _safe_get(trade_data, "breachSnapshot", "breachPct")),
+        ("breachSnapshot.emBreachPct", _safe_get(trade_data, "breachSnapshot", "emBreachPct")),
+        ("predictionSnapshot.breachProb", _safe_get(trade_data, "predictionSnapshot", "breachProb")),
+        ("predictionSnapshot.breachPct", _safe_get(trade_data, "predictionSnapshot", "breachPct")),
+        ("entry.emBreachPct", _safe_get(trade_data, "entry", "emBreachPct")),
+        ("entry.breachPct", _safe_get(trade_data, "entry", "breachPct")),
+        ("entryContext.emBreachSummary[min]", _min_of_dict_values(_safe_get(trade_data, "entryContext", "emBreachSummary"))),
+        ("marketSnapshot.breachPct", _safe_get(trade_data, "marketSnapshot", "breachPct")),
+    ]
+    for label, raw in candidates:
+        try:
+            if raw is None:
+                continue
+            v = float(raw)
+        except (TypeError, ValueError):
+            continue
+        # predictionSnapshot.breachProb is on [0, 1]; everything else is [0, 100].
+        if label == "predictionSnapshot.breachProb" and 0.0 <= v <= 1.0:
+            return round(v * 100.0, 4), label
+        if 0.0 <= v <= 100.0:
+            return round(v, 4), label
+    return None, "none"
+
+
+def enrich_trade_log_payload(
+    trade_data: Dict[str, Any],
+    *,
+    engine: str = "unknown",
+) -> Dict[str, Any]:
+    """Ensure entryContext.breachPct is populated before the trade is persisted.
+
+    Called from log_trade in both engine1 and engine2. Mutates the
+    ``trade_data`` dict in place AND returns it for chaining. Logs a
+    WARN if no prediction source could be found so we surface FE/advisor
+    payload bugs immediately rather than discovering them weeks later
+    when the conformal mirror runs.
+    """
+    ctx = trade_data.setdefault("entryContext", {})
+    if ctx.get("breachPct") is not None:
+        return trade_data  # already canonical, nothing to do.
+
+    breach_pct, source = derive_breach_pct(trade_data)
+    if breach_pct is None:
+        LOG.warning(
+            "trade_log enrichment[%s]: no breach prediction found in payload "
+            "(checked entryContext / breachSnapshot / predictionSnapshot / "
+            "entry / marketSnapshot). v2 conformal calibrator will skip this trade.",
+            engine,
+        )
+        return trade_data
+
+    ctx["breachPct"] = breach_pct
+    ctx.setdefault("breachPctSource", source)
+    LOG.info(
+        "trade_log enrichment[%s]: breachPct=%.2f%% derived from %s",
+        engine, breach_pct, source,
+    )
+    return trade_data
+
+
+def _safe_get(doc: Any, *path: str) -> Any:
+    cur: Any = doc
+    for p in path:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(p)
+    return cur
+
+
+def _min_of_dict_values(d: Any) -> Optional[float]:
+    if not isinstance(d, dict) or not d:
+        return None
+    vals: List[float] = []
+    for v in d.values():
+        try:
+            f = float(v)
+            if 0.0 <= f <= 100.0:
+                vals.append(f)
+        except (TypeError, ValueError):
+            continue
+    return min(vals) if vals else None

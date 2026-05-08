@@ -97,6 +97,14 @@ def log_trade(
     trade_id = str(uuid.uuid4())[:12]
     source = str(trade_data.get("source", "advisor"))
 
+    # Enrich entryContext.breachPct from breachSnapshot/predictionSnapshot if
+    # the FE didn't set it. This is what the v2 conformal calibrator reads.
+    try:
+        from backend.trade_memory import enrich_trade_log_payload
+        enrich_trade_log_payload(trade_data, engine="e1")
+    except Exception as exc:
+        LOG.debug("E1 trade enrichment failed (non-fatal): %s", exc)
+
     trade: Dict[str, Any] = {
         "tradeId": trade_id,
         "status": "active",

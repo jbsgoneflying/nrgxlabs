@@ -108,6 +108,14 @@ def log_trade(
     ttl = _trade_ttl(flags)
     max_idx = _trade_max_index(flags)
 
+    # Enrich entryContext.breachPct from breachSnapshot/predictionSnapshot if
+    # the FE didn't set it. This is what the v2 conformal calibrator reads.
+    try:
+        from backend.trade_memory import enrich_trade_log_payload
+        enrich_trade_log_payload(trade_data, engine="e2")
+    except Exception as exc:
+        LOG.debug("E2 trade enrichment failed (non-fatal): %s", exc)
+
     source = trade_data.get("source", "advisor")
     trade = {
         "tradeId": trade_id,
