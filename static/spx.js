@@ -3465,6 +3465,8 @@ function _closeTrade(tradeId) {
 // Trade Journal — closed trade history + performance stats
 // ---------------------------------------------------------------------------
 
+let _e2TradeJournalExpanded = false;
+
 function _outcomeBadge(oc) {
   var colors = { win: "#34c759", loss: "#ff453a", scratch: "#8e8e93" };
   var labels = { win: "Win", loss: "Loss", scratch: "Scratch" };
@@ -3500,8 +3502,11 @@ async function _loadTradeJournal() {
 
     sec.classList.remove("hidden");
     var html = '<div class="taPanel">';
-    html += '<div class="taHeader"><div class="taHeaderRow"><span class="taHeaderTitle">Trade Journal</span>';
-    html += '<span class="taHeaderMeta">Learning System · ' + (perfData.totalClosed || 0) + ' closed trades</span></div></div>';
+    html += '<button id="e2TradeJournalToggle" type="button" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border:none;background:transparent;cursor:pointer;border-bottom:1px solid var(--border);text-align:left">';
+    html += '<span style="font-size:15px;font-weight:700">Trade Journal</span>';
+    html += '<span style="font-size:12px;opacity:.6">Learning System · ' + (perfData.totalClosed || 0) + ' closed trades · ' + (_e2TradeJournalExpanded ? "Hide" : "Show") + '</span>';
+    html += "</button>";
+    html += '<div id="e2TradeJournalBody" style="display:' + (_e2TradeJournalExpanded ? "block" : "none") + ';">';
 
     if (perfData.hasData) {
       html += '<div style="padding:14px 20px;border-bottom:1px solid var(--border)">';
@@ -3589,8 +3594,15 @@ async function _loadTradeJournal() {
       });
     }
 
-    html += '</div>';
+    html += "</div></div>";
     el.innerHTML = html;
+    var tg = $("e2TradeJournalToggle");
+    if (tg) {
+      tg.addEventListener("click", function () {
+        _e2TradeJournalExpanded = !_e2TradeJournalExpanded;
+        _loadTradeJournal();
+      });
+    }
   } catch {
     // silently fail
   }

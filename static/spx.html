@@ -115,14 +115,6 @@
       </section>
 
       <section class="results hidden" id="results">
-        <!-- v2 Wing Decision Console (primary card) -->
-        <section class="surface hidden" id="e2WingConsoleSection" aria-label="Wing Decision Console">
-          <div class="sectionHeader" data-insight="wing_console">
-            <h2 class="sectionTitle">Wing Decision Console</h2>
-          </div>
-          <div id="e2WingConsole"></div>
-        </section>
-
         <!-- v2: Entry State strip (regime + macro_proximity + MI v2 probabilities) -->
         <section class="surface hidden" id="e2EntryStateSection" aria-label="Entry State">
           <div class="sectionHeader" data-insight="entry_state">
@@ -158,13 +150,6 @@
           </div>
           <div id="e2ActiveTradesContent"></div>
         </section>
-        <section class="surface hidden" id="e2TradeJournal" aria-label="Trade Journal">
-          <div class="sectionHeader" data-insight="trade_log">
-            <h2 class="sectionTitle">Trade Journal</h2>
-          </div>
-          <div id="e2TradeJournalContent"></div>
-        </section>
-
         <!-- v2 drill-downs for the orphaned catalog slugs -->
         <section class="surface hidden" id="e2CandidateGridSection" aria-label="Candidate Grid">
           <div class="sectionHeader" data-insight="candidate_grid">
@@ -332,6 +317,10 @@
             </table>
           </div>
           <div class="metricCaption muted" id="oddsFootnote">Breach is defined as expiry close outside the short strikes at distance (width × 1σ expected move). Risk-only (no credit model).</div>
+        </section>
+
+        <section class="surface hidden" id="e2TradeJournal" aria-label="Trade Journal">
+          <div id="e2TradeJournalContent"></div>
         </section>
       </section>
     </main>
