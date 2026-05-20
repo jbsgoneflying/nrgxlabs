@@ -25,6 +25,10 @@ def _base_wing_factor(rec: Optional[str]) -> Optional[float]:
         return 1.0
     if r == "Wide":
         return 1.5
+    if r == "Avoid":
+        # Keep model-driven multipliers available for planning/what-if paths
+        # even when recommendation is Avoid (trade gate still controls action).
+        return 1.0
     return None
 
 

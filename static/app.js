@@ -2333,15 +2333,22 @@ function renderSkewWings(payload) {
       const k = Number(payload?.params?.k);
       return Number.isFinite(k) && k > 0 ? k : null;
     })();
+    const qrec = String(wr?.quarterRecommendation || "");
+    const avoidFallback = qrec.toLowerCase().startsWith("avoid");
+    const fallbackLabel = fallbackMult != null
+      ? (avoidFallback
+          ? `${fallbackMult.toFixed(2)}× EM (fallback: quarter=Avoid)`
+          : `${fallbackMult.toFixed(2)}× EM (fallback)`)
+      : "—";
     const baseWingVal = (wr.baseWingMultiple !== null && wr.baseWingMultiple !== undefined)
       ? `${Number(wr.baseWingMultiple).toFixed(2)}× EM`
-      : (fallbackMult != null ? `${fallbackMult.toFixed(2)}× EM (fallback)` : "—");
+      : fallbackLabel;
     const putWingVal = (wr.putWingMultiple !== null && wr.putWingMultiple !== undefined)
       ? `${Number(wr.putWingMultiple).toFixed(2)}× EM`
-      : (fallbackMult != null ? `${fallbackMult.toFixed(2)}× EM (fallback)` : "—");
+      : fallbackLabel;
     const callWingVal = (wr.callWingMultiple !== null && wr.callWingMultiple !== undefined)
       ? `${Number(wr.callWingMultiple).toFixed(2)}× EM`
-      : (fallbackMult != null ? `${fallbackMult.toFixed(2)}× EM (fallback)` : "—");
+      : fallbackLabel;
     const conf = String(wr.confidence || "—");
     const confBadge =
       conf === "HIGH" ? pill("HIGH", "good") : conf === "MED" ? pill("MED", "warn") : pill("LOW", "neutral");
@@ -2658,6 +2665,8 @@ function renderTradeBuilder(payload) {
   const impPct = _bestImpliedMovePct(payload);
   const wr = payload?.wingRecommendation || null;
   const gate = (payload?.regime?.guidance || {})?.tradeGate;
+  const qrec = String(wr?.quarterRecommendation || "");
+  const avoidFallback = qrec.toLowerCase().startsWith("avoid");
   const fallbackMult = (() => {
     const k = Number(payload?.params?.k);
     return Number.isFinite(k) && k > 0 ? k : null;
@@ -2729,7 +2738,9 @@ function renderTradeBuilder(payload) {
   const asOf = usingDelayed && cur?.delayedUpdatedAt ? `updated=${cur.delayedUpdatedAt}` : cur?.asOfDate ? `asOf=${cur.asOfDate}` : "";
   const meta = [src, emLabel, asOf].filter(Boolean).join(", ");
   const multNote = (baseMult == null && fallbackMult != null)
-    ? ` Wing multipliers unavailable; using breach multiple fallback (${fallbackMult.toFixed(2)}× EM).`
+    ? (avoidFallback
+        ? ` Wing multipliers set to fallback ${fallbackMult.toFixed(2)}× EM because quarter recommendation is Avoid.`
+        : ` Wing multipliers unavailable; using breach multiple fallback (${fallbackMult.toFixed(2)}× EM).`)
     : "";
   if (notes) notes.textContent = `${extra}${multNote} Assumed price $${price.toFixed(2)}; implied move ${impPct.toFixed(2)}%.${meta ? ` (${meta})` : ""}`;
 }
@@ -4395,13 +4406,13 @@ function _e1RenderActionLadder(ladder) {
     var pnlColor = (a.expectedPnlPct != null && Number(a.expectedPnlPct) < 0) ? "#ff7a7a" : "#3cd4a9";
     var rangeStr = "";
     if (a.p10PnlPct != null && a.p90PnlPct != null) {
-      rangeStr = ' <span style="opacity:.55;font-size:10px;font-weight:400">(p10 ' + _e1FmtPct(a.p10PnlPct) + ' / p90 ' + _e1FmtPct(a.p90PnlPct) + ')</span>';
+      rangeStr = ' <span style="opacity:.78;font-size:10px;font-weight:500">(p10 ' + _e1FmtPct(a.p10PnlPct) + ' / p90 ' + _e1FmtPct(a.p90PnlPct) + ')</span>';
     }
-    return '<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:baseline;padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.03);margin-bottom:4px">' +
+    return '<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:baseline;padding:7px 9px;border-radius:6px;background:rgba(255,255,255,0.06);margin-bottom:5px">' +
       '<strong style="font-size:11px;letter-spacing:0.5px;text-transform:uppercase;color:#e6ecf2">' + escapeHtml(String(a.action || "")) + '</strong>' +
-      '<span style="font-size:11px;opacity:.75">' + escapeHtml(String(a.label || a.rationale || "")) + '</span>' +
-      '<span style="font-size:11px;opacity:.7">' + probLabel + '</span>' +
-      '<span style="font-size:11px;font-weight:600;color:' + pnlColor + '">' + pnl + rangeStr + '</span>' +
+      '<span style="font-size:12px;opacity:.92">' + escapeHtml(String(a.label || a.rationale || "")) + '</span>' +
+      '<span style="font-size:11px;opacity:.88">' + probLabel + '</span>' +
+      '<span style="font-size:12px;font-weight:700;color:' + pnlColor + '">' + pnl + rangeStr + '</span>' +
       '</div>';
   }).join("");
 }
@@ -4422,7 +4433,7 @@ function _paintE1LiveReview(panel, body) {
     '<span style="padding:3px 9px;border-radius:999px;background:' + phasePal.color + '22;color:' + phasePal.color + ';font-size:10px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase">' + escapeHtml(phasePal.label) + '</span>';
   var verdictPill =
     '<span style="padding:3px 12px;border-radius:6px;background:' + verdictColor + '1f;color:' + verdictColor + ';font-size:13px;font-weight:700;letter-spacing:0.5px">' + escapeHtml(verdict) + '</span>' +
-    '<span style="font-size:10px;opacity:.7;margin-left:-4px">conf ' + conf + '</span>';
+    '<span style="font-size:10px;opacity:.88;margin-left:-4px">conf ' + conf + '</span>';
   var statusPill =
     '<span style="padding:2px 8px;border-radius:4px;background:' + chipColor + '22;color:' + chipColor + ';font-size:10px;text-transform:uppercase;letter-spacing:0.4px">' + escapeHtml(r.statusChip || "—") + '</span>';
 
@@ -4432,9 +4443,9 @@ function _paintE1LiveReview(panel, body) {
 
   var header = '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">' +
     phaseChip + mismatchNote + verdictPill + statusPill +
-    '<span style="font-size:11px;opacity:.65">Spot $' + _e1FmtNum(r.currentSpot) + '</span>' +
-    '<span style="font-size:11px;opacity:.65">Nearest short ' + _e1FmtPct(r.nearestShortPct) + '</span>' +
-    '<span style="font-size:11px;opacity:.65">' + (r.daysToEarnings != null ? r.daysToEarnings + 'd to earnings' : '') + '</span>' +
+    '<span style="font-size:12px;opacity:.9">Spot $' + _e1FmtNum(r.currentSpot) + '</span>' +
+    '<span style="font-size:12px;opacity:.9">Nearest short ' + _e1FmtPct(r.nearestShortPct) + '</span>' +
+    '<span style="font-size:12px;opacity:.9">' + (r.daysToEarnings != null ? r.daysToEarnings + 'd to earnings' : '') + '</span>' +
     '</div>';
 
   // --- Narrative block ---
@@ -4445,10 +4456,10 @@ function _paintE1LiveReview(panel, body) {
   var ivE = ev.iv || {};
   var regE = ev.regime || {};
   var tile = function (label, value, sub) {
-    return '<div style="padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:6px;border:1px solid rgba(255,255,255,0.06);min-width:100px">' +
-      '<div style="font-size:9px;letter-spacing:0.5px;text-transform:uppercase;opacity:.5;margin-bottom:2px">' + escapeHtml(label) + '</div>' +
+    return '<div style="padding:8px 10px;background:rgba(255,255,255,0.05);border-radius:6px;border:1px solid rgba(255,255,255,0.10);min-width:100px">' +
+      '<div style="font-size:9px;letter-spacing:0.5px;text-transform:uppercase;opacity:.78;margin-bottom:2px">' + escapeHtml(label) + '</div>' +
       '<div style="font-size:13px;font-weight:600">' + value + '</div>' +
-      (sub ? '<div style="font-size:10px;opacity:.55;margin-top:1px">' + sub + '</div>' : '') +
+      (sub ? '<div style="font-size:10px;opacity:.78;margin-top:1px">' + sub + '</div>' : '') +
       '</div>';
   };
   var tiles = '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">';
@@ -4480,7 +4491,7 @@ function _paintE1LiveReview(panel, body) {
     replayBlock = '<div style="margin:8px 0;padding:10px 12px;background:rgba(125,182,255,0.05);border-radius:8px;border:1px solid rgba(125,182,255,0.18)">' +
       '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">' +
         '<strong style="font-size:11px;letter-spacing:0.4px;text-transform:uppercase;color:#7db6ff">Replay Projection · ' + escapeHtml(String(pn)) + ' analogues</strong>' +
-        '<span style="font-size:10px;opacity:.6">now → expiry</span>' +
+        '<span style="font-size:10px;opacity:.85">now → expiry</span>' +
       '</div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:14px;font-size:11px;margin-bottom:6px">' +
         '<span>P10 <strong style="color:' + ((p10 != null && p10 < 0) ? "#ff7a7a" : "#e6ecf2") + '">' + _e1FmtPct(p10) + '</strong></span>' +
@@ -4541,21 +4552,21 @@ function _paintE1LiveReview(panel, body) {
 
   // --- Key points / risks / desk note ---
   var keyPts = (Array.isArray(rec.keyPoints) && rec.keyPoints.length)
-    ? '<div style="margin-top:8px"><strong style="font-size:11px;text-transform:uppercase;letter-spacing:0.4px;opacity:.7">Key points</strong>' +
-      '<ul style="margin:4px 0 0 18px;padding:0">' + rec.keyPoints.map(function (k) { return '<li style="margin:2px 0">' + escapeHtml(k) + '</li>'; }).join("") + '</ul></div>'
+    ? '<div style="margin-top:8px"><strong style="font-size:11px;text-transform:uppercase;letter-spacing:0.4px;opacity:.92">Key points</strong>' +
+      '<ul style="margin:4px 0 0 18px;padding:0;font-size:12px;line-height:1.45">' + rec.keyPoints.map(function (k) { return '<li style="margin:2px 0">' + escapeHtml(k) + '</li>'; }).join("") + '</ul></div>'
     : '';
   var risks = (Array.isArray(rec.riskFactors) && rec.riskFactors.length)
     ? '<div style="margin-top:6px"><strong style="font-size:11px;text-transform:uppercase;letter-spacing:0.4px;color:#f3a847">Risks</strong>' +
-      '<ul style="margin:4px 0 0 18px;padding:0">' + rec.riskFactors.map(function (k) { return '<li style="margin:2px 0">' + escapeHtml(k) + '</li>'; }).join("") + '</ul></div>'
+      '<ul style="margin:4px 0 0 18px;padding:0;font-size:12px;line-height:1.45">' + rec.riskFactors.map(function (k) { return '<li style="margin:2px 0">' + escapeHtml(k) + '</li>'; }).join("") + '</ul></div>'
     : '';
   var deskNote = rec.deskNote
-    ? '<div style="margin-top:8px;padding:6px 10px;background:rgba(60,212,169,0.08);border-radius:6px;font-size:11px"><em>Desk note:</em> ' + escapeHtml(rec.deskNote) + '</div>'
+    ? '<div style="margin-top:8px;padding:7px 10px;background:rgba(60,212,169,0.12);border-radius:6px;border:1px solid rgba(60,212,169,0.35);font-size:12px;line-height:1.4"><em>Desk note:</em> ' + escapeHtml(rec.deskNote) + '</div>'
     : '';
 
   // --- Action ladder ---
   var ladderBlock = "";
   if (Array.isArray(rec.actionLadder) && rec.actionLadder.length) {
-    ladderBlock = '<div style="margin-top:10px"><strong style="font-size:11px;text-transform:uppercase;letter-spacing:0.4px;opacity:.7;display:block;margin-bottom:6px">Action ladder</strong>' +
+    ladderBlock = '<div style="margin-top:10px"><strong style="font-size:11px;text-transform:uppercase;letter-spacing:0.4px;opacity:.92;display:block;margin-bottom:6px">Action ladder</strong>' +
       _e1RenderActionLadder(rec.actionLadder) + '</div>';
   }
 

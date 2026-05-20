@@ -391,7 +391,13 @@ def run_monte_carlo(
             if k_mult is not None and k_mult > 0:
                 put_mult = k_mult if put_mult is None else put_mult
                 call_mult = k_mult if call_mult is None else call_mult
-                notes.append(f"Wing multipliers unavailable; using symmetric {k_mult:.2f}× EM from breach multiple.")
+                qrec = str((wing_recommendation or {}).get("quarterRecommendation") or "")
+                if qrec.lower().startswith("avoid"):
+                    notes.append(
+                        f"Wing multipliers set to symmetric {k_mult:.2f}× EM because quarter recommendation is Avoid."
+                    )
+                else:
+                    notes.append(f"Wing multipliers unavailable; using symmetric {k_mult:.2f}× EM from breach multiple.")
         if put_mult is None or call_mult is None:
             return {
                 "nSims": 0,

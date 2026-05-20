@@ -59,3 +59,28 @@ def test_wing_recommendation_no_trade_gate_is_respected():
     assert wr["recommendationLabel"] == "NO_TRADE"
     assert "No Trade" in (wr["rationale"] or "")
 
+
+def test_wing_recommendation_avoid_still_emits_multipliers_for_planning():
+    summary = {
+        "events_used": 20,
+        "upBreachRatePct": 12.0,
+        "downBreachRatePct": 14.0,
+        "avgUpOvershootPct": 18.0,
+        "avgDownOvershootPct": 20.0,
+    }
+    quarters = {"Q2": {"recommendation": "Avoid"}}
+    regime = {"label": "Risk-On", "tailMultiplier": 1.46, "guidance": {"tradeGate": "CAUTION"}}
+
+    wr = compute_wing_recommendation(
+        summary=summary,
+        quarters=quarters,
+        regime=regime,
+        current_quarter_key="Q2",
+        skew_component=None,
+    )
+
+    assert wr["quarterRecommendation"] == "Avoid"
+    assert wr["tradeGate"] == "CAUTION"
+    assert wr["baseWingMultiple"] == 1.46
+    assert wr["putWingMultiple"] == 1.46
+    assert wr["callWingMultiple"] == 1.46
