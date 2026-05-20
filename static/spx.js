@@ -46,6 +46,10 @@ function _fmtClusterLine(c) {
 
 let lastPayload = null;
 let lastGammaPayload = null;
+const _e2TrackBuilderState = {
+  defaultEmMultiple: 1.25,
+  defaultWingWidth: 10,
+};
 const gammaState = {
   view: "weekly", // weekly|nearest
   layers: { putWall: true, callWall: true, clusters: true, gammaPeaks: true, gammaFlip: true },
@@ -1827,7 +1831,7 @@ function render(payload) {
         '<span class="taHeaderTitle">AI Trade Advisor</span>' +
         '<span class="taHeaderActions"><button id="e2RunAdvisorBtn" class="primaryButton" type="button" style="font-size:11px;padding:6px 16px">Run Advisor</button></span>' +
         '</div><div class="taMuted" style="font-size:12px;margin-top:4px">' +
-        'On-demand narrative layer over the Wing Decision Console + scan. One click = one LLM call.' +
+        'On-demand narrative layer over the tracked/live workflow + scan. One click = one LLM call.' +
         '</div></div></div>';
       var _wc = Array.isArray(payload?.widthComparison) ? payload.widthComparison : [];
       if (_wc.length > 0 && typeof renderWidthComparison === "function") {
@@ -1838,7 +1842,7 @@ function render(payload) {
     }
   } catch (_e) { console.warn("e2 advisor panel:", _e); }
 
-  // v2: Wing Decision Console + MI v2 + source chip + orphan drilldowns.
+  // v2: Track Builder + source chip + orphan drilldowns.
   try { renderE2CommandDeck(payload); } catch (err) { console.warn("e2 command deck:", err); }
 
   // Load active trades
@@ -1893,63 +1897,145 @@ function _fmtPctE2(x, digits = 1) {
 }
 
 function renderE2CommandDeck(payload) {
-  try { _renderMiV2Regime(payload); } catch (_e) { /* ignore */ }
-  try { _renderEntryState(payload); } catch (_e) { /* ignore */ }
+  try { _renderTrackBuilder(payload); } catch (_e) { /* ignore */ }
   try { _renderMacroProximity(payload); } catch (_e) { /* ignore */ }
-  // Wing Console is its own fetch — the scan payload doesn't carry it.
-  _fetchAndRenderWingConsole(payload);
 }
 
-function _renderMiV2Regime(payload) {
-  const body = document.getElementById("e2RegimeMiV2Body");
-  const sec  = document.getElementById("e2RegimeMiV2Section");
-  if (!body || !sec) return;
-  const r = (payload && payload.current && payload.current.regimeMiV2) || null;
-  if (!r) {
-    sec.classList.add("hidden");
-    body.innerHTML = "";
-    return;
+function _roundToStep(x, step) {
+  const n = Number(x);
+  const s = Number(step) || 1;
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n / s) * s;
+}
+
+function _seedTrackedShortStrikes(spot, emPct, emMult) {
+  const spotN = Number(spot);
+  const emN = Number(emPct);
+  const emm = Number(emMult);
+  if (!Number.isFinite(spotN) || !Number.isFinite(emN) || !Number.isFinite(emm) || spotN <= 0 || emN <= 0 || emm <= 0) {
+    return { shortPut: null, shortCall: null };
   }
-  sec.classList.remove("hidden");
-  const probs = r.probabilities || {};
-  const bars = Object.entries(probs).map(([label, p]) => {
-    const pct = Math.max(0, Math.min(1, Number(p) || 0));
-    return (
-      `<div class="e2RegimeMiV2">` +
-        `<span style="min-width:110px">${escapeHtml(String(label))}</span>` +
-        `<span class="e2RegimeMiV2Bar" style="width:${Math.max(24, Math.round(pct * 180))}px">` +
-          `<span class="e2RegimeMiV2Fill" style="width:${(pct * 100).toFixed(0)}%"></span>` +
-        `</span>` +
-        `<span>${(pct * 100).toFixed(1)}%</span>` +
-      `</div>`
-    );
-  }).join("");
-  body.innerHTML = (
-    `<div class="taPanel" style="padding:16px"><div class="taHeader" style="margin-bottom:8px"><div class="taHeaderRow">` +
-      `<span class="taHeaderTitle">${escapeHtml(String(r.label || "—"))} <span class="taMuted" style="font-size:11px">vol_state: ${escapeHtml(String(r.vol_state || "—"))} · source: ${escapeHtml(String(r.source || "—"))}</span></span>` +
-    `</div></div>` +
-    bars +
-    `</div>`
-  );
+  const distPts = spotN * (emN / 100.0) * emm;
+  return {
+    shortPut: _roundToStep(spotN - distPts, 5),
+    shortCall: _roundToStep(spotN + distPts, 5),
+  };
 }
 
-function _renderEntryState(payload) {
-  const body = document.getElementById("e2EntryStateBody");
-  const sec  = document.getElementById("e2EntryStateSection");
+function _renderTrackBuilder(payload) {
+  const body = document.getElementById("e2TrackBuilderContent");
+  const sec = document.getElementById("e2TrackBuilderSection");
   if (!body || !sec) return;
   const em = (payload && payload.expectedMove) || {};
   const current = (payload && payload.current) || {};
   const regime = current.regime || {};
+  const macro = current.macro || {};
+  const hb = payload && payload.historyBreakerRisk;
+  const spot = Number(current.stockPrice || em.smartSpotPrice || em.spotPrice || 0);
+  const emPct = Number(em.expectedMovePct || em.oratsExpectedMovePct || 0);
+  const seeded = _seedTrackedShortStrikes(spot, emPct, _e2TrackBuilderState.defaultEmMultiple);
   sec.classList.remove("hidden");
   body.innerHTML = (
-    `<div class="e15Grid" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));gap:8px">` +
-      `<div class="e15Card"><div class="e15CardLabel">Spot</div><div class="e15CardValue">${escapeHtml(String(current.stockPrice || em.smartSpotPrice || em.spotPrice || "—"))}</div></div>` +
-      `<div class="e15Card"><div class="e15CardLabel">1σ EM%</div><div class="e15CardValue">${_fmtPctE2(em.expectedMovePct || em.oratsExpectedMovePct, 2)}</div></div>` +
-      `<div class="e15Card"><div class="e15CardLabel">Expiry</div><div class="e15CardValue">${escapeHtml(String(em.expiry || "—"))}</div></div>` +
-      `<div class="e15Card"><div class="e15CardLabel">Regime (E2)</div><div class="e15CardValue">${escapeHtml(String(regime.label || regime.bucket || "—"))}</div></div>` +
-      `<div class="e15Card"><div class="e15CardLabel">DTE</div><div class="e15CardValue">${escapeHtml(String(em.dte || "—"))}</div></div>` +
+    `<div class="taPanel" style="padding:14px 16px">` +
+      `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">` +
+      `Build tracked candidates (not live). Spot <strong>${escapeHtml(String(spot || "—"))}</strong> · 1σ EM <strong>${_fmtPctE2(emPct, 2)}</strong> · Expiry <strong>${escapeHtml(String(em.expiry || "—"))}</strong> · Regime <strong>${escapeHtml(String(regime.label || regime.bucket || "—"))}</strong>` +
+      `</div>` +
+      `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px">` +
+        `<div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">EM multiple</label><input id="e2TrackEm" type="number" step="0.05" min="0.5" max="4.0" value="${_e2TrackBuilderState.defaultEmMultiple.toFixed(2)}" style="width:100%;padding:7px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);font-size:12px"/></div>` +
+        `<div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Wing width (pts)</label><input id="e2TrackWing" type="number" step="1" min="1" max="100" value="${_e2TrackBuilderState.defaultWingWidth}" style="width:100%;padding:7px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);font-size:12px"/></div>` +
+        `<div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Short put</label><input id="e2TrackShortPut" type="number" step="1" value="${seeded.shortPut != null ? String(seeded.shortPut) : ""}" style="width:100%;padding:7px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);font-size:12px"/></div>` +
+        `<div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Short call</label><input id="e2TrackShortCall" type="number" step="1" value="${seeded.shortCall != null ? String(seeded.shortCall) : ""}" style="width:100%;padding:7px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);font-size:12px"/></div>` +
+        `<div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Est. credit ($)</label><input id="e2TrackCredit" type="number" step="0.01" min="0" value="2.00" style="width:100%;padding:7px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);font-size:12px"/></div>` +
+        `<div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Entry day</label><input id="e2TrackEntryDay" type="text" value="${escapeHtml(String(document.getElementById("entryDay")?.value || "mon"))}" style="width:100%;padding:7px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);font-size:12px"/></div>` +
+      `</div>` +
+      `<div style="margin-top:10px"><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Note (optional)</label><input id="e2TrackNote" type="text" placeholder="Why this candidate is worth tracking..." style="width:100%;padding:7px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);font-size:12px"/></div>` +
+      (hb && hb.level && hb.level !== "low"
+        ? `<div style="margin-top:10px;padding:8px 10px;border-radius:8px;background:rgba(255,159,10,.10);border:1px solid rgba(255,159,10,.25);font-size:11px;color:#ffb46a">History-breaker ${escapeHtml(String(hb.level).toUpperCase())} (${escapeHtml(String(hb.score || "—"))}) warn-only. Track with tighter management assumptions.</div>`
+        : "") +
+      `<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">` +
+        `<button id="e2TrackSeedBtn" type="button" class="chipToggle" style="font-size:11px;padding:6px 10px">Seed strikes</button>` +
+        `<button id="e2TrackSubmitBtn" type="button" class="primaryButton" style="font-size:11px;padding:7px 14px">Track Candidate</button>` +
+      `</div>` +
     `</div>`
   );
+
+  const seedBtn = document.getElementById("e2TrackSeedBtn");
+  if (seedBtn) {
+    seedBtn.addEventListener("click", function () {
+      const emMult = Number(document.getElementById("e2TrackEm")?.value || _e2TrackBuilderState.defaultEmMultiple);
+      const seededNow = _seedTrackedShortStrikes(spot, emPct, emMult);
+      if (seededNow.shortPut != null) document.getElementById("e2TrackShortPut").value = String(seededNow.shortPut);
+      if (seededNow.shortCall != null) document.getElementById("e2TrackShortCall").value = String(seededNow.shortCall);
+    });
+  }
+
+  const submitBtn = document.getElementById("e2TrackSubmitBtn");
+  if (submitBtn) {
+    submitBtn.addEventListener("click", async function () {
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Tracking...";
+      try {
+        const emMult = Number(document.getElementById("e2TrackEm")?.value || _e2TrackBuilderState.defaultEmMultiple);
+        const wing = Number(document.getElementById("e2TrackWing")?.value || _e2TrackBuilderState.defaultWingWidth);
+        const shortPut = Number(document.getElementById("e2TrackShortPut")?.value || 0);
+        const shortCall = Number(document.getElementById("e2TrackShortCall")?.value || 0);
+        const credit = Number(document.getElementById("e2TrackCredit")?.value || 0);
+        const entryDay = String(document.getElementById("e2TrackEntryDay")?.value || "mon").trim().toLowerCase();
+        const note = String(document.getElementById("e2TrackNote")?.value || "").trim();
+        if (!Number.isFinite(shortPut) || !Number.isFinite(shortCall) || shortPut <= 0 || shortCall <= 0 || shortPut >= shortCall) {
+          throw new Error("Enter valid short put/call strikes.");
+        }
+        if (!Number.isFinite(wing) || wing <= 0) throw new Error("Wing width must be > 0.");
+        _e2TrackBuilderState.defaultEmMultiple = Number.isFinite(emMult) && emMult > 0 ? emMult : _e2TrackBuilderState.defaultEmMultiple;
+        _e2TrackBuilderState.defaultWingWidth = wing;
+        const bodyReq = {
+          source: "track_builder",
+          mode: "tracked",
+          entry: {
+            underlying: String((payload?.underlying || {}).symbol || "SPX"),
+            spotAtEntry: Number(spot || 0),
+            entryDate: String(payload?.asOfDate || new Date().toISOString().slice(0, 10)).slice(0, 10),
+            expiryDate: String(em.expiry || ""),
+            shortPutStrike: shortPut,
+            longPutStrike: shortPut - wing,
+            shortCallStrike: shortCall,
+            longCallStrike: shortCall + wing,
+            wingWidth: wing,
+            emMultiple: emMult,
+            entryCredit: credit,
+          },
+          entryContext: {
+            regimeScore: regime.score,
+            regimeBucket: regime.bucket || regime.label,
+            macroBucket: macro.bucket,
+            emPct: emPct,
+            volPressureState: payload?.liveContext?.volPressure?.state,
+            historyBreakerRisk: payload?.historyBreakerRisk || null,
+          },
+          note: note || "Tracked from SPX Track Builder.",
+          entryDay: entryDay || "mon",
+        };
+        const resp = await fetch("/api/spx-ic/trade", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(bodyReq),
+        });
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        submitBtn.textContent = "Tracked ✓";
+        submitBtn.style.background = "#34c759";
+        await _loadActiveTrades();
+        const at = document.getElementById("e2ActiveTrades");
+        if (at) {
+          try { at.scrollIntoView({ behavior: "smooth", block: "start" }); }
+          catch (_e) { at.scrollIntoView(); }
+        }
+      } catch (e) {
+        alert("Track candidate failed: " + String(e?.message || e));
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Track Candidate";
+      }
+    });
+  }
 }
 
 function _renderMacroProximity(payload) {
