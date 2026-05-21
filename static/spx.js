@@ -1833,10 +1833,9 @@ function render(payload) {
         '</div><div class="taMuted" style="font-size:12px;margin-top:4px">' +
         'On-demand narrative layer over the tracked/live workflow + scan. One click = one LLM call.' +
         '</div></div></div>';
-      var _wc = Array.isArray(payload?.widthComparison) ? payload.widthComparison : [];
-      if (_wc.length > 0 && typeof renderWidthComparison === "function") {
-        try { renderWidthComparison(_wc); } catch (_e) { /* ignore */ }
-      }
+      // EM × Wing Width Analysis intentionally hidden — the desk asked
+      // to keep only the AI Trade Advisor narrative + LLM call surface
+      // here. The width grid lives in the candidate-grid drilldown.
       var advBtn = $("e2RunAdvisorBtn");
       if (advBtn) advBtn.addEventListener("click", function () { _runAdvisor(); });
     }
@@ -3068,7 +3067,8 @@ async function _runAdvisor() {
     var data = await resp.json();
     _lastAdvisorResult = data;
     renderAdvisorPanel(data);
-    if (data.widthComparison) renderWidthComparison(data.widthComparison);
+    // EM × Wing Width Analysis hidden per desk request — the advisor
+    // narrative + verdict carries the same intel without the width grid.
     renderConvergence();
   } catch (err) {
     if (el) el.innerHTML = '<div style="padding:16px;color:#ff453a;font-size:13px">Advisor error: ' + escapeHtml(String(err.message || err)) + '</div>';

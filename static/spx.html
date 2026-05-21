@@ -122,17 +122,18 @@
           <div id="e2TrackBuilderContent"></div>
         </section>
 
-        <!-- Existing Decision panel is now a drill-down (section header carries the E2-score slug). -->
-        <section class="surface hidden" id="e2DecisionSection" aria-label="Decision header"
-                 data-insight-root="regime_card"></section>
-
-        <!-- Advisor is always-on in v2 (not gated on multi-wing) -->
+        <!-- Advisor sits directly under Track Builder so the desk can run the LLM narrative
+             alongside their tracked candidates. Width grid is hidden (see spx.js). -->
         <section class="surface hidden" id="e2AdvisorSection" aria-label="AI Trade Advisor">
           <div class="sectionHeader" data-insight="ai_advisor">
             <h2 class="sectionTitle">AI Trade Advisor</h2>
           </div>
           <div id="e2AdvisorContent"></div>
         </section>
+
+        <!-- Decision panel is a drill-down (section header carries the E2-score slug). -->
+        <section class="surface hidden" id="e2DecisionSection" aria-label="Decision header"
+                 data-insight-root="regime_card"></section>
 
         <!-- Trades -->
         <section class="surface hidden" id="e2ActiveTrades" aria-label="Active Trades">
