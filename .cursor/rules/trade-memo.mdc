@@ -1,0 +1,85 @@
+---
+description: Institutional-grade pre-trade memo workflow — invoke when the user asks for a trade memo, pre-trade analysis, "build the picture" on a trade, decides whether to deploy capital on an SPX iron condor (Engine 2 / 2b flex) or an earnings IV-crush trade (Engine 1).
+globs:
+alwaysApply: false
+---
+
+# Trade Memo — Pre-Capital-Deployment Playbook
+
+Use when the user says any of:
+- "Run a trade memo for X" / "build the full picture" / "should I take this trade?"
+- "Pull the live data and let's run [SPX trade] / [earnings trade]"
+- Decides to deploy real capital on either an Engine 2/2b IC or an Engine 1 earnings trade
+- Asks for an "institutional read" / "desk-level analysis" / "what's the edge"
+
+**Do NOT use for**: post-trade reconciliation (different — see end of this rule), feature build requests, or routine market-color questions.
+
+## The deliverable is always a canvas
+
+Trade memos are data-heavy decision artifacts. Always render as a Cursor canvas at `~/.cursor/projects/<workspace>/canvases/<trade-id>.canvas.tsx`. Markdown chat dumps are insufficient — the desk needs to scan the artifact while clicking through the broker. Mirror the structure in `canvases/spx-ic-memorial-day-2026-trade-memo.canvas.tsx` (the reference template).
+
+## Required sections, in order
+
+1. **Hero** — H1 trade ID, status pills (TRADE / PASS / WAIT), confidence %, hedge flag. Subtitle has date + time + spot + DTE shape.
+2. **Executive verdict callout** — one Callout (`tone="success"` for TRADE, `"warning"` for WAIT, `"danger"` for PASS). Two paragraphs: (a) what the cohort math says, (b) what the qualitative tail says. The callout must answer "should I take this trade and at what size."
+3. **Market snapshot Grid** — 4×2 Stats: spot, EM%, VIX (vs 52w), regime, plus 4 context tiles (oil / index ATH proximity / consecutive wins / weekend stress gauge for SPX; ATM IV crush expectation / past 4 quarters move stats / earnings beat history / event calendar for earnings).
+4. **The trade Card** — exact leg table (qty, strike, side, mid, distance %), plus a 2×2 Stats grid (target credit, max loss, ROC, POP). If hedged, second Card with hedge legs and a stress-max-loss row.
+5. **Where the edge is Table** — 4 rows minimum, one per corroboration source. Each row: source, reading, sample size, confidence note. Aim for FOUR independent corroborations (e.g. all-shape cohort, regime-matched cohort, exact-event cohort, AI Advisor). Color rows green on TRADE; warning if any source dissents.
+6. **Historical analogues Table** — every prior analogue with date, gap%, regime, macro. Below: 4-stat grid (median/p95/max abs gap; worst gap × current EM).
+7. **Hedge scenario math Table** — 6–8 rows of Tuesday-open (SPX) or post-earnings-open (E1) scenarios. Columns: scenario, target price, position outcome, hedge intrinsic, net P&L.
+8. **External context Cards** — paired 3fr/2fr Grid. Left = qualitative tail (geopolitics for SPX, earnings whisper / guidance risk for E1). Right = scheduled data calendar for the hold window.
+9. **Playbook timeline** — 3 Cards stacked: pre-entry checklist, hold-period monitoring, exit execution. Each card has 3–6 bullet `Text` items, NOT a table.
+10. **Risk register Table** — 5 rows: risk, probability, impact, mitigant. Color rows by severity.
+11. **Desk one-pager Grid (2 cols)** — Bull case card / Bear case card. 5 bullets each, written as something the desk could read aloud in 30 seconds.
+12. **Footer source line** — list every data source used (Raven-Tech endpoint + URL, news outlets, social, ORATS, etc.).
+
+## Data gathering — parallel pulls, every time
+
+Run these IN PARALLEL on memo invocation (never serially):
+
+**Raven-Tech engines** — pull authoritative quant data:
+- **SPX flex IC**: `curl -sS "https://app.raven-tech.co/api/spx-ic/flex?ticker=SPX&entry_date=YYYY-MM-DD&expiry=YYYY-MM-DD&include_live_chain=1"` then `POST /api/spx-ic/flex/advisor` with the payload body for LLM verdict. Required field paths: `flexAnalytics.subsamples.{all|regimeMacro|holidayClass|exactHoliday}.breach`, `weekendStress.{level,termSpreadPts,notes}`, `liveChain.targets`, `hedgeSizer.{tiers,hedgeStrikes,shortStructure}`, `recommendation.{recommended,bestEffort,emPreference}`, `weeks` (historical analogues).
+- **SPX weekly IC** (non-flex): `/api/spx-ic` + `/api/spx-ic/advisor` (same payload pattern).
+- **Earnings IV crush (E1)**: Use the matching Engine 1 endpoints — historical IV-crush distribution for the ticker, plus its advisor.
+
+**Live market data** — concurrent `WebSearch` calls for:
+- Spot + intraday tape ("SPX S&P 500 close <date>" or single-name quote)
+- VIX level + 52-week range (for SPX) or single-name IV30 + earnings IV (for E1)
+- Geopolitical / macro headline scan for the hold window (Iran, Fed, central bank decisions, etc.)
+- Event calendar for hold window (data drops, earnings calls, Fed speakers)
+- Oil tape (for SPX when Middle East risk is live)
+- Social/sell-side desk view ("0DTE iron condor desk view <date>" or "<ticker> earnings whisper")
+
+**Filter aggressively** — every data point in the memo must materially change the verdict, size, or hedge structure. Do NOT pad with cute color.
+
+## Edge-corroboration discipline
+
+The memo's "Where the edge is" table is the heart of the artifact. **Demand FOUR independent corroborations** before recommending TRADE:
+1. **Quant cohort math** — at least one breach-statistic source (engine `flexAnalytics` / odds-like-now / E1 historical IV-crush).
+2. **Regime / macro match** — narrower subsample that matches today's conditions.
+3. **Event-specific match** — exact holiday for SPX, prior earnings for E1 (n ≥ 2 minimum).
+4. **AI Advisor verdict** — the engine's LLM (`/advisor` endpoint) on the same payload.
+
+If three or fewer corroborate, the memo verdict caps at **LEAN_TRADE** (smaller size, mandatory hedge). If two or fewer, the verdict is **PASS** or **WAIT** — explain what would need to change.
+
+## Hedge math — always include for binary-event windows
+
+For any trade spanning a binary event (holiday weekend for SPX, earnings print for E1), the Hedge Sizer block is mandatory:
+- Pull `hedgeSizer.hedgeStrikes` (live mids) and `hedgeSizer.tiers` from the payload (already wired for flex; for E1 add an equivalent block when implemented).
+- Render the scenario P&L table with the user's chosen tier highlighted.
+- Frame the cost as "X% of gross credit consumed to cap loss at Y% of unhedged max" — that's the institutional framing.
+
+## Size discipline
+
+Default reference size is **20 contracts** for SPX flex IC and **5 contracts** for single-name earnings trades. The frontend Hedge Sizer panel handles dynamic scaling, but the memo bakes in the 20 / 5 defaults plus a "for accounts where this loss would be material, halve the size" footer note. Never recommend a size without showing the corresponding stress-max-loss in dollars.
+
+## Post-trade reconciliation (separate workflow)
+
+When the user posts broker fills (screenshot, paste), do NOT regenerate the memo. Instead:
+1. Build a fills-vs-plan table (planned mid / actual fill / slippage per leg).
+2. Compute locked-in actuals (gross credit, hedge cost, net credit, capital at risk, worst-case stress P&L).
+3. Restate the exit thresholds as a printable table with the actual short strikes.
+4. Confirm monitoring protocol (weekend / Sunday futures check / Tuesday open execution).
+5. Remind the user the hedge legs WILL show red mid-trade — that's by design.
+
+This is a focused tactical response, not another canvas.
