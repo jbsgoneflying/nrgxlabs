@@ -43,6 +43,7 @@ from backend.engine2b.flex_windows import (
     classify_holiday,
     derive_target_shape,
 )
+from backend.engine2b.weekend_stress import compute_weekend_stress
 
 from backend.spx_ic.backtest import beta_binomial_mean, pctile, recommend_width
 from backend.spx_ic.engine import (
@@ -812,6 +813,28 @@ def compute_engine2b_flex_ic(
             }
     mark("flex.live_chain")
 
+    # ---- Weekend Stress Gauge (holiday-spanning trades only) ----
+    weekend_stress_block: Dict[str, Any] = {
+        "enabled": False,
+        "level": "UNKNOWN",
+        "notes": ["Weekend stress gauge runs only for holiday-spanning trades."],
+    }
+    if include_live_chain and bool(target_shape.get("spansHoliday")):
+        try:
+            weekend_stress_block = compute_weekend_stress(
+                client,
+                ticker=underlying,
+                today=now,
+                near_expiry=expiry_date,
+            )
+        except Exception as e:
+            weekend_stress_block = {
+                "enabled": False,
+                "level": "UNKNOWN",
+                "notes": [f"Weekend stress gauge failed: {type(e).__name__}: {e}"],
+            }
+    mark("flex.weekend_stress")
+
     mark("compute.total")
     LOG.info(
         "Engine2b flex compute done in %.2fs: windows=%s rows=%s entry=%s exp=%s",
@@ -856,6 +879,7 @@ def compute_engine2b_flex_ic(
         },
         "flexAnalytics": flex_analytics,
         "liveChain": live_chain_block,
+        "weekendStress": weekend_stress_block,
         "current": {
             "regime": regime_now,
             "macro": macro_now,

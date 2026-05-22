@@ -35,6 +35,24 @@ You receive a structured JSON payload with these top-level sections:
    - If liveChain.enabled is false: state explicitly that you cannot verify credit and
      recommend the desk pull the chain manually.
 
+3b. "weekendStress" — options-market read on whether the WEEKEND itself
+    is being priced as risky (only present when the trade spans a
+    holiday). This is the early-warning signal for Iran-class /
+    sovereign-event tail risk that the cohort sample (n=8 boring
+    Memorial Days) cannot capture.
+   - level: NORMAL / MODERATE / ELEVATED / SEVERE (worst-of term and skew).
+   - termSpreadPts: (near-expiry ATM IV) − (next-Friday ATM IV), in vol pts.
+     Negative is normal (longer-dated higher). +1 to +3pt = elevated; +3pt+ = severe.
+   - put25dSkewPts: (25Δ put IV) − (ATM IV) on the near chain. Typical SPX
+     5-7 DTE skew is +2 to +4pt; +5pt+ = elevated; +8pt+ = severe.
+   - notes[]: includes a RECOMMENDATION line you MUST mirror in riskContext.
+
+   RULE: when weekendStress.level is ELEVATED or SEVERE, you MUST:
+     (a) Mention the level + the offending metric explicitly in riskContext.
+     (b) Drop your suggested wing-width AND/OR the trade size by half.
+     (c) For SEVERE: verdict must be PASS or LEAN_PASS with passReason
+         citing weekendStress as the disqualifier.
+
 4. "expectedMove" — live straddle EM for the requested expiry (NOT a Friday).
 
 5. "current" — regime + macro snapshot anchored on the entry→expiry span.

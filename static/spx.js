@@ -2809,6 +2809,7 @@ async function runFlex() {
 
     render(payload);
     _renderFlexBanner(payload);
+    _renderWeekendStress(payload);
     _renderFlexAnalytics(payload);
     _renderFlexLiveChain(payload);
     _retitleForFlexMode(payload);
@@ -2910,6 +2911,89 @@ function _retitleForFlexMode(payload) {
       }
     });
   } catch (_e) { /* ignore */ }
+}
+
+// ── Weekend Stress Gauge — options-market read on priced weekend risk ──
+function _renderWeekendStress(payload) {
+  const sec = $("e2bWeekendStressSection");
+  const body = $("e2bWeekendStressBody");
+  const meta = $("e2bWeekendStressMeta");
+  if (!sec || !body) return;
+  const ws = payload?.weekendStress;
+  if (!ws) { sec.classList.add("hidden"); return; }
+  // Only show when the trade actually spans a holiday — otherwise this
+  // gauge is N/A and just clutters the dashboard.
+  const spans = !!(payload?.flexExpiry?.spansHoliday);
+  if (!spans) { sec.classList.add("hidden"); return; }
+  sec.classList.remove("hidden");
+
+  const lvl = (ws.level || "UNKNOWN").toUpperCase();
+  const lvlColor = lvl === "SEVERE" ? "#ff453a"
+                 : lvl === "ELEVATED" ? "#ff9f0a"
+                 : lvl === "MODERATE" ? "#ffd60a"
+                 : lvl === "NORMAL" ? "#34c759"
+                 : "#86868b";
+  if (meta) {
+    if (ws.enabled) {
+      meta.textContent = `${ws.symbolUsed || "—"} · spot ${ws.spot == null ? "—" : Number(ws.spot).toFixed(2)} · near ${ws.nearExpiry} vs ${ws.comparisonExpiry}`;
+    } else {
+      meta.textContent = (ws.notes && ws.notes[0]) || "Stress gauge unavailable";
+    }
+  }
+
+  if (!ws.enabled) {
+    body.innerHTML = `<div class="taPanel" style="padding:12px 14px"><div style="color:#ff9f0a;font-size:12px;font-weight:600">Weekend stress gauge disabled — chain unavailable for one or both expiries.</div></div>`;
+    return;
+  }
+
+  const termColor = ws.termLevel === "SEVERE" ? "#ff453a" : ws.termLevel === "ELEVATED" ? "#ff9f0a" : ws.termLevel === "MODERATE" ? "#ffd60a" : "#34c759";
+  const skewColor = ws.skewLevel === "SEVERE" ? "#ff453a" : ws.skewLevel === "ELEVATED" ? "#ff9f0a" : ws.skewLevel === "MODERATE" ? "#ffd60a" : "#34c759";
+  const termSpread = ws.termSpreadPts == null ? "—" : (ws.termSpreadPts >= 0 ? "+" : "") + Number(ws.termSpreadPts).toFixed(2) + " pts";
+  const skewPts = ws.put25dSkewPts == null ? "—" : (ws.put25dSkewPts >= 0 ? "+" : "") + Number(ws.put25dSkewPts).toFixed(2) + " pts";
+
+  // Strip the "RECOMMENDATION:" prefix from the rec note for cleaner display.
+  const recNote = (ws.notes || []).find((n) => /^RECOMMENDATION/i.test(String(n))) || "";
+  const recText = recNote.replace(/^RECOMMENDATION:\s*/i, "");
+  const detailNotes = (ws.notes || []).filter((n) => !/^RECOMMENDATION/i.test(String(n)));
+
+  body.innerHTML = `
+    <div style="display:flex;align-items:center;gap:18px;padding:14px 18px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;flex-direction:column;align-items:center;min-width:130px">
+        <div style="font-size:10px;font-weight:700;color:var(--text-secondary);letter-spacing:0.5px;text-transform:uppercase">Composite Level</div>
+        <div style="font-size:28px;font-weight:800;color:${lvlColor};letter-spacing:0.5px;margin-top:2px">${escapeHtml(lvl)}</div>
+      </div>
+      <div style="flex:1;font-size:12px;line-height:1.5;color:var(--text-secondary)">
+        ${escapeHtml(recText) || "—"}
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:0;border-bottom:1px solid var(--border)">
+      <div style="padding:14px 18px;border-right:1px solid var(--border)">
+        <div style="font-size:10px;font-weight:700;color:var(--text-secondary);letter-spacing:0.5px;text-transform:uppercase;margin-bottom:4px">Term Structure</div>
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <span class="mono" style="font-size:22px;font-weight:700;color:${termColor}">${escapeHtml(termSpread)}</span>
+          <span class="mono" style="font-size:11px;font-weight:600;color:${termColor};text-transform:uppercase">${escapeHtml(ws.termLevel || "—")}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Near ATM IV ${ws.nearAtmIvPct == null ? "—" : Number(ws.nearAtmIvPct).toFixed(2) + "%"} vs next-Fri ATM IV ${ws.comparisonAtmIvPct == null ? "—" : Number(ws.comparisonAtmIvPct).toFixed(2) + "%"}</div>
+      </div>
+      <div style="padding:14px 18px">
+        <div style="font-size:10px;font-weight:700;color:var(--text-secondary);letter-spacing:0.5px;text-transform:uppercase;margin-bottom:4px">25Δ Put Skew</div>
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <span class="mono" style="font-size:22px;font-weight:700;color:${skewColor}">${escapeHtml(skewPts)}</span>
+          <span class="mono" style="font-size:11px;font-weight:600;color:${skewColor};text-transform:uppercase">${escapeHtml(ws.skewLevel || "—")}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-top:4px">25Δ put IV − ATM IV (near chain). Typical: +2 to +4 pts.</div>
+      </div>
+    </div>
+    <div style="padding:12px 18px">
+      <ul style="margin:0;padding-left:18px;font-size:12px;line-height:1.6;color:var(--text-primary)">
+        ${detailNotes.map((n) => `<li>${escapeHtml(String(n))}</li>`).join("")}
+      </ul>
+      <div class="metricCaption muted" style="margin-top:10px;font-size:11px;line-height:1.5">
+        Term inversion = options market overweighting the near window (weekend gap risk priced).
+        25Δ put skew = downside-fear hedging demand. Composite level is the worst-of the two signals.
+        Cohort math (n=8 holiday weekends) does NOT account for asymmetric weekend catalysts — this gauge does.
+      </div>
+    </div>`;
 }
 
 // ── Flex Analytics renderer — cohort breakdown + open-gap distribution ──

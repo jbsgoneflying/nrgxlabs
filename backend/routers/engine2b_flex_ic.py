@@ -220,6 +220,7 @@ def spx_ic_flex_advisor(
         "flexExpiry": payload.get("flexExpiry"),
         "flexAnalytics": payload.get("flexAnalytics"),
         "liveChain": payload.get("liveChain"),
+        "weekendStress": payload.get("weekendStress"),
         "expectedMove": payload.get("expectedMove"),
         "deskConsensus": payload.get("deskConsensus"),
         "current": payload.get("current"),

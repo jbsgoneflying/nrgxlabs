@@ -87,6 +87,7 @@ def sanitize_flex_for_llm(payload: Dict[str, Any]) -> Dict[str, Any]:
         "flexExpiry",
         "flexAnalytics",
         "liveChain",
+        "weekendStress",
         "expectedMove",
         "strikeTargets",
         "current",
