@@ -356,4 +356,85 @@ def compute_flex_live_chain_targets(
     return result
 
 
-__all__ = ["compute_flex_live_chain_targets"]
+def find_hedge_strike_mid(
+    client: OratsClient,
+    *,
+    ticker: str,
+    today: dt.date,
+    expiry: dt.date,
+    spot: float,
+    target_distance_pct: float,
+    side: str,
+    symbols: Optional[Tuple[str, ...]] = None,
+) -> Dict[str, Any]:
+    """Find the nearest available strike at ``target_distance_pct`` from spot and return its live mid.
+
+    Used by the Hedge Sizer to price up the tail-protection wing in
+    real time without re-deriving an EM. ``side`` is ``"call"`` (uses
+    +|distance|) or ``"put"`` (uses -|distance|). Returns the same
+    shape regardless of whether live data was retrieved so callers can
+    surface a clean N/A in the UI.
+    """
+    out: Dict[str, Any] = {
+        "side": side,
+        "targetDistancePct": float(target_distance_pct),
+        "strike": None,
+        "midPrice": None,
+        "bid": None,
+        "ask": None,
+        "actualDistancePct": None,
+        "symbolUsed": None,
+        "warnings": [],
+    }
+    expiry_str = expiry.isoformat()
+    syms = _resolve_symbols(ticker, symbols)
+    sym_used, chain_rows, spot_used, warnings = _pull_live_chain(client, symbols=syms, expiry_str=expiry_str)
+    out["warnings"].extend(warnings)
+    if not sym_used or not chain_rows or not spot_used:
+        out["warnings"].append("No live chain for hedge-strike lookup.")
+        return out
+
+    use_spot = float(spot if spot and spot > 0 else spot_used)
+    sign = 1.0 if side == "call" else -1.0
+    target_price = use_spot * (1.0 + sign * abs(float(target_distance_pct)) / 100.0)
+
+    strikes: List[float] = []
+    seen: set = set()
+    for r in chain_rows:
+        k = _to_float(r.get("strike"))
+        if k is None or k <= 0 or k in seen:
+            continue
+        seen.add(k)
+        strikes.append(float(k))
+    strikes.sort()
+    if not strikes:
+        out["warnings"].append("Chain has no strikes; cannot resolve hedge strike.")
+        return out
+
+    nearest = _nearest_strike(strikes, target_price)
+    if nearest is None:
+        return out
+    row = _row_by_strike(chain_rows, nearest)
+    if not row:
+        out["warnings"].append("Strike row not found for nearest match.")
+        return out
+
+    bid_field = "callBidPrice" if side == "call" else "putBidPrice"
+    ask_field = "callAskPrice" if side == "call" else "putAskPrice"
+    bid = _to_float(row.get(bid_field))
+    ask = _to_float(row.get(ask_field))
+    mid = _mid(bid, ask)
+    actual_distance = round(100.0 * (float(nearest) - use_spot) / use_spot, 3)
+
+    out.update({
+        "strike": int(nearest) if float(nearest).is_integer() else float(nearest),
+        "midPrice": mid,
+        "bid": bid,
+        "ask": ask,
+        "actualDistancePct": actual_distance,
+        "symbolUsed": sym_used,
+    })
+    return out
+
+
+__all__ = ["compute_flex_live_chain_targets", "find_hedge_strike_mid"]

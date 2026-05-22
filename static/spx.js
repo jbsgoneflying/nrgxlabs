@@ -2812,6 +2812,7 @@ async function runFlex() {
     _renderWeekendStress(payload);
     _renderFlexAnalytics(payload);
     _renderFlexLiveChain(payload);
+    _renderHedgeSizer(payload);
     _retitleForFlexMode(payload);
     // Reset the prior flex advisor card so it doesn't show stale narrative.
     const flexAdvSec = $("e2bFlexAdvisorSection");
@@ -3139,6 +3140,276 @@ function _renderFlexLiveChain(payload) {
     Mid prices are bid/ask midpoints from the ${escapeHtml(String(lc.symbolUsed))} live chain.
     POP is the naive <span class="mono">1 − |shortPutΔ| − shortCallΔ</span> estimate. Always verify on the broker before entry — fills depend on liquidity, and SPXW after-hours quotes can widen.
   </div>`;
+}
+
+// ── Hedge Sizer — institutional tail-hedge sizing for the recommended IC ──
+// Pure JS computation so contract-count / max-loss / stress-gap sliders
+// recompute the tier table in real time without re-fetching the payload.
+// Backend hands us the primitives (short structure, live hedge strike mids,
+// stress-gap intrinsics); JS does the integer-ceil sizing & scenario math.
+
+const _hedgeSizerState = {
+  contracts: 20,
+  maxLossPct: 33,
+  stressGapPct: 3.0,
+  putMidOverride: null,
+  callMidOverride: null,
+};
+
+function _ceilInt(x) {
+  if (x == null || !isFinite(x) || x <= 0) return 0;
+  return Math.ceil(x);
+}
+
+function _hedgeIntrinsicAt(strike, side, spot, gapPct, multiplier) {
+  const g = Math.abs(gapPct) / 100;
+  if (side === "call") {
+    const stress = spot * (1 + g);
+    return Math.max(0, stress - strike) * multiplier;
+  }
+  if (side === "put") {
+    const stress = spot * (1 - g);
+    return Math.max(0, strike - stress) * multiplier;
+  }
+  return 0;
+}
+
+function _computeHedgeTier(hs, contracts, capPct, stressGapPct) {
+  const mult = hs.multiplier || 100;
+  const spot = hs.spot;
+  const maxLossPer = hs.shortStructure.maxLossPerContract;
+  const creditPer = hs.shortStructure.creditPerContract;
+  const callStrike = hs.hedgeStrikes.call.strike;
+  const putStrike = hs.hedgeStrikes.put.strike;
+  const callMid = (_hedgeSizerState.callMidOverride != null) ? _hedgeSizerState.callMidOverride :
+    (hs.hedgeStrikes.call.midPrice != null ? hs.hedgeStrikes.call.midPrice : 0.05);
+  const putMid = (_hedgeSizerState.putMidOverride != null) ? _hedgeSizerState.putMidOverride :
+    (hs.hedgeStrikes.put.midPrice != null ? hs.hedgeStrikes.put.midPrice : 0.05);
+
+  const unhedgedMaxLoss = contracts * maxLossPer * mult;
+  const creditDollars = contracts * creditPer * mult;
+  const callIntrinsic = _hedgeIntrinsicAt(callStrike, "call", spot, stressGapPct, mult);
+  const putIntrinsic = _hedgeIntrinsicAt(putStrike, "put", spot, stressGapPct, mult);
+  const recoupNeeded = unhedgedMaxLoss * (1 - capPct / 100);
+  const calls = _ceilInt(recoupNeeded / callIntrinsic);
+  const puts = _ceilInt(recoupNeeded / putIntrinsic);
+  const hedgeCost = (calls * callMid + puts * putMid) * mult;
+  const netCredit = creditDollars - hedgeCost;
+  const capitalAtRisk = unhedgedMaxLoss + hedgeCost;
+  const cappedUp = Math.max(0, unhedgedMaxLoss - calls * callIntrinsic);
+  const cappedDown = Math.max(0, unhedgedMaxLoss - puts * putIntrinsic);
+  const normalRoc = capitalAtRisk > 0 ? (100 * netCredit / capitalAtRisk) : null;
+  return {
+    calls, puts, callMid, putMid, hedgeCost, netCredit, capitalAtRisk,
+    cappedUp, cappedDown, normalRoc, callIntrinsic, putIntrinsic,
+    unhedgedMaxLoss, creditDollars,
+  };
+}
+
+function _fmtDollars(n) {
+  if (n == null || !isFinite(n)) return "—";
+  const sign = n < 0 ? "−" : "";
+  return sign + "$" + Math.abs(Math.round(n)).toLocaleString();
+}
+
+function _renderHedgeSizer(payload) {
+  const sec = $("e2bHedgeSizerSection");
+  const body = $("e2bHedgeSizerBody");
+  const meta = $("e2bHedgeSizerMeta");
+  if (!sec || !body) return;
+  const hs = payload?.hedgeSizer;
+  if (!hs) { sec.classList.add("hidden"); return; }
+  sec.classList.remove("hidden");
+
+  if (!hs.enabled) {
+    body.innerHTML = `<div class="taPanel" style="padding:12px 14px">
+      <div style="color:#ff9f0a;font-size:12px;font-weight:600">Hedge sizer disabled.</div>
+      ${Array.isArray(hs.notes) && hs.notes.length ? `<ul style="font-size:11px;color:var(--text-secondary);margin:8px 0 0 0;padding-left:18px">${hs.notes.map((n) => `<li>${escapeHtml(String(n))}</li>`).join("")}</ul>` : ""}
+    </div>`;
+    if (meta) meta.textContent = "disabled";
+    return;
+  }
+
+  if (meta) {
+    meta.textContent = `ref: ${hs.shortStructure?.label || "—"} · spot=${Number(hs.spot).toFixed(2)} · default stress=±${hs.stressGapPctDefault}%`;
+  }
+
+  // Reset overrides whenever a fresh payload arrives.
+  _hedgeSizerState.contracts = hs.shortStructure?.contracts || 20;
+  _hedgeSizerState.maxLossPct = 33;
+  _hedgeSizerState.stressGapPct = Number(hs.stressGapPctDefault || 3.0);
+  _hedgeSizerState.callMidOverride = null;
+  _hedgeSizerState.putMidOverride = null;
+
+  const callInfo = hs.hedgeStrikes.call;
+  const putInfo = hs.hedgeStrikes.put;
+  const callMidLive = callInfo.midPrice != null ? Number(callInfo.midPrice).toFixed(2) : "—";
+  const putMidLive = putInfo.midPrice != null ? Number(putInfo.midPrice).toFixed(2) : "—";
+  const callDist = callInfo.distancePct != null ? `+${Number(callInfo.distancePct).toFixed(2)}%` : "—";
+  const putDist = putInfo.distancePct != null ? `${Number(putInfo.distancePct).toFixed(2)}%` : "—";
+
+  body.innerHTML = `
+    <div class="taPanel" style="padding:14px 16px">
+      <!-- Reference structure summary -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px">
+        <div class="metricCard"><div class="metricLabel">Reference IC</div><div class="metricValue mono" style="font-size:11px">${escapeHtml(hs.shortStructure.label || "—")}</div></div>
+        <div class="metricCard"><div class="metricLabel">Credit / contract</div><div class="metricValue mono">$${Number(hs.shortStructure.creditPerContract).toFixed(2)}</div></div>
+        <div class="metricCard"><div class="metricLabel">Max loss / contract</div><div class="metricValue mono">$${Number(hs.shortStructure.maxLossPerContract).toFixed(2)}</div></div>
+        <div class="metricCard"><div class="metricLabel">Spot</div><div class="metricValue mono">${Number(hs.spot).toFixed(2)}</div></div>
+      </div>
+
+      <!-- Hedge strikes (live mid pulled from chain) -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+        <div class="metricCard">
+          <div class="metricLabel">Upside tail — long call</div>
+          <div class="metricValue mono" style="font-size:14px">${callInfo.strike} <span class="muted" style="font-size:11px">(${callDist})</span></div>
+          <div class="metricSubValue mono" style="font-size:11px">mid: $${callMidLive} <span class="muted">· ITM@stress: ${_fmtDollars(callInfo.intrinsicAtStressDollars)}/contract</span></div>
+        </div>
+        <div class="metricCard">
+          <div class="metricLabel">Downside tail — long put</div>
+          <div class="metricValue mono" style="font-size:14px">${putInfo.strike} <span class="muted" style="font-size:11px">(${putDist})</span></div>
+          <div class="metricSubValue mono" style="font-size:11px">mid: $${putMidLive} <span class="muted">· ITM@stress: ${_fmtDollars(putInfo.intrinsicAtStressDollars)}/contract</span></div>
+        </div>
+      </div>
+
+      <!-- Sizing controls -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;padding:12px;background:rgba(255,179,0,0.06);border:1px solid rgba(255,179,0,0.25);border-radius:6px;margin-bottom:14px">
+        <div>
+          <label for="hsContracts" style="font-size:11px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.4px">IC Contracts</label>
+          <input type="range" id="hsContracts" min="1" max="100" value="${_hedgeSizerState.contracts}" step="1" style="width:100%;margin-top:6px">
+          <div class="mono" style="font-size:13px;font-weight:700"><span id="hsContractsVal">${_hedgeSizerState.contracts}</span> contracts</div>
+        </div>
+        <div>
+          <label for="hsCap" style="font-size:11px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.4px">Max-Loss Target</label>
+          <input type="range" id="hsCap" min="10" max="100" value="${_hedgeSizerState.maxLossPct}" step="1" style="width:100%;margin-top:6px">
+          <div class="mono" style="font-size:13px;font-weight:700"><span id="hsCapVal">${_hedgeSizerState.maxLossPct}</span>% of unhedged max loss</div>
+        </div>
+        <div>
+          <label for="hsStress" style="font-size:11px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.4px">Stress Gap</label>
+          <input type="range" id="hsStress" min="1" max="15" value="${_hedgeSizerState.stressGapPct}" step="0.5" style="width:100%;margin-top:6px">
+          <div class="mono" style="font-size:13px;font-weight:700">±<span id="hsStressVal">${Number(_hedgeSizerState.stressGapPct).toFixed(1)}</span>% spot gap</div>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.4px">Manual mid overrides (optional)</label>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <input type="number" id="hsCallMid" placeholder="call mid" step="0.05" style="width:50%;padding:5px 8px;font-family:ui-monospace,Menlo,monospace;font-size:12px">
+            <input type="number" id="hsPutMid" placeholder="put mid" step="0.05" style="width:50%;padding:5px 8px;font-family:ui-monospace,Menlo,monospace;font-size:12px">
+          </div>
+        </div>
+      </div>
+
+      <!-- Live computed tier (single row) -->
+      <div id="hsCustomTier" style="margin-bottom:14px"></div>
+
+      <!-- Pre-built tier comparison table -->
+      <div class="metricCaption muted" style="font-size:11px;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.4px;font-weight:700">Reference Tiers (recomputed live with current sliders)</div>
+      <div class="tableWrap">
+        <table class="dataTable" id="hsTierTable" style="font-size:11px">
+          <thead>
+            <tr>
+              <th>Tier</th>
+              <th class="num">Cap</th>
+              <th class="num">Calls</th>
+              <th class="num">Puts</th>
+              <th class="num">Hedge cost</th>
+              <th class="num">Net credit</th>
+              <th class="num">Capital at risk</th>
+              <th class="num">Max loss ↑stress</th>
+              <th class="num">Max loss ↓stress</th>
+              <th class="num">Normal ROC</th>
+            </tr>
+          </thead>
+          <tbody id="hsTierTableBody"></tbody>
+        </table>
+      </div>
+
+      <div class="metricCaption muted" style="margin-top:12px;font-size:11px;line-height:1.6">
+        <strong style="color:var(--text-primary)">Read me:</strong> "Normal ROC" assumes spot finishes inside the IC at expiry (hedge premiums lost, full credit kept). "Max loss at stress" shows the dollar loss if spot gaps to the stress level — capped by the long-tail intrinsic. Sizing uses integer ceiling, so the actual cap is at least as tight as your target. The Lottery tier is the cheapest meaningful hedge; the Conservative tier nearly converts the IC into a fully-capped condor. <strong style="color:var(--text-primary)">Pick the tier whose max-loss columns you can sleep through.</strong>
+        ${Array.isArray(hs.notes) && hs.notes.length ? `<br><br><strong style="color:#ff9f0a">Notes:</strong><ul style="margin:6px 0 0 0;padding-left:18px">${hs.notes.map((n) => `<li>${escapeHtml(String(n))}</li>`).join("")}</ul>` : ""}
+      </div>
+    </div>
+  `;
+
+  // Wire sliders + recompute on every change.
+  const elContracts = document.getElementById("hsContracts");
+  const elCap = document.getElementById("hsCap");
+  const elStress = document.getElementById("hsStress");
+  const elCallMid = document.getElementById("hsCallMid");
+  const elPutMid = document.getElementById("hsPutMid");
+  const recompute = () => {
+    _hedgeSizerState.contracts = Number(elContracts.value);
+    _hedgeSizerState.maxLossPct = Number(elCap.value);
+    _hedgeSizerState.stressGapPct = Number(elStress.value);
+    const cm = parseFloat(elCallMid.value);
+    const pm = parseFloat(elPutMid.value);
+    _hedgeSizerState.callMidOverride = isFinite(cm) && cm > 0 ? cm : null;
+    _hedgeSizerState.putMidOverride = isFinite(pm) && pm > 0 ? pm : null;
+    document.getElementById("hsContractsVal").textContent = _hedgeSizerState.contracts;
+    document.getElementById("hsCapVal").textContent = _hedgeSizerState.maxLossPct;
+    document.getElementById("hsStressVal").textContent = Number(_hedgeSizerState.stressGapPct).toFixed(1);
+    _renderHedgeSizerCustomTier(hs);
+    _renderHedgeSizerTierTable(hs);
+  };
+  ["input", "change"].forEach((evt) => {
+    elContracts.addEventListener(evt, recompute);
+    elCap.addEventListener(evt, recompute);
+    elStress.addEventListener(evt, recompute);
+    elCallMid.addEventListener(evt, recompute);
+    elPutMid.addEventListener(evt, recompute);
+  });
+  recompute();
+}
+
+function _renderHedgeSizerCustomTier(hs) {
+  const el = document.getElementById("hsCustomTier");
+  if (!el) return;
+  const t = _computeHedgeTier(hs, _hedgeSizerState.contracts, _hedgeSizerState.maxLossPct, _hedgeSizerState.stressGapPct);
+  const rocColor = t.normalRoc == null ? "var(--text-secondary)" : (t.normalRoc >= 12 ? "#34c759" : t.normalRoc >= 6 ? "#ff9f0a" : "#ff453a");
+  el.innerHTML = `
+    <div class="metricCard" style="background:rgba(52,199,89,0.08);border:1px solid rgba(52,199,89,0.35);padding:14px 16px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+        <div style="font-weight:700;font-size:13px">Your Custom Hedge</div>
+        <div class="mono muted" style="font-size:11px">${_hedgeSizerState.contracts} IC · ${_hedgeSizerState.maxLossPct}% cap · ±${Number(_hedgeSizerState.stressGapPct).toFixed(1)}% stress</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+        <div><div class="metricLabel">Buy calls</div><div class="metricValue mono">${t.calls}</div></div>
+        <div><div class="metricLabel">Buy puts</div><div class="metricValue mono">${t.puts}</div></div>
+        <div><div class="metricLabel">Hedge cost</div><div class="metricValue mono">${_fmtDollars(t.hedgeCost)}</div></div>
+        <div><div class="metricLabel">Net credit</div><div class="metricValue mono">${_fmtDollars(t.netCredit)}</div></div>
+        <div><div class="metricLabel">Capital at risk</div><div class="metricValue mono">${_fmtDollars(t.capitalAtRisk)}</div></div>
+        <div><div class="metricLabel">Max loss ↑stress</div><div class="metricValue mono" style="color:#ff453a">${_fmtDollars(t.cappedUp)}</div></div>
+        <div><div class="metricLabel">Max loss ↓stress</div><div class="metricValue mono" style="color:#ff453a">${_fmtDollars(t.cappedDown)}</div></div>
+        <div><div class="metricLabel">Normal ROC</div><div class="metricValue mono" style="color:${rocColor}">${t.normalRoc == null ? "—" : Number(t.normalRoc).toFixed(1) + "%"}</div></div>
+      </div>
+    </div>
+  `;
+}
+
+function _renderHedgeSizerTierTable(hs) {
+  const tbody = document.getElementById("hsTierTableBody");
+  if (!tbody) return;
+  const tiers = [
+    { name: "Lottery", cap: 50 },
+    { name: "Defined", cap: 33 },
+    { name: "Conservative", cap: 20 },
+  ];
+  const rows = tiers.map((tier) => {
+    const t = _computeHedgeTier(hs, _hedgeSizerState.contracts, tier.cap, _hedgeSizerState.stressGapPct);
+    const rocColor = t.normalRoc == null ? "var(--text-secondary)" : (t.normalRoc >= 12 ? "#34c759" : t.normalRoc >= 6 ? "#ff9f0a" : "#ff453a");
+    return `<tr>
+      <td><strong>${tier.name}</strong></td>
+      <td class="num mono">${tier.cap}%</td>
+      <td class="num mono">${t.calls}</td>
+      <td class="num mono">${t.puts}</td>
+      <td class="num mono">${_fmtDollars(t.hedgeCost)}</td>
+      <td class="num mono">${_fmtDollars(t.netCredit)}</td>
+      <td class="num mono">${_fmtDollars(t.capitalAtRisk)}</td>
+      <td class="num mono" style="color:#ff9f0a">${_fmtDollars(t.cappedUp)}</td>
+      <td class="num mono" style="color:#ff9f0a">${_fmtDollars(t.cappedDown)}</td>
+      <td class="num mono" style="color:${rocColor};font-weight:600">${t.normalRoc == null ? "—" : Number(t.normalRoc).toFixed(1) + "%"}</td>
+    </tr>`;
+  }).join("");
+  tbody.innerHTML = rows;
 }
 
 // ── Flex AI Advisor — POST /api/spx-ic/flex/advisor ──

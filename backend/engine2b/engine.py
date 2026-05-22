@@ -36,12 +36,20 @@ from backend.orats_client import OratsClient, OratsError
 
 from backend.engine2b.flex_analytics import build_flex_analytics
 from backend.engine2b.flex_em import compute_expected_move_flex
-from backend.engine2b.flex_live_chain import compute_flex_live_chain_targets
+from backend.engine2b.flex_live_chain import (
+    compute_flex_live_chain_targets,
+    find_hedge_strike_mid,
+)
 from backend.engine2b.flex_windows import (
     FlexWindow,
     build_flex_windows,
     classify_holiday,
     derive_target_shape,
+)
+from backend.engine2b.hedge_sizer import (
+    HedgeStrike,
+    ShortPosition,
+    compute_hedge_sizing,
 )
 from backend.engine2b.weekend_stress import compute_weekend_stress
 
@@ -835,6 +843,124 @@ def compute_engine2b_flex_ic(
             }
     mark("flex.weekend_stress")
 
+    # ---- Hedge Sizer (live single-strike pull + 3-tier reference) ----
+    hedge_sizer_block: Dict[str, Any] = {
+        "enabled": False,
+        "notes": ["Hedge sizer requires include_live_chain=1 and a usable live chain."],
+    }
+    if (
+        include_live_chain
+        and isinstance(live_chain_block, dict)
+        and live_chain_block.get("enabled")
+        and live_chain_block.get("spotPrice")
+        and isinstance(live_chain_block.get("targets"), list)
+    ):
+        # Anchor on the trade the advisor will most often recommend
+        # for holiday-weekend trades: 2.0× EM × $5 wing. If that exact
+        # row is missing we fall back to the first $5-wing target with
+        # a real net credit, then to any $5-wing target.
+        targets = live_chain_block["targets"]
+        ref_target = None
+        for t in targets:
+            try:
+                if int(t.get("wingWidthPts") or 0) == 5 and abs(float(t.get("emMult") or 0) - 2.0) < 0.01:
+                    ref_target = t
+                    break
+            except Exception:
+                continue
+        if ref_target is None:
+            for t in targets:
+                if int(t.get("wingWidthPts") or 0) == 5 and t.get("netMidCredit") not in (None, 0):
+                    ref_target = t
+                    break
+        if ref_target is None and targets:
+            ref_target = targets[0]
+
+        if ref_target is None or ref_target.get("netMidCredit") in (None,):
+            hedge_sizer_block = {
+                "enabled": False,
+                "notes": ["No usable live-chain target with a net mid credit; hedge sizer disabled."],
+            }
+        else:
+            try:
+                spot_now = float(live_chain_block["spotPrice"])
+                credit_per = float(ref_target.get("netMidCredit") or 0.0)
+                # Max loss per IC in points = wing - credit (the live chain
+                # already returns this as ``maxLossPerContract`` in points).
+                max_loss_per = float(ref_target.get("maxLossPerContract") or 0.0)
+                short_pos = ShortPosition(
+                    contracts=20,  # reference count; UI lets desk scale this live
+                    max_loss_per_contract=max_loss_per,
+                    credit_per_contract=credit_per,
+                    label=(
+                        f"{int(ref_target.get('emMult', 2)*1000)/1000.0:g}× EM "
+                        f"{ref_target.get('shortPut')}/{ref_target.get('longPut')}P + "
+                        f"{ref_target.get('shortCall')}/{ref_target.get('longCall')}C "
+                        f"(${ref_target.get('wingWidthPts')} wing)"
+                    ),
+                )
+                # Default hedge strike distance: ±2.5%, snapped to the
+                # nearest live strike. ~2.5% is the empirical sweet
+                # spot for SPX 4-DTE — cheap (<$0.10 mid) but ITM at
+                # the ±3% stress design point.
+                call_hedge_info = find_hedge_strike_mid(
+                    client,
+                    ticker=underlying,
+                    today=now,
+                    expiry=expiry_date,
+                    spot=spot_now,
+                    target_distance_pct=2.5,
+                    side="call",
+                )
+                put_hedge_info = find_hedge_strike_mid(
+                    client,
+                    ticker=underlying,
+                    today=now,
+                    expiry=expiry_date,
+                    spot=spot_now,
+                    target_distance_pct=2.5,
+                    side="put",
+                )
+                hedge_call = HedgeStrike(
+                    strike=float(call_hedge_info.get("strike") or spot_now * 1.025),
+                    side="call",
+                    mid_price=call_hedge_info.get("midPrice"),
+                    distance_pct=float(call_hedge_info.get("actualDistancePct") or 2.5),
+                )
+                hedge_put = HedgeStrike(
+                    strike=float(put_hedge_info.get("strike") or spot_now * 0.975),
+                    side="put",
+                    mid_price=put_hedge_info.get("midPrice"),
+                    distance_pct=float(put_hedge_info.get("actualDistancePct") or -2.5),
+                )
+                hedge_sizer_block = compute_hedge_sizing(
+                    short_position=short_pos,
+                    hedge_call=hedge_call,
+                    hedge_put=hedge_put,
+                    spot=spot_now,
+                    stress_gap_pct=3.0,
+                    target_caps_pct=[50.0, 33.0, 20.0],
+                    asymmetric={"upCap": 50.0, "downCap": 20.0},
+                )
+                hedge_sizer_block["referenceTarget"] = {
+                    "emMult": ref_target.get("emMult"),
+                    "wingWidthPts": ref_target.get("wingWidthPts"),
+                    "shortPut": ref_target.get("shortPut"),
+                    "longPut": ref_target.get("longPut"),
+                    "shortCall": ref_target.get("shortCall"),
+                    "longCall": ref_target.get("longCall"),
+                }
+                hedge_sizer_block["hedgeStrikeLookups"] = {
+                    "call": call_hedge_info,
+                    "put": put_hedge_info,
+                }
+            except Exception as e:
+                hedge_sizer_block = {
+                    "enabled": False,
+                    "notes": [f"Hedge sizer failed: {type(e).__name__}: {e}"],
+                }
+    mark("flex.hedge_sizer")
+
     mark("compute.total")
     LOG.info(
         "Engine2b flex compute done in %.2fs: windows=%s rows=%s entry=%s exp=%s",
@@ -880,6 +1006,7 @@ def compute_engine2b_flex_ic(
         "flexAnalytics": flex_analytics,
         "liveChain": live_chain_block,
         "weekendStress": weekend_stress_block,
+        "hedgeSizer": hedge_sizer_block,
         "current": {
             "regime": regime_now,
             "macro": macro_now,
