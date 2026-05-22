@@ -2665,6 +2665,135 @@ async function run() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Engine 2b — Flex-Expiry tab (non-Friday entry/expiry pairs)
+// ---------------------------------------------------------------------------
+
+function _e2bDescribeWeekday(d) {
+  if (!(d instanceof Date) || isNaN(d.valueOf())) return "";
+  return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()];
+}
+
+function _e2bUpdateShapeHint() {
+  const out = $("e2bFlexShape");
+  if (!out) return;
+  const entryStr = $("e2bEntryDate")?.value || "";
+  const expiryStr = $("e2bExpiryDate")?.value || "";
+  if (!entryStr || !expiryStr) {
+    out.textContent = "";
+    return;
+  }
+  const e = new Date(entryStr + "T00:00:00Z");
+  const x = new Date(expiryStr + "T00:00:00Z");
+  if (isNaN(e.valueOf()) || isNaN(x.valueOf()) || x <= e) {
+    out.textContent = "Expiry must be after entry date.";
+    return;
+  }
+  const calDays = Math.round((x - e) / (1000 * 60 * 60 * 24));
+  out.textContent = `${_e2bDescribeWeekday(e)} ${entryStr} → ${_e2bDescribeWeekday(x)} ${expiryStr} · ${calDays} cal day${calDays === 1 ? "" : "s"}`;
+}
+
+function initE2bFlexUI() {
+  const flexOn = !!(window.__FLAGS && window.__FLAGS.ENABLE_E2B_FLEX_EXPIRY);
+  const panel = $("e2bFlexPanel");
+  if (!panel) return;
+  if (!flexOn) {
+    panel.classList.add("hidden");
+    return;
+  }
+  panel.classList.remove("hidden");
+
+  const today = new Date();
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const entry = $("e2bEntryDate");
+  const exp = $("e2bExpiryDate");
+  if (entry && !entry.value) entry.value = iso(today);
+  if (exp && !exp.value) {
+    const fri = new Date(today);
+    const daysToFri = (5 - 1 - fri.getUTCDay() + 7) % 7 || 7; // next Friday from today
+    fri.setUTCDate(fri.getUTCDate() + daysToFri);
+    exp.value = iso(fri);
+  }
+
+  entry?.addEventListener("change", _e2bUpdateShapeHint);
+  exp?.addEventListener("change", _e2bUpdateShapeHint);
+  _e2bUpdateShapeHint();
+
+  const form = $("e2bFlexForm");
+  if (form) {
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      runFlex();
+    });
+  }
+}
+
+async function runFlex() {
+  const status = $("status");
+  const out = $("e2bFlexShape");
+  const entryStr = $("e2bEntryDate")?.value || "";
+  const expiryStr = $("e2bExpiryDate")?.value || "";
+  if (!entryStr || !expiryStr) {
+    if (out) out.textContent = "Pick an entry date and an expiry date.";
+    return;
+  }
+
+  const qs = new URLSearchParams({
+    underlying: String(engine2UnderlyingState.symbol || "SPX"),
+    entry_date: entryStr,
+    expiry: expiryStr,
+    years: "2",
+    widths: "1.0,1.5,2.0,2.5",
+    risk_target_breach_pct: "25",
+  });
+  const url = `/api/spx-ic/flex?${qs.toString()}`;
+
+  try {
+    setLoading(true, "Scoring flex-expiry trade...");
+    if (status) {
+      status.textContent = "Running flex…";
+      status.classList.remove("isError", "isOk");
+      status.classList.add("isRunning");
+      status.classList.remove("hidden");
+    }
+    const payload = await fetchJson(url);
+
+    // Render through the existing pipeline. The flex payload mirrors
+    // /api/spx-ic keys so the desk's renderers light up unchanged.
+    render(payload);
+
+    // Surface the flex shape (entry → expiry, DTE, holiday) above the results.
+    if (out && payload?.flexExpiry) {
+      const fx = payload.flexExpiry;
+      const cal = fx.dteCalendarDays;
+      const sess = fx.dteSessions;
+      const holiday = fx.holiday;
+      const parts = [
+        `${entryStr} → ${expiryStr}`,
+        `${cal} cal day${cal === 1 ? "" : "s"}`,
+        `${sess} session${sess === 1 ? "" : "s"}`,
+        `${fx.analoguesFound ?? 0} historical analogue${(fx.analoguesFound ?? 0) === 1 ? "" : "s"}`,
+      ];
+      if (fx.spansHoliday && holiday && holiday.date) {
+        parts.push(`spans ${holiday.label} (${holiday.date.slice(5)})`);
+      }
+      out.textContent = parts.join(" · ");
+    }
+    if (status) status.classList.add("hidden");
+  } catch (e) {
+    if (status) {
+      status.textContent = `Flex error: ${String(e?.message || e)}`;
+      status.classList.remove("isRunning", "isOk");
+      status.classList.add("isError");
+      status.classList.remove("hidden");
+    }
+    const results = $("results");
+    if (results) results.classList.toggle("hidden", true);
+  } finally {
+    setLoading(false);
+  }
+}
+
 async function main() {
   const status = $("status");
   const flags = await checkFlags();
@@ -2687,6 +2816,7 @@ async function main() {
     });
   }
 
+  initE2bFlexUI();
   initUnderlyingUI();
   initTooltips();
   try { window.RavenUI?.initInfoTips?.(); } catch { /* ignore */ }

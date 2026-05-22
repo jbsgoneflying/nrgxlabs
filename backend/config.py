@@ -129,6 +129,13 @@ class FeatureFlags:
     # --- Engine 2: SPX weekly IC (default OFF; separate page/endpoint) ---
     ENABLE_ENGINE2_SPX_IC: bool = False
 
+    # --- Engine 2b: Flex-Expiry SPX IC scenario engine ---
+    # Sibling of Engine 2 that accepts any (entry_date, expiry) pair so
+    # the desk can score non-Friday trades (e.g. Fri -> Tue across a
+    # holiday weekend). Default OFF so the public surface doesn't change
+    # until the desk explicitly opts in.
+    ENABLE_E2B_FLEX_EXPIRY: bool = False
+
     # --- Engine 3: Red Dog Reversal Scanner (default ON - UI controlled) ---
     ENABLE_ENGINE3_RED_DOG: bool = True
     ENGINE3_CACHE_TTL_BARS: int = 6 * 3600       # 6 hours for daily bars
@@ -663,6 +670,7 @@ class FeatureFlags:
             MC_DEFAULT_WING_WIDTH_DOLLARS=_get_float("MC_DEFAULT_WING_WIDTH_DOLLARS", 5.0),
 
             ENABLE_ENGINE2_SPX_IC=_get_bool("ENABLE_ENGINE2_SPX_IC", False),
+            ENABLE_E2B_FLEX_EXPIRY=_get_bool("ENABLE_E2B_FLEX_EXPIRY", False),
 
             ENABLE_ENGINE3_RED_DOG=_get_bool("ENABLE_ENGINE3_RED_DOG", True),
             ENGINE3_CACHE_TTL_BARS=_get_int("ENGINE3_CACHE_TTL_BARS", 6 * 3600),
@@ -1153,6 +1161,7 @@ class FeatureFlags:
             ("ENABLE_BENZINGA", bool(self.ENABLE_BENZINGA)),
             ("BENZINGA_ENABLE_EVENT_RISK", bool(self.BENZINGA_ENABLE_EVENT_RISK)),
             ("ENABLE_ENGINE2_SPX_IC", bool(self.ENABLE_ENGINE2_SPX_IC)),
+            ("ENABLE_E2B_FLEX_EXPIRY", bool(self.ENABLE_E2B_FLEX_EXPIRY)),
             ("ENGINE2_ENTRY_DAYS", str(self.ENGINE2_ENTRY_DAYS)),
             ("ENGINE2_EM_MULTS", str(self.ENGINE2_EM_MULTS)),
             ("ENGINE2_WING_WIDTH_PTS", str(self.ENGINE2_WING_WIDTH_PTS)),

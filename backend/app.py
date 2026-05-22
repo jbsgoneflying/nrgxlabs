@@ -19,6 +19,7 @@ from backend.config import get_flags
 from backend.routers import (
     engine1_breach,
     engine2_spx_ic,
+    engine2b_flex_ic,
     engine3_red_dog,
     engine4_ichimoku,
     engine5_lead_lag,
@@ -272,6 +273,7 @@ def flags():
         "ENABLE_BENZINGA": bool(f.ENABLE_BENZINGA),
         "BENZINGA_ENABLE_EVENT_RISK": bool(f.BENZINGA_ENABLE_EVENT_RISK),
         "ENABLE_ENGINE2_SPX_IC": bool(f.ENABLE_ENGINE2_SPX_IC),
+        "ENABLE_E2B_FLEX_EXPIRY": bool(getattr(f, "ENABLE_E2B_FLEX_EXPIRY", False)),
         "ENGINE2_DEFAULT_YEARS": int(f.ENGINE2_LOOKBACK_YEARS_DEFAULT),
         "ENGINE2_DEFAULT_EM_MULTS": str(f.ENGINE2_EM_MULTS),
         "ENGINE2_DEFAULT_WING_PTS": str(f.ENGINE2_WING_WIDTH_PTS),
@@ -379,6 +381,7 @@ def market_intelligence_page():
 
 app.include_router(engine1_breach.router)
 app.include_router(engine2_spx_ic.router)
+app.include_router(engine2b_flex_ic.router)
 app.include_router(engine3_red_dog.router)
 app.include_router(engine4_ichimoku.router)
 app.include_router(engine5_lead_lag.router)

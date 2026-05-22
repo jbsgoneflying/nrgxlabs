@@ -112,6 +112,30 @@
         <div class="metricCaption muted" style="margin-top:10px; text-align:center;">
           v2 defaults: lookback <b>2y</b> · widths <b>1.0 / 1.25 / 1.5 / 2.0× EM</b> · wings <b>5/10/15 pts</b> (desk-tunable via <code>E2_WING_*</code>)
         </div>
+
+        <!-- Flex Expiry (Engine 2b) — non-Friday entry/expiry pairs.
+             Hidden until ENABLE_E2B_FLEX_EXPIRY is on; the Friday flow above
+             stays exactly as it was. -->
+        <details id="e2bFlexPanel" class="hidden" style="margin-top:14px;">
+          <summary style="cursor:pointer; font-size:12px; font-weight:600; color:#86868b;">
+            Flex Expiry (advanced) — score any (entry → expiry) pair, including holiday-weekend trades
+          </summary>
+          <form id="e2bFlexForm" style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-top:10px;">
+            <div class="controlGroup">
+              <div class="controlLabel">Entry date</div>
+              <input id="e2bEntryDate" type="date" class="controlSelect" style="min-width:140px;" />
+            </div>
+            <div class="controlGroup">
+              <div class="controlLabel">Expiry date</div>
+              <input id="e2bExpiryDate" type="date" class="controlSelect" style="min-width:140px;" />
+            </div>
+            <button id="e2bRunBtn" class="primaryButton" type="submit">
+              <span class="btnSpinner" aria-hidden="true"></span>
+              Run Flex
+            </button>
+            <div id="e2bFlexShape" class="muted" style="font-size:12px; flex-basis:100%; margin-top:6px;"></div>
+          </form>
+        </details>
       </section>
 
       <section class="results hidden" id="results">
