@@ -3053,7 +3053,7 @@ function _renderFlexLiveChain(payload) {
   </div>
   <div class="metricCaption muted" style="margin-top:10px;font-size:11px;line-height:1.5">
     Mid prices are bid/ask midpoints from the ${escapeHtml(String(lc.symbolUsed))} live chain.
-    POP is the naive ``1 − |shortPutΔ| − shortCallΔ`` estimate. Always verify on the broker before entry — fills depend on liquidity, and SPXW after-hours quotes can widen.
+    POP is the naive <span class="mono">1 − |shortPutΔ| − shortCallΔ</span> estimate. Always verify on the broker before entry — fills depend on liquidity, and SPXW after-hours quotes can widen.
   </div>`;
 }
 
