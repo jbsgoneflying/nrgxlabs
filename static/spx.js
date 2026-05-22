@@ -2710,7 +2710,7 @@ function initE2bFlexUI() {
   if (entry && !entry.value) entry.value = iso(today);
   if (exp && !exp.value) {
     const fri = new Date(today);
-    const daysToFri = (5 - 1 - fri.getUTCDay() + 7) % 7 || 7; // next Friday from today
+    const daysToFri = (5 - 1 - fri.getUTCDay() + 7) % 7 || 7;
     fri.setUTCDate(fri.getUTCDate() + daysToFri);
     exp.value = iso(fri);
   }
@@ -2726,7 +2726,53 @@ function initE2bFlexUI() {
       runFlex();
     });
   }
+
+  // Preset chips — desk-friendly common shapes.
+  const friToTue = $("e2bFlexPresetFriToTue");
+  if (friToTue) friToTue.addEventListener("click", () => _e2bApplyPreset("friToTue"));
+  const tueToFri = $("e2bFlexPresetTueToFri");
+  if (tueToFri) tueToFri.addEventListener("click", () => _e2bApplyPreset("tueToFri"));
+  const monToFri = $("e2bFlexPresetMonToFri");
+  if (monToFri) monToFri.addEventListener("click", () => _e2bApplyPreset("monToFri"));
+
+  const bannerBtn = $("e2bFlexBannerAdvisorBtn");
+  if (bannerBtn) bannerBtn.addEventListener("click", () => _runFlexAdvisor());
 }
+
+function _e2bApplyPreset(kind) {
+  const entry = $("e2bEntryDate");
+  const exp = $("e2bExpiryDate");
+  if (!entry || !exp) return;
+  const today = new Date();
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const dow = today.getUTCDay(); // 0=Sun..6=Sat
+  let entryD = new Date(today);
+  let expD = new Date(today);
+  if (kind === "friToTue") {
+    // Entry = nearest Friday today or upcoming; Expiry = following Tuesday.
+    const daysToFri = (5 - dow + 7) % 7;
+    entryD.setUTCDate(entryD.getUTCDate() + daysToFri);
+    expD = new Date(entryD);
+    expD.setUTCDate(expD.getUTCDate() + 4); // Fri + 4 = Tue
+  } else if (kind === "tueToFri") {
+    const daysToTue = (2 - dow + 7) % 7;
+    entryD.setUTCDate(entryD.getUTCDate() + daysToTue);
+    expD = new Date(entryD);
+    expD.setUTCDate(expD.getUTCDate() + 3); // Tue + 3 = Fri
+  } else if (kind === "monToFri") {
+    const daysToMon = (1 - dow + 7) % 7;
+    entryD.setUTCDate(entryD.getUTCDate() + daysToMon);
+    expD = new Date(entryD);
+    expD.setUTCDate(expD.getUTCDate() + 4); // Mon + 4 = Fri
+  }
+  entry.value = iso(entryD);
+  exp.value = iso(expD);
+  _e2bUpdateShapeHint();
+}
+
+// Most-recent flex payload — kept separately from `lastPayload` so the
+// Friday-engine state stays intact when the user toggles between modes.
+let _lastFlexPayload = null;
 
 async function runFlex() {
   const status = $("status");
@@ -2737,6 +2783,7 @@ async function runFlex() {
     if (out) out.textContent = "Pick an entry date and an expiry date.";
     return;
   }
+  const includeLive = $("e2bIncludeLiveChain")?.value || "1";
 
   const qs = new URLSearchParams({
     underlying: String(engine2UnderlyingState.symbol || "SPX"),
@@ -2745,11 +2792,12 @@ async function runFlex() {
     years: "2",
     widths: "1.0,1.5,2.0,2.5",
     risk_target_breach_pct: "25",
+    include_live_chain: includeLive,
   });
   const url = `/api/spx-ic/flex?${qs.toString()}`;
 
   try {
-    setLoading(true, "Scoring flex-expiry trade...");
+    setLoading(true, "Scoring flex-expiry trade…");
     if (status) {
       status.textContent = "Running flex…";
       status.classList.remove("isError", "isOk");
@@ -2757,12 +2805,17 @@ async function runFlex() {
       status.classList.remove("hidden");
     }
     const payload = await fetchJson(url);
+    _lastFlexPayload = payload;
 
-    // Render through the existing pipeline. The flex payload mirrors
-    // /api/spx-ic keys so the desk's renderers light up unchanged.
     render(payload);
+    _renderFlexBanner(payload);
+    _renderFlexAnalytics(payload);
+    _renderFlexLiveChain(payload);
+    _retitleForFlexMode(payload);
+    // Reset the prior flex advisor card so it doesn't show stale narrative.
+    const flexAdvSec = $("e2bFlexAdvisorSection");
+    if (flexAdvSec) flexAdvSec.classList.add("hidden");
 
-    // Surface the flex shape (entry → expiry, DTE, holiday) above the results.
     if (out && payload?.flexExpiry) {
       const fx = payload.flexExpiry;
       const cal = fx.dteCalendarDays;
@@ -2792,6 +2845,324 @@ async function runFlex() {
   } finally {
     setLoading(false);
   }
+}
+
+// ── Flex banner — replaces "WEEKLY IC" labelling when in flex mode ──
+function _renderFlexBanner(payload) {
+  const sec = $("e2bFlexBanner");
+  if (!sec) return;
+  const fx = payload?.flexExpiry;
+  if (!fx) { sec.classList.add("hidden"); return; }
+  sec.classList.remove("hidden");
+  const w = $("e2bFlexBannerWindow");
+  if (w) w.textContent = `${fx.entryDate} → ${fx.expiryDate}`;
+  const shape = $("e2bFlexBannerShape");
+  if (shape) shape.textContent = `${fx.dteCalendarDays} cal · ${fx.dteSessions} session${fx.dteSessions === 1 ? "" : "s"}`;
+  const h = $("e2bFlexBannerHoliday");
+  if (h) {
+    if (fx.spansHoliday && fx.holiday && fx.holiday.label) {
+      h.textContent = `Spans ${fx.holiday.label}`;
+    } else {
+      h.textContent = "";
+    }
+  }
+  const a = $("e2bFlexBannerAnalogues");
+  if (a) {
+    const fa = payload?.flexAnalytics;
+    if (fa && fa.subsamples) {
+      const parts = [];
+      const eh = fa.subsamples.exactHoliday;
+      const hc = fa.subsamples.holidayClass;
+      const rm = fa.subsamples.regimeMacro;
+      const all = fa.subsamples.all;
+      if (eh) parts.push(`exact n=${eh.n}`);
+      if (hc) parts.push(`class n=${hc.n}`);
+      if (rm) parts.push(`regime n=${rm.n}`);
+      if (all) parts.push(`all n=${all.n}`);
+      parts.push(`primary=${fa.primary}`);
+      a.textContent = parts.join(" · ");
+    } else {
+      a.textContent = `${fx.analoguesFound ?? 0} analogues`;
+    }
+  }
+}
+
+// ── Retitle / retag Friday-only labels so the flex view is honest ──
+function _retitleForFlexMode(payload) {
+  const isFlex = !!payload?.flexExpiry;
+  // E2 instrument panel header (the "WEEKLY IC" pill).
+  try {
+    document.querySelectorAll(".taBiasPill--neu").forEach((el) => {
+      if ((el.textContent || "").trim() === "WEEKLY IC" && isFlex) {
+        el.textContent = "FLEX IC";
+        el.style.background = "#ffb300";
+        el.style.color = "#1a1a1a";
+      }
+    });
+    // EM "Weekly Friday only" footer — relabel.
+    document.querySelectorAll(".taCardInterp.muted").forEach((el) => {
+      if ((el.textContent || "").includes("Weekly Friday only") && isFlex) {
+        const fx = payload.flexExpiry;
+        el.innerHTML = el.innerHTML.replace(
+          "Weekly Friday only",
+          `Flex expiry · ${fx.expiryDate}`
+        );
+      }
+    });
+  } catch (_e) { /* ignore */ }
+}
+
+// ── Flex Analytics renderer — cohort breakdown + open-gap distribution ──
+function _renderFlexAnalytics(payload) {
+  const sec = $("e2bFlexAnalyticsSection");
+  const body = $("e2bFlexAnalyticsBody");
+  const meta = $("e2bFlexAnalyticsMeta");
+  if (!sec || !body) return;
+  const fa = payload?.flexAnalytics;
+  if (!fa || !fa.subsamples) {
+    sec.classList.add("hidden");
+    return;
+  }
+  sec.classList.remove("hidden");
+  if (meta) {
+    const note = (fa.notes || []).join(" · ");
+    meta.textContent = `primary cohort: ${fa.primary}${note ? " · " + note : ""}`;
+  }
+
+  const cohortOrder = ["exactHoliday", "holidayClass", "regimeMacro", "all"];
+  const widthsRowH = (cohort) => {
+    const breach = Array.isArray(cohort?.breach) ? cohort.breach : [];
+    if (!breach.length) return '<tr><td colspan="6" class="muted">No rows</td></tr>';
+    return breach.map((r) => {
+      const closeC = r.closeBreachPct;
+      const eitherC = r.openOrCloseBreachPct;
+      const closeColor = closeC == null ? "var(--text-secondary)" : (closeC <= 20 ? "#34c759" : closeC <= 30 ? "#ff9f0a" : "#ff453a");
+      const eitherColor = eitherC == null ? "var(--text-secondary)" : (eitherC <= 20 ? "#34c759" : eitherC <= 30 ? "#ff9f0a" : "#ff453a");
+      return `<tr>
+        <td class="mono">${Number(r.w).toFixed(2)}×</td>
+        <td class="num mono">${r.n ?? "—"}</td>
+        <td class="num mono" style="color:${closeColor};font-weight:600">${closeC == null ? "—" : closeC.toFixed(1) + "%"}</td>
+        <td class="num mono" style="color:${eitherColor};font-weight:600">${eitherC == null ? "—" : eitherC.toFixed(1) + "%"}</td>
+        <td class="num mono">${r.maeP95XEm == null ? "—" : (r.maeP95XEm.toFixed(2) + "×")}</td>
+        <td class="num mono">${r.meanGapXEm == null ? "—" : (r.meanGapXEm.toFixed(2) + "×")}</td>
+      </tr>`;
+    }).join("");
+  };
+  const gapMicro = (cohort) => {
+    const g = cohort?.openGap;
+    if (!g || !g.n) return '<div class="muted" style="font-size:11px;">no gap data</div>';
+    const skewColor = g.skewBucket === "up" ? "#34c759" : g.skewBucket === "down" ? "#ff453a" : "var(--text-secondary)";
+    return `<div style="font-size:11px;color:var(--text-secondary);margin-top:6px;">
+      open gap n=${g.n} · |gap| p50=${g.absPct?.p50 ?? "—"}% · p95=${g.absPct?.p95 ?? "—"}% · max=${g.absPct?.max ?? "—"}% ·
+      <span class="mono" style="color:${skewColor}">${g.skewBucket || "—"}</span>
+    </div>`;
+  };
+
+  const cards = cohortOrder.filter((k) => fa.subsamples[k]).map((key) => {
+    const c = fa.subsamples[key];
+    const isPrimary = (key === fa.primary);
+    return `<div class="taPanel" style="padding:12px 14px;${isPrimary ? "border:1px solid #ffb300;box-shadow:0 0 0 1px rgba(255,179,0,0.2);" : ""}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-weight:700;font-size:13px">${escapeHtml(c.label || key)}${isPrimary ? ' <span style="font-size:9px;background:#ffb300;color:#1a1a1a;padding:2px 6px;border-radius:3px;margin-left:6px;letter-spacing:0.5px">PRIMARY</span>' : ""}</div>
+        <div class="mono" style="font-size:11px;color:var(--text-secondary)">n=${c.n}${c.holidayLabel ? " · " + escapeHtml(c.holidayLabel) : ""}</div>
+      </div>
+      <div class="tableWrap">
+        <table class="dataTable" style="font-size:11px">
+          <thead>
+            <tr>
+              <th>EM ×</th><th class="num">N</th>
+              <th class="num">Close breach</th>
+              <th class="num">Open-or-close breach</th>
+              <th class="num">MAE p95 (×EM)</th>
+              <th class="num">|gap| mean (×EM)</th>
+            </tr>
+          </thead>
+          <tbody>${widthsRowH(c)}</tbody>
+        </table>
+      </div>
+      ${gapMicro(c)}
+    </div>`;
+  }).join("");
+
+  body.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:12px">${cards}</div>
+    <div class="metricCaption muted" style="margin-top:10px;font-size:11px;line-height:1.5">
+      <strong>Close breach</strong> = expiry close outside ±(width × EM).
+      <strong>Open-or-close breach</strong> = expiry close OR expiry open outside ±(width × EM) — the realistic breach
+      for 1-session windows where the open is the desk's first chance to react after a halt.
+      The primary cohort is auto-selected: tightest subsample with n≥5 wins; fall back to wider cohorts if none qualifies.
+      <strong>Skew bucket</strong> flags asymmetric tail risk: "up" / "down" / "balanced".
+    </div>`;
+}
+
+// ── Live chain card — broker-grade strikes / credit for the requested expiry ──
+function _renderFlexLiveChain(payload) {
+  const sec = $("e2bLiveChainSection");
+  const body = $("e2bLiveChainBody");
+  const meta = $("e2bLiveChainMeta");
+  const expEl = $("e2bLiveChainExpiry");
+  if (!sec || !body) return;
+  const lc = payload?.liveChain;
+  if (!lc) { sec.classList.add("hidden"); return; }
+  sec.classList.remove("hidden");
+  if (expEl) expEl.textContent = payload?.flexExpiry?.expiryDate || lc.expiry || "";
+  if (meta) {
+    if (lc.enabled) {
+      meta.textContent = `${lc.symbolUsed || "—"} · spot=${lc.spotPrice == null ? "—" : Number(lc.spotPrice).toFixed(2)} · EM=${lc.emPct == null ? "—" : Number(lc.emPct).toFixed(2)}%`;
+    } else {
+      meta.textContent = `disabled — ${(lc.notes && lc.notes[0]) || "no live chain"}`;
+    }
+  }
+  if (!lc.enabled || !Array.isArray(lc.targets) || !lc.targets.length) {
+    body.innerHTML = `<div class="taPanel" style="padding:12px 14px"><div style="color:#ff9f0a;font-size:12px;font-weight:600">Live chain unavailable for this expiry — pull strikes manually on the broker before entry.</div>
+      ${Array.isArray(lc.warnings) && lc.warnings.length ? `<ul style="font-size:11px;color:var(--text-secondary);margin:8px 0 0 0;padding-left:18px">${lc.warnings.map((w) => `<li>${escapeHtml(String(w))}</li>`).join("")}</ul>` : ""}</div>`;
+    return;
+  }
+
+  const rows = lc.targets.map((t) => {
+    const rocColor = t.rocPct == null ? "var(--text-secondary)" : (t.rocPct >= 15 ? "#34c759" : t.rocPct >= 8 ? "#ff9f0a" : "#ff453a");
+    const popColor = t.popFromMid == null ? "var(--text-secondary)" : (t.popFromMid >= 0.80 ? "#34c759" : t.popFromMid >= 0.65 ? "#ff9f0a" : "#ff453a");
+    return `<tr>
+      <td class="mono">${Number(t.emMult).toFixed(2)}×</td>
+      <td class="num mono">${t.wingWidthPts}</td>
+      <td class="mono">${t.shortPut} / ${t.shortCall}</td>
+      <td class="mono">${t.longPut} / ${t.longCall}</td>
+      <td class="num mono">${t.shortPutMid == null ? "—" : Number(t.shortPutMid).toFixed(2)}</td>
+      <td class="num mono">${t.shortCallMid == null ? "—" : Number(t.shortCallMid).toFixed(2)}</td>
+      <td class="num mono" style="font-weight:700">${t.netMidCredit == null ? "—" : "$" + Number(t.netMidCredit).toFixed(2)}</td>
+      <td class="num mono">${t.maxLossPerContract == null ? "—" : "$" + Number(t.maxLossPerContract).toFixed(2)}</td>
+      <td class="num mono" style="color:${rocColor};font-weight:600">${t.rocPct == null ? "—" : Number(t.rocPct).toFixed(1) + "%"}</td>
+      <td class="num mono" style="color:${popColor};font-weight:600">${t.popFromMid == null ? "—" : (Number(t.popFromMid) * 100).toFixed(0) + "%"}</td>
+      <td class="num mono">${t.putBreakeven == null ? "—" : t.putBreakeven} / ${t.callBreakeven == null ? "—" : t.callBreakeven}</td>
+    </tr>`;
+  }).join("");
+
+  body.innerHTML = `<div class="tableWrap">
+    <table class="dataTable" style="font-size:11px">
+      <thead>
+        <tr>
+          <th>EM ×</th><th class="num">Wing</th>
+          <th>SP / SC</th><th>LP / LC</th>
+          <th class="num">SP mid</th><th class="num">SC mid</th>
+          <th class="num">Net credit</th><th class="num">Max loss</th>
+          <th class="num">ROC</th><th class="num">POP (mid)</th>
+          <th>BE put / call</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+  <div class="metricCaption muted" style="margin-top:10px;font-size:11px;line-height:1.5">
+    Mid prices are bid/ask midpoints from the ${escapeHtml(String(lc.symbolUsed))} live chain.
+    POP is the naive ``1 − |shortPutΔ| − shortCallΔ`` estimate. Always verify on the broker before entry — fills depend on liquidity, and SPXW after-hours quotes can widen.
+  </div>`;
+}
+
+// ── Flex AI Advisor — POST /api/spx-ic/flex/advisor ──
+let _flexAdvisorRunning = false;
+async function _runFlexAdvisor() {
+  if (_flexAdvisorRunning) return;
+  if (!_lastFlexPayload || !_lastFlexPayload.flexExpiry) {
+    alert("Run a flex scan first.");
+    return;
+  }
+  const sec = $("e2bFlexAdvisorSection");
+  const body = $("e2bFlexAdvisorBody");
+  if (sec && body) {
+    sec.classList.remove("hidden");
+    body.innerHTML = '<div style="padding:18px;text-align:center;color:var(--text-secondary);font-size:12px"><span class="btnSpinner" style="display:inline-block;margin-right:8px"></span>Running flex advisor (90s budget)…</div>';
+  }
+  _flexAdvisorRunning = true;
+  try {
+    const resp = await fetch("/api/spx-ic/flex/advisor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(_lastFlexPayload),
+    });
+    if (!resp.ok) {
+      let detail = "";
+      try { detail = (await resp.json()).detail || ""; } catch (_) {}
+      throw new Error(detail || ("HTTP " + resp.status));
+    }
+    const data = await resp.json();
+    _renderFlexAdvisor(data);
+  } catch (e) {
+    if (body) body.innerHTML = `<div style="padding:14px;color:#ff453a;font-size:12px">Flex advisor error: ${escapeHtml(String(e?.message || e))}</div>`;
+  } finally {
+    _flexAdvisorRunning = false;
+  }
+}
+
+function _renderFlexAdvisor(data) {
+  const body = $("e2bFlexAdvisorBody");
+  if (!body) return;
+  const a = data?.advisor || {};
+  if (a._source === "fallback") {
+    body.innerHTML = `<div style="padding:14px;color:#f3a847;font-size:12px;font-weight:600">⚠ Flex advisor fallback</div>
+      <div style="padding:0 14px 14px;font-size:12px;color:var(--text-secondary)">Reason: ${escapeHtml(String(a._fallback_reason || "unknown"))}</div>`;
+    return;
+  }
+  const verdict = a.verdict || "PASS";
+  const vc = verdict === "TRADE" ? "#34c759" : verdict === "LEAN_PASS" ? "#ff9f0a" : "#ff453a";
+  const conf = Number(a.confidence) || 0;
+  const cohort = a.cohortUsed || {};
+  const ticket = a.tradeTicket || {};
+
+  const cohortLine = `cohort: <strong>${escapeHtml(String(cohort.name || "—"))}</strong> · n=<strong>${cohort.n ?? "—"}</strong> · closeBreach=${cohort.closeBreachPct == null ? "—" : cohort.closeBreachPct + "%"} · open-or-close=${cohort.openOrCloseBreachPct == null ? "—" : cohort.openOrCloseBreachPct + "%"} · gap p95=${cohort.openGapP95Pct == null ? "—" : cohort.openGapP95Pct + "%"}`;
+
+  let html = '<div class="taPanel">';
+  html += '<div style="display:flex;align-items:center;gap:16px;padding:14px 18px;border-bottom:1px solid var(--border)">';
+  html += `<div style="display:flex;flex-direction:column;align-items:center;min-width:110px">
+    <div style="font-size:26px;font-weight:800;color:${vc};letter-spacing:0.5px">${escapeHtml(verdict.replace("_", " "))}</div>
+    <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Confidence: ${conf}%</div>
+  </div>`;
+  html += `<div style="flex:1;font-size:13px;line-height:1.5">${escapeHtml(a.deskNote || "")}<div style="font-size:11px;color:var(--text-secondary);margin-top:6px">${cohortLine}</div></div>`;
+  html += '</div>';
+
+  if (ticket.shortPutStrike) {
+    html += '<div style="padding:12px 18px;border-bottom:1px solid var(--border)">';
+    html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px;margin-bottom:8px">Trade Ticket — Flex Expiry</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;font-size:12px">';
+    const cells = [
+      ["Entry", ticket.entry],
+      ["Expiry", ticket.expiry],
+      ["Short Put", ticket.shortPutStrike],
+      ["Long Put", ticket.longPutStrike],
+      ["Short Call", ticket.shortCallStrike],
+      ["Long Call", ticket.longCallStrike],
+      ["Wing", "$" + ticket.wingWidth],
+      ["EM Mult", ticket.emMultiple + "×"],
+      ["Est. Credit", ticket.estimatedCredit || "—"],
+      ["Max Loss", ticket.maxLoss || "—"],
+    ];
+    cells.forEach((kv) => {
+      html += `<div><span style="color:var(--text-secondary)">${escapeHtml(kv[0])}</span><br><span class="mono" style="font-weight:600">${escapeHtml(String(kv[1] ?? "—"))}</span></div>`;
+    });
+    html += '</div></div>';
+  }
+
+  const sections = [
+    ["Edge Assessment", a.edgeAssessment],
+    ["Wing Width Rationale", a.wingWidthRationale],
+    ["Risk Context", a.riskContext],
+    ["Entry Plan", a.entryPlan],
+    ["Management Plan", a.managementPlan],
+    ["Exit Rules", a.exitRules],
+  ];
+  if (a.passReason) sections.unshift(["Pass Reason", a.passReason]);
+  html += '<div style="padding:12px 18px">';
+  sections.forEach((s) => {
+    if (!s[1]) return;
+    html += `<div style="margin-bottom:12px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px;margin-bottom:4px">${escapeHtml(s[0])}</div>
+      <div style="font-size:12px;line-height:1.5">${escapeHtml(String(s[1]))}</div></div>`;
+  });
+  if (Array.isArray(a.keyRisks) && a.keyRisks.length) {
+    html += '<div style="margin-bottom:8px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px;margin-bottom:4px">Key Risks</div>';
+    html += '<ul style="margin:0;padding-left:18px;font-size:12px;line-height:1.6">';
+    a.keyRisks.forEach((r) => { html += '<li>' + escapeHtml(String(r)) + '</li>'; });
+    html += '</ul></div>';
+  }
+  html += '</div></div>';
+  body.innerHTML = html;
 }
 
 async function main() {

@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import datetime as dt
 import threading
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from cachetools import TTLCache
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query
 
 from backend.config import get_flags
 from backend.deps import (
@@ -56,6 +56,7 @@ def spx_ic_flex(
         description="Comma-separated EM-multiple grid. Default includes 2.5× for holiday-weekend trades.",
     ),
     risk_target_breach_pct: float = Query(25.0, gt=0.0, le=100.0),
+    include_live_chain: bool = Query(True, description="Pull live SPXW chain for the requested expiry and project per-EM strike credits."),
 ):
     flags = get_flags()
     if not flags.ENABLE_ENGINE2_SPX_IC:
@@ -93,6 +94,7 @@ def spx_ic_flex(
         "years": years,
         "widths": ",".join(str(w) for w in ws),
         "risk_target_breach_pct": risk_target_breach_pct,
+        "include_live_chain": bool(include_live_chain),
     }
     cache_enabled = not is_us_equity_market_open()
     key = _flex_cache_key(params, flags.cache_key_engine2())
@@ -113,6 +115,7 @@ def spx_ic_flex(
             years=int(years),
             widths=ws,
             risk_target_breach_pct=float(risk_target_breach_pct),
+            include_live_chain=bool(include_live_chain),
         )
         payload["schemaVersion"] = 1
         payload["updatedAt"] = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -130,3 +133,96 @@ def spx_ic_flex(
     except Exception as e:
         LOG.exception("Unhandled failure (spx-ic/flex)")
         raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Flex AI Advisor — POST /api/spx-ic/flex/advisor
+# ═════════════════════════════════════════════════════════════════════════
+
+@router.post("/api/spx-ic/flex/advisor")
+def spx_ic_flex_advisor(
+    body: Optional[Dict[str, Any]] = Body(default=None),
+    underlying: str = Query("SPX"),
+    entry_date: Optional[str] = Query(None),
+    expiry: Optional[str] = Query(None),
+    years: int = Query(2, ge=1, le=5),
+    widths: str = Query("1.0,1.5,2.0,2.5"),
+    risk_target_breach_pct: float = Query(25.0, gt=0.0, le=100.0),
+    include_live_chain: bool = Query(True),
+):
+    """Run the flex-expiry LLM trade advisor.
+
+    Two call modes:
+
+    1. Pass a pre-computed flex payload in ``body`` (must contain
+       ``flexExpiry``). This is what the frontend uses after a
+       ``runFlex()`` call so we don't double-fetch ORATS.
+    2. Pass query params (``entry_date`` / ``expiry``) and the route
+       re-runs ``compute_engine2b_flex_ic`` then advises. Useful for
+       headless backtesting / curl.
+    """
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE2_SPX_IC:
+        raise HTTPException(status_code=404, detail="Engine 2 disabled (ENABLE_ENGINE2_SPX_IC=0).")
+    if not bool(getattr(flags, "ENABLE_E2B_FLEX_EXPIRY", False)):
+        raise HTTPException(status_code=404, detail="Engine 2b flex-expiry disabled (ENABLE_E2B_FLEX_EXPIRY=0).")
+    if not getattr(flags, "ENGINE2_ADVISOR_ENABLED", False):
+        raise HTTPException(status_code=404, detail="Engine 2 advisor disabled (ENGINE2_ADVISOR_ENABLED=0).")
+
+    payload: Dict[str, Any]
+    if body and isinstance(body, dict) and body.get("flexExpiry"):
+        payload = body
+    else:
+        if not entry_date or not expiry:
+            raise HTTPException(
+                status_code=400,
+                detail="Either POST a flex payload (with flexExpiry) or pass entry_date + expiry query params.",
+            )
+        entry_dt = _parse_iso_date(entry_date, field="entry_date")
+        expiry_dt = _parse_iso_date(expiry, field="expiry")
+        if expiry_dt <= entry_dt:
+            raise HTTPException(status_code=400, detail="expiry must be strictly after entry_date.")
+        under = str(underlying or "SPX").strip().upper()
+        if under not in ("SPX", "SPY", "QQQ"):
+            raise HTTPException(status_code=400, detail="underlying must be SPX|SPY|QQQ")
+        try:
+            ws = [float(p.strip()) for p in str(widths).split(",") if p.strip()]
+            ws = sorted({w for w in ws if w > 0}) or [1.0, 1.5, 2.0, 2.5]
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"widths bad ({e})") from e
+        try:
+            payload = compute_engine2b_flex_ic(
+                client=get_client(),
+                benzinga_client=get_benzinga_client_optional(),
+                flags=flags,
+                underlying_preference=under,
+                entry_date=entry_dt,
+                expiry_date=expiry_dt,
+                years=int(years),
+                widths=ws,
+                risk_target_breach_pct=float(risk_target_breach_pct),
+                include_live_chain=bool(include_live_chain),
+            )
+        except OratsError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from e
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
+    try:
+        from backend.engine2b.advisor import generate_flex_advisor
+        advisor = generate_flex_advisor(payload, flags=flags)
+    except Exception as e:
+        LOG.exception("Engine 2b flex advisor failure")
+        raise HTTPException(status_code=500, detail=f"Flex advisor error: {type(e).__name__}: {e}") from e
+
+    return {
+        "advisor": advisor,
+        "flexExpiry": payload.get("flexExpiry"),
+        "flexAnalytics": payload.get("flexAnalytics"),
+        "liveChain": payload.get("liveChain"),
+        "expectedMove": payload.get("expectedMove"),
+        "deskConsensus": payload.get("deskConsensus"),
+        "current": payload.get("current"),
+        "underlying": payload.get("underlying"),
+        "asOfDate": payload.get("asOfDate"),
+    }

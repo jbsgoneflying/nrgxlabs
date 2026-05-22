@@ -118,7 +118,7 @@
              stays exactly as it was. -->
         <details id="e2bFlexPanel" class="hidden" style="margin-top:14px;">
           <summary style="cursor:pointer; font-size:12px; font-weight:600; color:#86868b;">
-            Flex Expiry (advanced) — score any (entry → expiry) pair, including holiday-weekend trades
+            Flex Expiry — score any (entry → expiry) pair, including holiday-weekend & multi-leg cadence trades
           </summary>
           <form id="e2bFlexForm" style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-top:10px;">
             <div class="controlGroup">
@@ -129,13 +129,64 @@
               <div class="controlLabel">Expiry date</div>
               <input id="e2bExpiryDate" type="date" class="controlSelect" style="min-width:140px;" />
             </div>
+            <div class="controlGroup">
+              <div class="controlLabel">Include live chain</div>
+              <select id="e2bIncludeLiveChain" class="controlSelect" style="min-width:120px;">
+                <option value="1" selected>On (broker-grade)</option>
+                <option value="0">Off (faster)</option>
+              </select>
+            </div>
             <button id="e2bRunBtn" class="primaryButton" type="submit">
               <span class="btnSpinner" aria-hidden="true"></span>
               Run Flex
             </button>
             <div id="e2bFlexShape" class="muted" style="font-size:12px; flex-basis:100%; margin-top:6px;"></div>
+            <div style="flex-basis:100%; display:flex; gap:8px; flex-wrap:wrap;">
+              <button id="e2bFlexPresetFriToTue" class="chipToggle" type="button" style="font-size:11px;">Fri → Tue (next holiday weekend)</button>
+              <button id="e2bFlexPresetTueToFri" class="chipToggle" type="button" style="font-size:11px;">Tue → Fri (mid-week leg)</button>
+              <button id="e2bFlexPresetMonToFri" class="chipToggle" type="button" style="font-size:11px;">Mon → Fri (full week)</button>
+            </div>
           </form>
         </details>
+      </section>
+
+      <!-- ── Flex Mode Banner — replaces "WEEKLY IC" labelling on flex runs ── -->
+      <section class="surface hidden" id="e2bFlexBanner" aria-label="Flex Mode Banner" style="border-left:4px solid #ffb300;">
+        <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:10px 14px;">
+          <span style="font-size:10px; font-weight:800; letter-spacing:0.5px; padding:3px 8px; border-radius:4px; background:#ffb300; color:#1a1a1a;">FLEX MODE</span>
+          <span id="e2bFlexBannerWindow" style="font-size:13px; font-weight:600;"></span>
+          <span id="e2bFlexBannerShape" class="mono muted" style="font-size:12px;"></span>
+          <span id="e2bFlexBannerHoliday" class="mono" style="font-size:12px; color:#ffb300;"></span>
+          <span id="e2bFlexBannerAnalogues" class="mono muted" style="font-size:12px;"></span>
+          <span style="flex:1;"></span>
+          <button id="e2bFlexBannerAdvisorBtn" class="primaryButton" type="button" style="font-size:11px; padding:6px 14px;">Run Flex Advisor</button>
+        </div>
+      </section>
+
+      <!-- ── Flex Analytics — institutional cohort breakdown + open-gap distribution ── -->
+      <section class="surface hidden" id="e2bFlexAnalyticsSection" aria-label="Flex Analytics">
+        <div class="sectionHeader">
+          <h2 class="sectionTitle">Flex Analytics — Cohort Breakdown</h2>
+          <div class="sectionMeta muted" id="e2bFlexAnalyticsMeta">—</div>
+        </div>
+        <div id="e2bFlexAnalyticsBody"></div>
+      </section>
+
+      <!-- ── Live Chain Targets — broker-grade strikes / credit for the requested expiry ── -->
+      <section class="surface hidden" id="e2bLiveChainSection" aria-label="Live Chain Targets">
+        <div class="sectionHeader">
+          <h2 class="sectionTitle">Live Chain Targets — <span id="e2bLiveChainExpiry" class="mono muted" style="font-weight:400; font-size:13px;">—</span></h2>
+          <div class="sectionMeta muted" id="e2bLiveChainMeta">—</div>
+        </div>
+        <div id="e2bLiveChainBody"></div>
+      </section>
+
+      <!-- ── Flex Advisor Panel — sibling of e2AdvisorSection for the flex endpoint ── -->
+      <section class="surface hidden" id="e2bFlexAdvisorSection" aria-label="Flex AI Advisor">
+        <div class="sectionHeader">
+          <h2 class="sectionTitle">Flex AI Advisor</h2>
+        </div>
+        <div id="e2bFlexAdvisorBody"></div>
       </section>
 
       <section class="results hidden" id="results">

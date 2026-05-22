@@ -34,10 +34,13 @@ from backend.config import FeatureFlags
 from backend.expected_move import compute_strike_targets
 from backend.orats_client import OratsClient, OratsError
 
+from backend.engine2b.flex_analytics import build_flex_analytics
 from backend.engine2b.flex_em import compute_expected_move_flex
+from backend.engine2b.flex_live_chain import compute_flex_live_chain_targets
 from backend.engine2b.flex_windows import (
     FlexWindow,
     build_flex_windows,
+    classify_holiday,
     derive_target_shape,
 )
 
@@ -164,6 +167,7 @@ def compute_engine2b_flex_ic(
     widths: Optional[List[float]] = None,
     risk_target_breach_pct: float = 25.0,
     today: Optional[dt.date] = None,
+    include_live_chain: bool = True,
 ) -> Dict[str, Any]:
     """Build the Engine 2b flex-expiry payload.
 
@@ -435,6 +439,19 @@ def compute_engine2b_flex_ic(
         mae_abs_pts = mae_abs_pct / 100.0 * entry_px
         mae_abs_em = mae_abs_pct / float(em1sigma_pct) if em1sigma_pct > 1e-9 else None
 
+        # Open-gap (Fri close -> expiry open) — the actual first
+        # opportunity to react when the live trade holds 1 session
+        # across a closed weekday. ``open`` is missing for some sparse
+        # historical rows; we degrade gracefully.
+        gap_open_pct: Optional[float] = None
+        gap_open_x_em: Optional[float] = None
+        gap_open_breach_flag: bool = False
+        exp_open = float(exp_bar.open) if (exp_bar and exp_bar.open is not None and exp_bar.open > 0) else None
+        if exp_open is not None:
+            gap_open_pct = (exp_open / entry_px - 1.0) * 100.0
+            if em1sigma_pct > 1e-9:
+                gap_open_x_em = float(gap_open_pct) / float(em1sigma_pct)
+
         week_rows.append(
             {
                 "entryDate": ek,
@@ -442,9 +459,14 @@ def compute_engine2b_flex_ic(
                 "dte": int(win.dte_sessions),
                 "dteCalendarDays": int(win.dte_calendar_days),
                 "spansHoliday": bool(win.spans_holiday),
+                "holidayLabel": win.holiday_label,
+                "holidayDate": win.holiday_date.isoformat() if win.holiday_date else None,
                 "entryPx": round(entry_px, 2),
                 "expiryPx": round(exp_px, 2),
+                "expiryOpenPx": round(exp_open, 2) if exp_open is not None else None,
                 "retPct": round(float(ret_pct), 3),
+                "openGapPct": None if gap_open_pct is None else round(float(gap_open_pct), 3),
+                "openGapXEm": None if gap_open_x_em is None else round(float(gap_open_x_em), 3),
                 "em1sigmaPct": round(float(em1sigma_pct), 3),
                 "emSource": em_source,
                 "macroMultiplier": round(float(macro.get("multiplier") or 1.0), 3),
@@ -742,6 +764,54 @@ def compute_engine2b_flex_ic(
     }
     rec_simple = recommend_width(by_width=by_width, risk_target_breach_pct=float(risk_target_breach_pct))
 
+    # ---- Flex analytics (holiday-class + open-gap + cohort breach) ----
+    target_holiday_label: Optional[str] = None
+    if holiday_in_live_span and isinstance(holiday_in_live_span.get("date"), str):
+        try:
+            target_holiday_label = classify_holiday(dt.date.fromisoformat(holiday_in_live_span["date"][:10]))
+        except Exception:
+            target_holiday_label = holiday_in_live_span.get("label")
+    flex_analytics = build_flex_analytics(
+        week_rows=week_rows,
+        widths=widths_use,
+        regime_bucket_now=regime_bucket_now,
+        macro_bucket_now=macro_bucket_now,
+        target_holiday_label=target_holiday_label,
+        target_spans_holiday=bool(target_shape.get("spansHoliday")),
+    )
+    mark("flex.analytics")
+
+    # ---- Live chain probe (the actual broker context for the live expiry) ----
+    live_chain_block: Dict[str, Any] = {
+        "enabled": False,
+        "notes": ["Live-chain probe not requested or unavailable."],
+    }
+    em_pct_for_live = _to_float(expected_move.get("expectedMovePct") if isinstance(expected_move, dict) else None)
+    if include_live_chain and em_pct_for_live and em_pct_for_live > 0:
+        try:
+            if underlying == "SPX":
+                lc_symbols = ("SPXW", "SPX", "SPY")
+            elif underlying == "QQQ":
+                lc_symbols = ("QQQ",)
+            else:
+                lc_symbols = (underlying,)
+            live_chain_block = compute_flex_live_chain_targets(
+                client,
+                ticker=underlying,
+                today=now,
+                expiry=expiry_date,
+                em_pct=float(em_pct_for_live),
+                em_mults=em_mults,
+                wing_pts=wing_pts,
+                symbols=lc_symbols,
+            )
+        except Exception as e:
+            live_chain_block = {
+                "enabled": False,
+                "notes": [f"Live-chain probe failed: {type(e).__name__}: {e}"],
+            }
+    mark("flex.live_chain")
+
     mark("compute.total")
     LOG.info(
         "Engine2b flex compute done in %.2fs: windows=%s rows=%s entry=%s exp=%s",
@@ -775,6 +845,7 @@ def compute_engine2b_flex_ic(
             "dteCalendarDays": int(target_shape["dteCalendarDays"]),
             "spansHoliday": bool(target_shape["spansHoliday"]),
             "holiday": holiday_in_live_span,
+            "holidayLabel": target_holiday_label,
             "analoguesFound": int(len(flex_windows)),
             "rowsWithBars": int(len(week_rows)),
             "notes": [
@@ -783,6 +854,8 @@ def compute_engine2b_flex_ic(
                 "Friday-engine main flow at /api/spx-ic is untouched.",
             ],
         },
+        "flexAnalytics": flex_analytics,
+        "liveChain": live_chain_block,
         "current": {
             "regime": regime_now,
             "macro": macro_now,

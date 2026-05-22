@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from backend.engine15.trading_calendar import (
     add_business_days,
@@ -34,6 +34,57 @@ from backend.engine15.trading_calendar import (
 )
 from backend.spx_ic.utils import _fmt_date
 from backend.spx_ic.weekly_windows import WeeklyWindow
+
+
+# Map a calendar-(month, day) pair onto a stable holiday family label so we
+# can build "exact-holiday" subsamples (e.g. only Memorial Day analogues for
+# a Memorial Day weekend trade). The map is intentionally broad — a holiday
+# can land on different weekdays year-over-year (e.g. Christmas) and the
+# label needs to stay constant so subsample-matching works. Keys cover the
+# observable date range; the lookup is forgiving for dates not in the
+# table (they get the generic "NYSE holiday" label).
+_HOLIDAY_FAMILY: Dict[Tuple[int, int], str] = {
+    (1, 1): "New Year's Day",
+    (1, 2): "New Year's Day (observed)",
+    (1, 9): "Day of Mourning",
+    (1, 15): "MLK Day", (1, 16): "MLK Day", (1, 17): "MLK Day",
+    (1, 18): "MLK Day", (1, 19): "MLK Day", (1, 20): "MLK Day", (1, 21): "MLK Day",
+    (2, 15): "Presidents' Day", (2, 16): "Presidents' Day", (2, 17): "Presidents' Day",
+    (2, 18): "Presidents' Day", (2, 19): "Presidents' Day", (2, 20): "Presidents' Day",
+    (2, 21): "Presidents' Day",
+    (3, 25): "Good Friday", (3, 26): "Good Friday", (3, 27): "Good Friday",
+    (3, 28): "Good Friday", (3, 29): "Good Friday", (3, 30): "Good Friday",
+    (3, 31): "Good Friday",
+    (4, 1): "Good Friday", (4, 2): "Good Friday", (4, 3): "Good Friday",
+    (4, 4): "Good Friday", (4, 5): "Good Friday", (4, 6): "Good Friday",
+    (4, 7): "Good Friday", (4, 8): "Good Friday", (4, 9): "Good Friday",
+    (4, 10): "Good Friday", (4, 11): "Good Friday", (4, 12): "Good Friday",
+    (4, 13): "Good Friday", (4, 14): "Good Friday", (4, 15): "Good Friday",
+    (4, 16): "Good Friday", (4, 17): "Good Friday", (4, 18): "Good Friday",
+    (4, 19): "Good Friday", (4, 20): "Good Friday", (4, 21): "Good Friday",
+    (4, 22): "Good Friday", (4, 23): "Good Friday",
+    (5, 25): "Memorial Day", (5, 26): "Memorial Day", (5, 27): "Memorial Day",
+    (5, 28): "Memorial Day", (5, 29): "Memorial Day", (5, 30): "Memorial Day",
+    (5, 31): "Memorial Day",
+    (6, 18): "Juneteenth", (6, 19): "Juneteenth", (6, 20): "Juneteenth",
+    (7, 3): "Independence Day", (7, 4): "Independence Day", (7, 5): "Independence Day",
+    (9, 1): "Labor Day", (9, 2): "Labor Day", (9, 3): "Labor Day", (9, 4): "Labor Day",
+    (9, 5): "Labor Day", (9, 6): "Labor Day", (9, 7): "Labor Day",
+    (11, 22): "Thanksgiving", (11, 23): "Thanksgiving", (11, 24): "Thanksgiving",
+    (11, 25): "Thanksgiving", (11, 26): "Thanksgiving", (11, 27): "Thanksgiving",
+    (11, 28): "Thanksgiving",
+    (12, 24): "Christmas", (12, 25): "Christmas", (12, 26): "Christmas",
+}
+
+
+def classify_holiday(d: dt.date) -> str:
+    """Return a stable family label for an NYSE-closed weekday.
+
+    The label is what downstream code uses to define an *exact* analogue
+    subsample. Unknown dates fall back to ``"NYSE holiday"`` so the
+    family stays well-defined even when the holiday table is sparse.
+    """
+    return _HOLIDAY_FAMILY.get((d.month, d.day)) or "NYSE holiday"
 
 
 @dataclass(frozen=True)
@@ -45,6 +96,8 @@ class FlexWindow:
     dte_sessions: int
     dte_calendar_days: int
     spans_holiday: bool
+    holiday_label: Optional[str] = None
+    holiday_date: Optional[dt.date] = None
 
     def to_weekly_window(self) -> WeeklyWindow:
         """Adapt to the Friday-engine dataclass so downstream code is interchangeable."""
@@ -74,8 +127,12 @@ def derive_target_shape(
     cal_days = (expiry_date - entry_date).days
     # A "holiday span" means the gap between entry and expiry contains
     # at least one weekday that the NYSE was closed (Memorial Day, July
-    # 4, etc.). Used downstream as a UI hint, not as a filter.
-    spans_holiday = _gap_contains_full_holiday(entry_date, expiry_date)
+    # 4, etc.). Used both as a UI hint AND downstream as a subsample
+    # filter for "exact-holiday" analogues.
+    holiday_hit = _first_holiday_weekday(entry_date, expiry_date)
+    spans_holiday = holiday_hit is not None
+    holiday_label = classify_holiday(holiday_hit) if holiday_hit else None
+    holiday_date = holiday_hit.isoformat() if holiday_hit else None
     return {
         "entryDate": _fmt_date(entry_date),
         "expiryDate": _fmt_date(expiry_date),
@@ -84,21 +141,29 @@ def derive_target_shape(
         "dteSessions": int(sessions),
         "dteCalendarDays": int(cal_days),
         "spansHoliday": bool(spans_holiday),
+        "holidayLabel": holiday_label,
+        "holidayDate": holiday_date,
     }
 
 
-def _gap_contains_full_holiday(entry_date: dt.date, expiry_date: dt.date) -> bool:
-    """True when at least one weekday in (entry, expiry) is an NYSE full-day close.
+def _first_holiday_weekday(entry_date: dt.date, expiry_date: dt.date) -> Optional[dt.date]:
+    """Return the first NYSE-closed weekday in the strict (entry, expiry) gap.
 
     Pure weekends do not count; we want the "extra" theta days the desk
-    is actually trying to harvest.
+    is actually trying to harvest. Returns ``None`` when the gap is
+    weekends + sessions only.
     """
     d = entry_date + dt.timedelta(days=1)
     while d < expiry_date:
         if d.weekday() < 5 and not is_trading_day(d):
-            return True
+            return d
         d += dt.timedelta(days=1)
-    return False
+    return None
+
+
+def _gap_contains_full_holiday(entry_date: dt.date, expiry_date: dt.date) -> bool:
+    """Back-compat wrapper around :func:`_first_holiday_weekday`."""
+    return _first_holiday_weekday(entry_date, expiry_date) is not None
 
 
 def build_flex_windows(
@@ -179,14 +244,16 @@ def build_flex_windows(
         if _fmt_date(entry) not in date_set or _fmt_date(expiry) not in date_set:
             continue
 
-        spans_holiday = _gap_contains_full_holiday(entry, expiry)
+        holiday_hit = _first_holiday_weekday(entry, expiry)
         out.append(
             FlexWindow(
                 entry_date=entry,
                 expiry_date=expiry,
                 dte_sessions=int(target_sessions),
                 dte_calendar_days=int(cal_days),
-                spans_holiday=bool(spans_holiday),
+                spans_holiday=bool(holiday_hit is not None),
+                holiday_label=classify_holiday(holiday_hit) if holiday_hit else None,
+                holiday_date=holiday_hit if holiday_hit else None,
             )
         )
         if len(out) >= int(max_windows):
@@ -204,6 +271,7 @@ def to_weekly_windows(flex_windows: Iterable[FlexWindow]) -> List[WeeklyWindow]:
 __all__ = [
     "FlexWindow",
     "build_flex_windows",
+    "classify_holiday",
     "derive_target_shape",
     "to_weekly_windows",
 ]
