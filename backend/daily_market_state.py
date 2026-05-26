@@ -1,4 +1,4 @@
-"""Raven-Tech Front Layer – DailyMarketState.
+"""NRGX Labs Front Layer – DailyMarketState.
 
 Single canonical object written once per day that synthesizes all existing
 Raven Tech engines into a deterministic market snapshot.

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Form
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.config import get_flags
@@ -54,7 +54,7 @@ def _configure_logging() -> None:
 _configure_logging()
 LOG = logging.getLogger("app")
 
-app = FastAPI(title="Raven-Tech.co", version="2.0.0")
+app = FastAPI(title="NRGX Labs", version="2.0.0")
 
 # ---- Invite-code gate (lightweight) ----
 AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "raven_session").strip() or "raven_session"
@@ -166,6 +166,15 @@ def login_page(next: str | None = None):
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>NRGX Labs — Access</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="NRGX Labs — Private research lab for self-directed capital. Invite-only beta access." />
+    <meta name="application-name" content="NRGX Labs" />
+    <meta name="apple-mobile-web-app-title" content="NRGX Labs" />
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="/static/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
     <link rel="stylesheet" href="/static/styles.css" />
     <style>
       body {{ display:flex; align-items:center; justify-content:center; min-height:100vh; }}
@@ -264,6 +273,18 @@ def calendar_page():
 @app.get("/api/health")
 def health():
     return {"ok": True, "v": "2026-02-28-router-split"}
+
+
+# robots.txt — the app domain (app.raven-tech.co / app.nrgxlabs.com) is
+# invite-only and behind a login gate. We still serve an explicit
+# Disallow so the login page itself doesn't leak into search indexes,
+# and no crawler wastes time probing /api/* surfaces.
+_ROBOTS_TXT = "User-agent: *\nDisallow: /\n"
+
+
+@app.get("/robots.txt", response_class=PlainTextResponse, include_in_schema=False)
+def robots_txt() -> str:
+    return _ROBOTS_TXT
 
 
 @app.get("/api/flags")

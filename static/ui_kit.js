@@ -238,7 +238,8 @@ function initInfoTips() {
 // IC Scenario`) so the engine code + ticker stay visible even when the tab is
 // truncated to ~10-15 chars.
 //
-// Original title pattern expected: `Engine N — Short Name | Raven-Tech.co`
+// Original title pattern expected: `Engine N — Short Name | NRGX Labs`
+// (Was `| Raven-Tech.co` pre-rebrand; the regex below ignores the suffix.)
 // If the page's title doesn't match, this is a silent no-op (so pages that
 // manage their own dynamic title — e.g. SPX page rotating SPX/SPY/QQQ — are
 // not stomped on).
@@ -248,7 +249,9 @@ let _ravenOriginalTitle = null;
 let _ravenTitleParts = null; // { engineNum, shortName } | null (if pattern didn't match)
 
 function _parseEngineTitle(title) {
-  // Match "Engine 15 — Earnings IC Scenario | Raven-Tech.co"
+  // Match "Engine 15 — Earnings IC Scenario | NRGX Labs"
+  // (Both old `Raven-Tech.co` and new `NRGX Labs` suffixes are accepted —
+  // the trailing `(?:\s*\|.*)?$` swallows any brand suffix.)
   // Em-dash (U+2014) is the standard separator across the app's titles.
   const m = String(title || "").match(/^Engine\s+(\d+)\s+[—–-]\s+([^|]+?)(?:\s*\|.*)?$/);
   if (!m) return null;
