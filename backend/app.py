@@ -165,7 +165,7 @@ def login_page(next: str | None = None):
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Raven-Tech.co — Access</title>
+    <title>NRGX Labs — Access</title>
     <link rel="stylesheet" href="/static/styles.css" />
     <style>
       body {{ display:flex; align-items:center; justify-content:center; min-height:100vh; }}
@@ -185,7 +185,7 @@ def login_page(next: str | None = None):
       <div class="loginTop">
         <img src="/static/NRGX-Logo.png" alt="NRGX Labs" />
         <div>
-          <div class="loginTitle">Raven-Tech.co — Private Beta</div>
+          <div class="loginTitle">Private Beta</div>
           <div class="loginSub">Enter your invite code to continue.</div>
         </div>
       </div>
