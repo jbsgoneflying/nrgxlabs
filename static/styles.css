@@ -74,13 +74,12 @@ body {
 }
 
 .brandLogo {
-  width: 52px;
-  height: 52px;
+  width: 120px;
+  height: 56px;
   object-fit: contain;
-  border-radius: 14px;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  box-shadow: 0 10px 26px rgba(15, 20, 30, 0.10);
+  /* Container chrome removed — the NRGX wordmark has its own clean white
+     background, so an extra rounded panel + border just frames empty space.
+     Sized to the wordmark's 2.11:1 aspect ratio at the existing header height. */
 }
 
 .appHeaderText {
@@ -338,12 +337,15 @@ body {
   visibility: visible;
 }
 
-/* Spinning logo - slow Y-axis rotation (horizontal spin) */
+/* Spinning logo - slow Y-axis rotation (horizontal spin).
+   Now uses the NRGX X-mark; grayscale filter dropped so the gold/navy
+   X colors come through subtly. Opacity bumped slightly to compensate
+   for the now-colored mark sitting on a near-white overlay. */
 .ravenLoadingLogo {
   width: 140px;
-  height: auto;
-  opacity: 0.12;
-  filter: grayscale(100%);
+  height: 140px;
+  object-fit: contain;
+  opacity: 0.18;
   animation: ravenSpinY 3.5s ease-in-out infinite;
   transform-style: preserve-3d;
 }

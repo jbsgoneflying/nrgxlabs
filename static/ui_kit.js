@@ -542,7 +542,7 @@ window.RavenLoading = (function() {
     overlay.setAttribute("aria-valuemin", "0");
     overlay.setAttribute("aria-valuemax", "100");
     overlay.innerHTML = `
-      <img src="/static/RavenONLY.png" class="ravenLoadingLogo" alt="" aria-hidden="true" />
+      <img src="/static/NRGX-Mark.png" class="ravenLoadingLogo" alt="" aria-hidden="true" />
       <div class="ravenLoadingProgress">
         <div class="ravenLoadingProgressFill"></div>
       </div>

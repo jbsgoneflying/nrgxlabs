@@ -77,7 +77,7 @@
     var dHead = document.createElement("div");
     dHead.className = "navDrawerHead";
     dHead.innerHTML =
-      '<img class="navDrawerLogo" src="/static/RavenONLY.png" alt="" />' +
+      '<img class="navDrawerLogo" src="/static/NRGX-Mark.png" alt="" />' +
       '<div><div class="navDrawerTitle">Raven-Tech.co</div>' +
       '<div class="navDrawerSub">Quantitative Desk Intelligence</div></div>';
     drawer.appendChild(dHead);

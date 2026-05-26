@@ -171,7 +171,7 @@ def login_page(next: str | None = None):
       body {{ display:flex; align-items:center; justify-content:center; min-height:100vh; }}
       .loginCard {{ width:min(520px, 92vw); padding:18px; border:1px solid var(--border); border-radius:18px; background:var(--surface); box-shadow:var(--shadow); }}
       .loginTop {{ display:flex; align-items:center; gap:12px; }}
-      .loginTop img {{ width:54px; height:54px; object-fit:contain; }}
+      .loginTop img {{ width:120px; height:54px; object-fit:contain; }}
       .loginTitle {{ font-size:18px; font-weight:800; letter-spacing:0.1px; }}
       .loginSub {{ margin-top:2px; color:var(--muted); font-size:13px; }}
       .loginForm {{ margin-top:14px; display:grid; gap:10px; }}
@@ -183,7 +183,7 @@ def login_page(next: str | None = None):
   <body>
     <div class="loginCard">
       <div class="loginTop">
-        <img src="/static/RavenONLY.png" alt="Raven-Tech.co" />
+        <img src="/static/NRGX-Logo.png" alt="NRGX Labs" />
         <div>
           <div class="loginTitle">Raven-Tech.co — Private Beta</div>
           <div class="loginSub">Enter your invite code to continue.</div>
