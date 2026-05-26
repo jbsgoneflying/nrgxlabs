@@ -22,7 +22,7 @@ async def raven_chat_stream(request: Request):
     flags = get_flags()
 
     if not getattr(flags, "ENABLE_RAVEN_CHAT", True):
-        raise HTTPException(status_code=503, detail="Raven Chat is disabled")
+        raise HTTPException(status_code=503, detail="NRGX Chat is disabled")
 
     try:
         body = await request.json()

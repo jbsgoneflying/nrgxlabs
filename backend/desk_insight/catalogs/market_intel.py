@@ -18,7 +18,7 @@ ENGINE_META = {
         "confidence chip, transition-risk to the next state, per-factor "
         "log-likelihood contributions, and bootstrap confidence bands. "
         "Single source of truth consumed by E3/E4/E7 gating, E14 "
-        "conditioning, and Raven Chat."
+        "conditioning, and NRGX Chat."
     ),
     "asset_class": "cross-asset (SPX RV, VIX term, HYG/LQD credit, DXY, WTI/GLD, BTC, dealer gamma, sector breadth)",
 }

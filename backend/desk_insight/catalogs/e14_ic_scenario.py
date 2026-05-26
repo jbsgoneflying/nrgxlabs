@@ -474,7 +474,7 @@ CATALOG = {
             "modifier state at entry so the post-trade loop is "
             "apples-to-apples against the actual close.\n"
             "- Copy Chat Summary: builds a text summary and copies it "
-            "to the clipboard so you can paste into Raven Chat for a "
+            "to the clipboard so you can paste into NRGX Chat for a "
             "human-in-the-loop discussion with the senior-quant advisor."
         ),
         "related_cards": [

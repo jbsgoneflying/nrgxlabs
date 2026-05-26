@@ -1132,7 +1132,7 @@
     var text = lines.join("\n");
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(function () {
-        setActionStatus("Chat summary copied to clipboard. Paste it into Raven Chat.", "green");
+        setActionStatus("Chat summary copied to clipboard. Paste it into NRGX Chat.", "green");
       }, function () {
         setActionStatus("Clipboard write failed — falling back to alert.", "amber");
         window.prompt("Copy this summary:", text);

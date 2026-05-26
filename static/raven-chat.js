@@ -1,7 +1,12 @@
 /**
- * Raven Chat — Senior Quant Trader advisor drawer.
+ * NRGX Chat — Senior Quant Trader advisor drawer.
  * Self-initializing: injects CSS, creates FAB + drawer, streams from /api/chat.
- * Expose window.RavenChat.setEngineContext(engineId, data) for engine pages.
+ *
+ * Note: the JS namespace stays `window.RavenChat` (not renamed to NRGXChat)
+ * because every engine page calls `window.RavenChat.setEngineContext(...)`
+ * to push its current state into the chat. Renaming would silently break
+ * those integrations across 16+ pages. Internal class names stay `rc*` for
+ * the same reason — only user-visible strings and brand visuals updated.
  */
 (function () {
   "use strict";
@@ -23,7 +28,7 @@
       "border:1px solid rgba(255,255,255,0.25);box-shadow:0 4px 20px rgba(0,0,0,0.15);" +
       "cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform .2s,box-shadow .2s}",
     ".rcFab:hover{transform:scale(1.08);box-shadow:0 6px 28px rgba(0,0,0,0.22)}",
-    ".rcFab svg{width:24px;height:24px;fill:#fff}",
+    ".rcFab svg{width:26px;height:26px;overflow:visible}",
     ".rcFab.rcHidden{display:none}",
 
     /* Backdrop — must cover the nav hamburger (z-index:20001) */
@@ -42,7 +47,9 @@
     /* Header */
     ".rcHeader{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--border,rgba(15,23,42,0.10));" +
       "flex-shrink:0}",
-    ".rcTitle{font-size:15px;font-weight:700;color:var(--text,#0b0b0f);flex:1}",
+    /* NRGX X-mark next to the title — small, restrained, brand-aligned */
+    ".rcBrandIcon{width:26px;height:26px;object-fit:contain;flex-shrink:0;display:block}",
+    ".rcTitle{font-size:15px;font-weight:700;color:var(--text,#0b0b0f);flex:1;letter-spacing:-0.1px}",
     ".rcHeaderBtn{background:none;border:1px solid var(--border,rgba(15,23,42,0.10));border-radius:8px;padding:5px 10px;" +
       "font-size:11px;font-weight:600;color:var(--muted,rgba(11,11,15,0.62));cursor:pointer;transition:background .15s}",
     ".rcHeaderBtn:hover{background:rgba(0,0,0,0.04)}",
@@ -112,10 +119,16 @@
 
   // ── Build DOM ──────────────────────────────────────────────────────────
 
-  // FAB
+  // FAB — stylized X mark from the NRGX wordmark. Gold blade extends out
+  // past the upper-right corner (the signature shape from the logo); a
+  // white cross-stroke keeps the X readable on the gradient background.
   var fab = el("button", "rcFab",
-    '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z"/><path d="M7 9h2v2H7zm4 0h2v2h-2zm4 0h2v2h-2z"/></svg>');
-  fab.title = "Raven Chat";
+    '<svg viewBox="0 0 32 32" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M7 25 L25 7 L31 1" stroke="#d4b27a" stroke-width="3"/>' +
+      '<path d="M7 7 L25 25" stroke="#ffffff" stroke-width="3"/>' +
+    '</svg>');
+  fab.title = "NRGX Chat";
+  fab.setAttribute("aria-label", "Open NRGX Chat");
   fab.addEventListener("click", toggleDrawer);
 
   // Backdrop
@@ -125,13 +138,19 @@
   // Drawer
   var drawer = el("div", "rcDrawer");
 
-  // Header
+  // Header — NRGX X-mark + title + actions
   var header = el("div", "rcHeader");
-  var titleEl = el("div", "rcTitle", "Raven Chat");
+  var brandIcon = document.createElement("img");
+  brandIcon.className = "rcBrandIcon";
+  brandIcon.src = "/static/NRGX-Mark.png";
+  brandIcon.alt = "";
+  brandIcon.setAttribute("aria-hidden", "true");
+  var titleEl = el("div", "rcTitle", "NRGX Chat");
   var newBtn = el("button", "rcHeaderBtn", "New Chat");
   newBtn.addEventListener("click", newConversation);
   var closeBtn = el("button", "rcCloseBtn", "&times;");
   closeBtn.addEventListener("click", closeDrawer);
+  header.appendChild(brandIcon);
   header.appendChild(titleEl);
   header.appendChild(newBtn);
   header.appendChild(closeBtn);
@@ -207,7 +226,7 @@
     var w = el("div", "rcWelcome",
       "<h3>Senior Quant Trader</h3>" +
       "<p>Ask me anything about the current market, your positions, " +
-      "or the data on screen. I have access to all of Raven Tech's engines " +
+      "or the data on screen. I have access to all of NRGX Labs' engines " +
       "and the live market snapshot.</p>");
     msgArea.appendChild(w);
   }
