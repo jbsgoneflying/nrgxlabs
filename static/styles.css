@@ -50,6 +50,17 @@ body {
   color: var(--text);
 }
 
+/* Live engine pages opt out of the radial blue/green gradient and sit on
+   the soft --bg surface directly — same calm look the page already has
+   during the .ravenLoadingOverlay blur, but permanent. The gradient was
+   distracting against the white header/control cards and the data
+   visualizations. Applied via class so non-active pages keep the gradient.
+   In use on: index.html (E1), spx.html (E2), post-event.html (E7),
+   compare.html (E10), market-intelligence.html (MI). */
+body.cleanBg {
+  background: var(--bg);
+}
+
 .container {
   max-width: 1240px;
   margin: 0 auto;
