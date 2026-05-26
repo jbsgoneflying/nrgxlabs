@@ -566,8 +566,12 @@
     </style>
   </head>
   <body class="cleanBg">
-    <!-- Raven loading overlay -->
-    <div class="ravenLoadingOverlay" id="ravenOverlay">
+    <!--
+      NRGX loading overlay — pre-marked .isVisible so the spinning X is up
+      on the very first paint (no flash of empty page while market-intelligence.js
+      boots). market-intelligence.js toggles the class via show/hideOverlay().
+    -->
+    <div class="ravenLoadingOverlay isVisible" id="ravenOverlay">
       <img class="ravenLoadingLogo" src="/static/NRGX-Mark.png" alt="" />
       <div class="ravenLoadingProgress"><div class="ravenLoadingProgressFill" id="ravenProgressFill"></div></div>
       <div class="ravenLoadingStatus" id="ravenStatus">Loading Market Intelligence...</div>

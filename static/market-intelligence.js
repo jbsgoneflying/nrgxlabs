@@ -106,8 +106,8 @@
     if (statusLabel) statusLabel.textContent = msg;
   }
 
-  function showOverlay() { if (overlay) overlay.style.display = "flex"; }
-  function hideOverlay() { if (overlay) overlay.style.display = "none"; }
+  function showOverlay() { if (overlay) overlay.classList.add("isVisible"); }
+  function hideOverlay() { if (overlay) overlay.classList.remove("isVisible"); }
 
   function fetchJSON(url) {
     return fetch(url).then(function (r) {
