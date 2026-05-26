@@ -1,0 +1,353 @@
+/* Direction C — "The Memo"
+   Editorial / working-paper feel. Single column, serif body, numbered
+   sections (§1 §2 §3) with running gold rules. CTA appears late and
+   plain — link-style, not a button. Reads like research, not marketing. */
+
+.memo {
+  background: var(--cream);
+  color: var(--ink);
+}
+
+/* ---------- Top bar ---------- */
+.mTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: var(--maxw-wide);
+  margin: 0 auto;
+  padding: var(--s-5) var(--s-7);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.mBrand img {
+  height: 32px;
+  width: auto;
+  display: block;
+}
+
+.mTopMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--s-5);
+  font-family: var(--font-serif);
+  font-size: var(--t-sm);
+  color: var(--muted);
+  font-style: italic;
+}
+
+.mTopRef {
+  letter-spacing: 0.02em;
+}
+
+.mTopLink {
+  color: var(--navy);
+  font-style: normal;
+  border-bottom: 1px solid var(--gold);
+  padding-bottom: 1px;
+  font-family: var(--font-sans);
+  font-size: var(--t-xs);
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+/* ---------- Paper / main column ---------- */
+.mPaper {
+  max-width: var(--maxw-wide);
+  margin: 0 auto;
+  padding: var(--s-9) var(--s-7) var(--s-10);
+}
+
+.mPaperInner {
+  max-width: 680px; /* a single readable column, like a working paper */
+  margin: 0 auto;
+}
+
+/* ---------- Abstract / hero ---------- */
+.mAbstract {
+  margin-bottom: var(--s-8);
+}
+
+.mEyebrow {
+  display: block;
+  margin-bottom: var(--s-3);
+}
+
+.mAbstractRule {
+  margin: 0 0 var(--s-6);
+  width: 80px;
+}
+
+.mLead {
+  font-family: var(--font-serif);
+  font-size: clamp(20px, 2.6vw, 26px);
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--ink);
+  margin: 0 0 var(--s-5);
+  letter-spacing: -0.005em;
+}
+
+.mDrop {
+  float: left;
+  font-family: var(--font-serif);
+  font-size: 5.4em;
+  line-height: 0.85;
+  font-weight: 500;
+  color: var(--navy);
+  padding: 8px 14px 0 0;
+  margin-top: 4px;
+}
+
+.mLeadSecondary {
+  font-family: var(--font-serif);
+  font-size: var(--t-md);
+  line-height: 1.7;
+  color: var(--muted);
+  margin: 0;
+  font-style: italic;
+}
+
+.mLeadSecondary a {
+  color: var(--navy);
+  font-style: normal;
+  border-bottom: 1px solid var(--gold);
+  padding-bottom: 1px;
+}
+
+/* ---------- Section ---------- */
+.mSectionDivider {
+  margin: var(--s-7) 0;
+  width: 100%;
+}
+
+.mSection {
+  margin-bottom: 0;
+}
+
+.mSectionHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-4);
+  margin-bottom: var(--s-5);
+}
+
+.mSectionMark {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: var(--t-md);
+  color: var(--gold);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
+.mSectionTitle {
+  font-family: var(--font-sans);
+  font-size: var(--t-xl);
+  font-weight: 500;
+  letter-spacing: var(--track-display);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.mBody {
+  font-family: var(--font-serif);
+  font-size: var(--t-md);
+  line-height: 1.75;
+  color: var(--ink);
+  margin: 0 0 var(--s-5);
+  max-width: 64ch;
+}
+
+.mBody em {
+  font-style: italic;
+  color: var(--navy);
+}
+
+/* ---------- Indexed list ---------- */
+.mIndex {
+  list-style: none;
+  margin: var(--s-4) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.mIndex li {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: var(--s-3);
+  font-family: var(--font-serif);
+  font-size: var(--t-base);
+  line-height: 1.7;
+  padding-bottom: var(--s-4);
+  border-bottom: 1px dotted var(--hairline-strong);
+}
+
+.mIndex li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.mIndexKey {
+  font-style: italic;
+  color: var(--gold);
+  font-weight: 400;
+  text-align: right;
+  padding-top: 1px;
+}
+
+.mIndexName {
+  font-weight: 600;
+  color: var(--ink);
+  margin-right: var(--s-2);
+}
+
+.mIndexBody {
+  color: var(--muted);
+}
+
+/* ---------- Pull quote ---------- */
+.mPull {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: var(--t-lg);
+  line-height: 1.55;
+  color: var(--ink);
+  margin: var(--s-6) 0 0;
+  padding: 0 0 0 var(--s-5);
+  border-left: 2px solid var(--gold);
+  max-width: 56ch;
+}
+
+/* ---------- Colophon / access ---------- */
+.mColophon {
+  margin-top: 0;
+}
+
+.mColophonRow {
+  margin-bottom: var(--s-3);
+}
+
+.mAccessBody {
+  font-family: var(--font-serif);
+  font-size: var(--t-md);
+  line-height: 1.75;
+  color: var(--ink);
+  margin: 0 0 var(--s-5);
+}
+
+.mAccessBody a {
+  color: var(--navy);
+  border-bottom: 1px solid var(--gold);
+  padding-bottom: 1px;
+}
+
+.mAccessActions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-6);
+  flex-wrap: wrap;
+  padding-top: var(--s-3);
+}
+
+.mLink {
+  font-family: var(--font-sans);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  border-bottom: 1px solid var(--hairline-strong);
+  padding-bottom: 4px;
+  transition: all var(--dur) var(--ease);
+}
+
+.mLink:hover {
+  border-bottom-color: var(--gold);
+  color: var(--navy);
+}
+
+.mLinkPrimary {
+  color: var(--navy);
+  border-bottom-color: var(--gold);
+  font-weight: 600;
+}
+
+.mLinkPrimary:hover {
+  color: var(--navy-deep);
+}
+
+/* ---------- Footer ---------- */
+.mFoot {
+  border-top: 1px solid var(--hairline);
+  padding: var(--s-6) var(--s-7);
+}
+
+.mFootInner {
+  max-width: var(--maxw-wide);
+  margin: 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-6);
+  font-size: var(--t-xs);
+  color: var(--muted);
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+}
+
+.mFootBrand {
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: var(--track-wordmark);
+}
+
+.mFootRight {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: var(--track-body);
+  font-family: var(--font-serif);
+  font-style: italic;
+}
+
+.mFootRight a {
+  font-style: normal;
+}
+
+.mFootRight a:hover {
+  color: var(--navy);
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 720px) {
+  .mTop {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--s-3);
+    padding: var(--s-4) var(--s-5);
+  }
+
+  .mPaper {
+    padding: var(--s-7) var(--s-5) var(--s-8);
+  }
+
+  .mDrop {
+    font-size: 4.4em;
+    padding: 4px 10px 0 0;
+  }
+
+  .mLead {
+    font-size: 19px;
+  }
+
+  .mFootInner {
+    flex-wrap: wrap;
+    gap: var(--s-3);
+    padding: 0;
+  }
+
+  .mFootRight {
+    margin-left: 0;
+    flex-basis: 100%;
+  }
+}

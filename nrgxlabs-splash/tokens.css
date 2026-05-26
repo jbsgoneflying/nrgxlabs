@@ -1,0 +1,135 @@
+/* NRGX Labs — shared brand tokens
+   Single source of truth for palette, type, and spacing across all
+   splash directions. Each direction-specific stylesheet imports this
+   first, then overrides only what its mood requires (e.g. Direction B
+   inverts background/foreground). */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,500;1,8..60,300;1,8..60,400&display=swap");
+
+:root {
+  /* Palette — extracted from the supplied NRGX Labs logo */
+  --paper: #fefefe;            /* matches the NRG-Logo.png matte exactly */
+  --cream: #f4f1ea;            /* warmer alternative for editorial moods */
+  --cream-soft: #ece8dd;       /* hairline divider on cream */
+  --ink: #0e1116;              /* primary type, NRGX wordmark */
+  --ink-soft: #1a1f27;         /* dark mode panel surface */
+  --navy: #1b2a57;             /* LABS wordmark, primary action */
+  --navy-deep: #131e3f;        /* hover state for navy */
+  --gold: #b5894a;             /* accent rule, hover */
+  --gold-soft: #d4b27a;        /* lighter gold for dark surfaces */
+  --muted: #6b6e76;            /* tagline / secondary copy */
+  --muted-dark: #8a8f9a;       /* secondary copy on dark surfaces */
+  --hairline: rgba(14, 17, 22, 0.08);
+  --hairline-strong: rgba(14, 17, 22, 0.16);
+  --hairline-dark: rgba(244, 241, 234, 0.10);
+
+  /* Type stacks */
+  --font-sans: "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: "Source Serif 4", "Iowan Old Style", "Charter", Georgia, "Times New Roman", serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+
+  /* Type scale (modular, 1.25 ratio) */
+  --t-xs: 11px;
+  --t-sm: 13px;
+  --t-base: 15px;
+  --t-md: 17px;
+  --t-lg: 21px;
+  --t-xl: 28px;
+  --t-2xl: 38px;
+  --t-3xl: 56px;
+  --t-4xl: 84px;
+  --t-display: 132px;
+
+  /* Spacing scale */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+  --s-9: 96px;
+  --s-10: 128px;
+
+  /* Layout */
+  --maxw-narrow: 720px;
+  --maxw-default: 960px;
+  --maxw-wide: 1180px;
+
+  /* Tracking — the wordmark is set tighter than body */
+  --track-display: -0.02em;
+  --track-wordmark: 0.18em;
+  --track-eyebrow: 0.22em;
+  --track-body: 0;
+
+  /* Motion */
+  --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur: 220ms;
+}
+
+/* Base reset — minimal, opinionated. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--t-base);
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--cream);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+/* Shared semantic helpers (used by all three directions) */
+.eyebrow {
+  font-size: var(--t-xs);
+  font-weight: 500;
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.rule-gold {
+  display: block;
+  width: 56px;
+  height: 1px;
+  background: var(--gold);
+  border: 0;
+  margin: 0;
+}
+
+.rule-hair {
+  display: block;
+  width: 100%;
+  height: 1px;
+  background: var(--hairline);
+  border: 0;
+  margin: 0;
+}

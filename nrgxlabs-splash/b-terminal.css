@@ -1,0 +1,507 @@
+/* Direction B — "The Terminal"
+   Dark inverted palette. Bordered panels feel like Bloomberg cells.
+   Gold reserved for live state. Mono accents for data. */
+
+.terminal {
+  background: var(--ink);
+  color: var(--cream);
+  --tBorder: var(--hairline-dark);
+  --tBorderStrong: rgba(244, 241, 234, 0.18);
+  --tPanelBg: #131820;
+}
+
+/* The logo is intended for cream backgrounds. Wrap it on dark with a
+   subtle vignette so the wordmark reads cleanly. */
+.tBrand {
+  display: inline-block;
+  background: var(--cream);
+  padding: 6px 14px;
+  border: 1px solid var(--tBorderStrong);
+}
+
+.tBrand img {
+  height: 28px;
+  width: auto;
+  display: block;
+}
+
+/* ---------- Top bar ---------- */
+.tTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-5);
+  padding: var(--s-4) var(--s-7);
+  border-bottom: 1px solid var(--tBorder);
+  font-family: var(--font-sans);
+}
+
+.tTopRight {
+  display: flex;
+  align-items: center;
+  gap: var(--s-5);
+}
+
+.tTape {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  color: var(--muted-dark);
+  letter-spacing: 0.03em;
+  padding: 8px 14px;
+  border: 1px solid var(--tBorder);
+  background: var(--tPanelBg);
+}
+
+.tTapeDot {
+  width: 6px;
+  height: 6px;
+  background: var(--gold-soft);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--gold);
+  animation: tapePulse 2.4s var(--ease) infinite;
+}
+
+@keyframes tapePulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.tTapeKey {
+  color: var(--muted-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 10px;
+}
+
+.tTapeVal {
+  color: var(--cream);
+  font-weight: 500;
+}
+
+.tTapeSep {
+  color: var(--tBorderStrong);
+}
+
+.tGold {
+  color: var(--gold-soft) !important;
+}
+
+.tEnter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--t-sm);
+  color: var(--gold-soft);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  padding: 8px 14px;
+  border: 1px solid var(--gold);
+  transition: all var(--dur) var(--ease);
+}
+
+.tEnter:hover {
+  background: var(--gold);
+  color: var(--ink);
+}
+
+/* ---------- Main ---------- */
+.tMain {
+  max-width: var(--maxw-wide);
+  margin: 0 auto;
+  padding: 0 var(--s-7);
+}
+
+/* ---------- Hero ---------- */
+.tHero {
+  padding: var(--s-9) 0 var(--s-8);
+}
+
+.tHeroGrid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.85fr;
+  gap: var(--s-7);
+  align-items: start;
+}
+
+.tEyebrow {
+  font-family: var(--font-mono);
+  color: var(--gold-soft);
+  letter-spacing: 0.18em;
+  display: block;
+  margin-bottom: var(--s-5);
+}
+
+.tHeadline {
+  font-size: clamp(36px, 5.4vw, var(--t-3xl));
+  line-height: 1.05;
+  font-weight: 400;
+  letter-spacing: var(--track-display);
+  margin: 0 0 var(--s-5);
+}
+
+.tSubhead {
+  font-size: var(--t-md);
+  line-height: 1.6;
+  color: var(--muted-dark);
+  margin: 0 0 var(--s-7);
+  max-width: 50ch;
+}
+
+.tCtaRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  flex-wrap: wrap;
+}
+
+/* ---------- Buttons ---------- */
+.tBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 12px 22px;
+  font-size: var(--t-sm);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  border-radius: 0;
+  transition: all var(--dur) var(--ease);
+  cursor: pointer;
+  border: 1px solid transparent;
+  font-family: var(--font-sans);
+}
+
+.tBtnPrimary {
+  background: var(--gold);
+  color: var(--ink);
+  border-color: var(--gold);
+}
+
+.tBtnPrimary:hover {
+  background: var(--gold-soft);
+  border-color: var(--gold-soft);
+  transform: translateY(-1px);
+}
+
+.tBtnGhost {
+  background: transparent;
+  color: var(--cream);
+  border-color: var(--tBorderStrong);
+  font-family: var(--font-mono);
+}
+
+.tBtnGhost:hover {
+  border-color: var(--gold);
+  color: var(--gold-soft);
+}
+
+.tBtnLarge {
+  padding: 16px 28px;
+  font-size: var(--t-base);
+}
+
+/* ---------- Panel primitive ---------- */
+.tPanel {
+  border: 1px solid var(--tBorder);
+  background: var(--tPanelBg);
+}
+
+.tPanelTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px var(--s-4);
+  border-bottom: 1px solid var(--tBorder);
+  background: rgba(244, 241, 234, 0.02);
+}
+
+.tPanelLabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--muted-dark);
+  text-transform: uppercase;
+}
+
+.tPanelStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--muted-dark);
+  text-transform: uppercase;
+}
+
+.tPanelDot {
+  width: 6px;
+  height: 6px;
+  background: #4caf7e;
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(76, 175, 126, 0.6);
+}
+
+.tPanelStatusGold {
+  color: var(--gold-soft);
+}
+
+/* ---------- Hero panel (engine state) ---------- */
+.tHeroPanel {
+  align-self: stretch;
+}
+
+.tPanelTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+}
+
+.tPanelTable td {
+  padding: 10px var(--s-4);
+  border-bottom: 1px solid var(--tBorder);
+}
+
+.tPanelTable tr:last-child td {
+  border-bottom: 0;
+}
+
+.tPanelKey {
+  width: 36px;
+  color: var(--gold-soft);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+.tPanelName {
+  color: var(--cream);
+  font-family: var(--font-sans);
+  font-size: var(--t-sm);
+}
+
+.tPanelVal {
+  text-align: right;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.tPanelOk {
+  color: #6fc99a;
+}
+
+.tPanelMute {
+  color: var(--muted-dark);
+  letter-spacing: 0.04em;
+}
+
+.tPanelFoot {
+  padding: 10px var(--s-4);
+  border-top: 1px solid var(--tBorder);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--muted-dark);
+  text-transform: uppercase;
+}
+
+.tPanelFoot a {
+  color: var(--gold-soft);
+}
+
+.tPanelFoot a:hover {
+  color: var(--gold);
+}
+
+/* ---------- 3-up cells ---------- */
+.tCells {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s-4);
+  padding: var(--s-7) 0;
+}
+
+.tCell {
+  display: flex;
+  flex-direction: column;
+}
+
+.tCellTitle {
+  font-size: var(--t-lg);
+  font-weight: 500;
+  letter-spacing: var(--track-display);
+  margin: 0;
+  padding: var(--s-5) var(--s-4) var(--s-3);
+}
+
+.tCellList {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--s-4) var(--s-5);
+  display: flex;
+  flex-direction: column;
+}
+
+.tCellList li {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 10px 0;
+  border-top: 1px dashed var(--tBorder);
+  font-size: var(--t-sm);
+  color: var(--cream);
+}
+
+.tCellList li:first-child {
+  border-top: 0;
+}
+
+.tCellTag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--gold-soft);
+  background: rgba(181, 137, 74, 0.08);
+  padding: 3px 6px;
+  border: 1px solid rgba(181, 137, 74, 0.25);
+  min-width: 30px;
+  text-align: center;
+}
+
+.tCellBody {
+  padding: 0 var(--s-4) var(--s-5);
+  font-size: var(--t-sm);
+  line-height: 1.65;
+  color: var(--muted-dark);
+  margin: 0;
+}
+
+/* ---------- Access ---------- */
+.tAccess {
+  padding: var(--s-9) 0 var(--s-10);
+  border-top: 1px solid var(--tBorder);
+  margin-top: var(--s-7);
+}
+
+.tAccessInner {
+  max-width: 640px;
+}
+
+.tAccessTitle {
+  font-size: var(--t-2xl);
+  font-weight: 500;
+  letter-spacing: var(--track-display);
+  margin: var(--s-4) 0 var(--s-4);
+  line-height: 1.15;
+}
+
+.tAccessBody {
+  font-size: var(--t-md);
+  line-height: 1.65;
+  color: var(--muted-dark);
+  margin: 0 0 var(--s-6);
+}
+
+.tAccessBody a {
+  color: var(--gold-soft);
+  border-bottom: 1px solid rgba(181, 137, 74, 0.4);
+  padding-bottom: 1px;
+}
+
+.tAccessBody a:hover {
+  color: var(--gold);
+  border-color: var(--gold);
+}
+
+/* ---------- Footer ---------- */
+.tFoot {
+  border-top: 1px solid var(--tBorder);
+  padding: var(--s-5) var(--s-7);
+}
+
+.tFootInner {
+  max-width: var(--maxw-wide);
+  margin: 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-6);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--muted-dark);
+  text-transform: uppercase;
+}
+
+.tFootBrand {
+  color: var(--cream);
+  font-weight: 500;
+}
+
+.tFootRight {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: var(--track-body);
+}
+
+.tFootRight a {
+  color: var(--gold-soft);
+}
+
+.tFootRight a:hover {
+  color: var(--gold);
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 980px) {
+  .tHeroGrid {
+    grid-template-columns: 1fr;
+    gap: var(--s-6);
+  }
+
+  .tCells {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .tTop {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--s-4);
+    padding: var(--s-4);
+  }
+
+  .tTopRight {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--s-3);
+    width: 100%;
+  }
+
+  .tTape {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .tEnter {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .tMain {
+    padding: 0 var(--s-4);
+  }
+
+  .tFootInner {
+    flex-wrap: wrap;
+    gap: var(--s-3);
+  }
+
+  .tFootRight {
+    margin-left: 0;
+    flex-basis: 100%;
+  }
+}

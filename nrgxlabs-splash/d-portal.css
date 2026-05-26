@@ -1,0 +1,422 @@
+/* Direction D — "The Portal"
+   Single-screen calling card. No scroll. Brand → proof → door.
+   The page answers "so what do you do?" by showing the engines the
+   desk actually runs (instead of telling you about them in prose),
+   then offers entry. Nothing else.
+   Designed for the moment after someone hears about NRGX Labs at
+   dinner and types the URL into their phone — they should feel like
+   they arrived somewhere intentional, not a marketing site. */
+
+.portal {
+  /* matches the NRG-Logo.png background exactly so the PNG matte is invisible */
+  background: var(--paper);
+  color: var(--ink);
+  min-height: 100vh;
+}
+
+/* ---------- Stage: a single 100vh frame ---------- */
+.pStage {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  padding: var(--s-6) var(--s-7);
+  max-width: var(--maxw-wide);
+  margin: 0 auto;
+}
+
+/* ---------- Header (small corner marks, restrained) ---------- */
+.pHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.pCorner {
+  position: relative;
+}
+
+.pCorner::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -8px;
+  width: 14px;
+  height: 1px;
+  background: var(--gold);
+}
+
+.pCornerRight::before {
+  left: auto;
+  right: 0;
+}
+
+/* ---------- Center stack: logo, rule, sentence, door ---------- */
+.pCenter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--s-5);
+  padding: var(--s-6) 0;
+}
+
+.pLogoLink {
+  display: block;
+  transition: opacity var(--dur) var(--ease);
+}
+
+.pLogoLink:hover {
+  opacity: 0.92;
+}
+
+/* Logo sizing — slightly restrained on desktop so it sits as the
+   focal point without overpowering the desk ledger below it. The
+   mobile override (≤720px) keeps the logo at full-bleed prominence
+   on phones, where the ledger has its own dedicated vertical room. */
+.pLogo {
+  width: clamp(390px, 55vw, 720px);
+  height: auto;
+  display: block;
+}
+
+.pCenterRule {
+  width: 48px;
+  margin: 0;
+}
+
+/* ---------- Tagline (typed eyebrow under the logo) ----------
+   A single uppercase line: "SIGNAL RESEARCH FOR PRIVATE CAPITAL".
+   Sized so the rendered line is approximately the same width as
+   the ledger below it (~540px on desktop) — feels intentional,
+   not eyebrow-thin. Always one line: `white-space: nowrap` plus
+   a clamp that scales smoothly down on narrow viewports so the
+   typing animation never has to deal with a mid-stream wrap. */
+.pTagline {
+  position: relative;
+  display: inline-block;
+  font-family: var(--font-sans);
+  font-size: clamp(10px, 1.8vw, 18px);
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  color: var(--ink);
+  text-transform: uppercase;
+  white-space: nowrap;
+  margin: 0;
+  /* Reserve a line of vertical space so the layout doesn't
+     jump while the characters are appearing. */
+  min-height: 1.4em;
+}
+
+.pTaglineText {
+  display: inline;
+  text-transform: uppercase;
+}
+
+/* Screen-reader-only utility (the lowercase, fully-formed sentence
+   is announced once; the typed visible span is aria-hidden). */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Blinking gold caret while typing. The selector is on the parent
+   .pTagline because that's where the data-typing attribute lives. */
+.pTagline[data-typing='active'] .pTaglineText::after,
+.pTagline[data-typing='done'] .pTaglineText::after {
+  content: '';
+  display: inline-block;
+  width: 1.4px;
+  height: 0.92em;
+  background: var(--gold);
+  margin-left: 4px;
+  vertical-align: -0.05em;
+}
+
+.pTagline[data-typing='active'] .pTaglineText::after {
+  animation: pTaglineCaretBlink 1.06s step-end infinite;
+}
+
+.pTagline[data-typing='done'] .pTaglineText::after {
+  opacity: 0;
+  transition: opacity 480ms var(--ease);
+}
+
+@keyframes pTaglineCaretBlink {
+  0%, 49%   { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pTagline[data-typing='active'] .pTaglineText::after,
+  .pTagline[data-typing='done'] .pTaglineText::after {
+    display: none;
+  }
+}
+
+/* ---------- Desk Ledger (the proof element) ----------
+   Replaces the prose tagline with a hairline-bordered card listing
+   the actual engines that run the desk, with a live header showing
+   "desk · live" + a gold pulse dot + the current ET timestamp.
+   Heavier than the old pulse strip, restrained enough to live on
+   D's cream surface — hairlines instead of dark cells.
+   Status values are static placeholders today; trivially swappable
+   for live values from /api/desk-state once the domain is wired up. */
+.pLedger {
+  width: 100%;
+  max-width: 540px;
+  border: 1px solid var(--hairline);
+  background: rgba(14, 17, 22, 0.012);
+  text-align: left;
+}
+
+.pLedgerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--hairline);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.pLedgerHeadLeft {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.pLedgerHeadTitle {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.pLedgerStamp {
+  color: var(--muted);
+  letter-spacing: 0.14em;
+  font-variant-numeric: tabular-nums;
+}
+
+.pLedgerDot {
+  width: 6px;
+  height: 6px;
+  background: var(--gold);
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(181, 137, 74, 0.45);
+  animation: pLedgerDot 2.6s var(--ease) infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pLedgerDot {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50%      { opacity: 1;    transform: scale(1.18); }
+}
+
+.pLedgerList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.pLedgerRow {
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  align-items: baseline;
+  gap: 14px;
+  padding: 10px 16px;
+  border-top: 1px dashed var(--hairline);
+}
+
+.pLedgerRow:first-child {
+  border-top: 0;
+}
+
+.pLedgerCode {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--gold);
+  font-weight: 600;
+}
+
+.pLedgerName {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 400;
+  letter-spacing: 0.005em;
+}
+
+.pLedgerVal {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.pLedgerValMute {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pLedgerDot {
+    animation: none;
+    opacity: 0.85;
+  }
+}
+
+/* ---------- Door (quiet, gold-underlined link, not a button) ---------- */
+.pDoor {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+  font-family: var(--font-sans);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--navy);
+  padding: var(--s-3) 0 6px;
+  border-bottom: 1px solid var(--gold);
+  transition: all var(--dur) var(--ease);
+  margin-top: var(--s-3);
+}
+
+.pDoor:hover {
+  color: var(--navy-deep);
+  border-bottom-color: var(--ink);
+}
+
+.pDoor:hover .pDoorArrow {
+  transform: translateX(4px);
+}
+
+.pDoorArrow {
+  display: inline-block;
+  transition: transform var(--dur) var(--ease);
+  color: var(--gold);
+}
+
+/* ---------- Footer (colophon strip) ---------- */
+.pFoot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding-top: var(--s-5);
+  border-top: 1px solid var(--hairline);
+}
+
+.pFootMail {
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: var(--track-body);
+  font-family: var(--font-sans);
+  font-size: var(--t-xs);
+  border-bottom: 1px solid transparent;
+  padding-bottom: 1px;
+  transition: all var(--dur) var(--ease);
+}
+
+.pFootMail:hover {
+  color: var(--navy);
+  border-bottom-color: var(--gold);
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 720px) {
+  .pStage {
+    padding: var(--s-5) var(--s-5);
+  }
+
+  .pCenter {
+    gap: var(--s-4);
+    padding: var(--s-4) 0;
+  }
+
+  .pLogo {
+    width: clamp(280px, 86vw, 480px);
+  }
+
+  .pLedger {
+    max-width: 100%;
+  }
+
+  .pLedgerHead {
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    padding: 8px 12px;
+  }
+
+  .pLedgerRow {
+    grid-template-columns: 32px 1fr auto;
+    gap: 10px;
+    padding: 9px 12px;
+  }
+
+  .pLedgerName {
+    font-size: 12px;
+  }
+
+  .pLedgerVal {
+    font-size: 10px;
+  }
+
+  .pDoor {
+    font-size: var(--t-xs);
+    letter-spacing: 0.16em;
+  }
+
+  .pFoot {
+    flex-direction: column;
+    gap: var(--s-3);
+    align-items: flex-start;
+  }
+}
+
+/* Extra-narrow viewports (small phones held vertically): step the
+   tagline down so it absolutely never wraps, even on 320px feature
+   phones. Letter-spacing tightens proportionally to keep the
+   tracking visually balanced at the smaller font size. */
+@media (max-width: 380px) {
+  .pTagline {
+    font-size: 9px;
+    letter-spacing: 0.12em;
+  }
+}
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .pDoor,
+  .pDoorArrow,
+  .pLogoLink,
+  .pFootMail {
+    transition: none;
+  }
+}

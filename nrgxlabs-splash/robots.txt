@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /a-quiet-lab.html
+Disallow: /b-terminal.html
+Disallow: /c-memo.html
+Disallow: /d-portal.html
+
+Sitemap: https://nrgxlabs.com/sitemap.xml

@@ -1,0 +1,343 @@
+/* Direction A — "The Quiet Lab"
+   Cream paper, oversized wordmark moment, hairline-divided 3-up grid,
+   one navy ghost CTA. Negative space is the design. */
+
+.quiet {
+  background: var(--cream);
+  color: var(--ink);
+}
+
+/* ---------- Top bar ---------- */
+.qTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s-5) var(--s-7);
+  max-width: var(--maxw-wide);
+  margin: 0 auto;
+}
+
+.qBrand img {
+  height: 38px;
+  width: auto;
+  display: block;
+}
+
+.qNav {
+  display: flex;
+  align-items: center;
+  gap: var(--s-6);
+  font-size: var(--t-sm);
+  color: var(--muted);
+}
+
+.qNav a {
+  transition: color var(--dur) var(--ease);
+}
+
+.qNav a:hover {
+  color: var(--ink);
+}
+
+.qNavCta {
+  color: var(--navy) !important;
+  font-weight: 500;
+  position: relative;
+  padding-left: var(--s-5);
+}
+
+.qNavCta::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: var(--s-3);
+  height: 1px;
+  background: var(--gold);
+}
+
+/* ---------- Main ---------- */
+.qMain {
+  max-width: var(--maxw-wide);
+  margin: 0 auto;
+  padding: 0 var(--s-7);
+}
+
+/* ---------- Hero ---------- */
+.qHero {
+  padding: var(--s-10) 0 var(--s-9);
+}
+
+.qHeroInner {
+  max-width: 880px;
+}
+
+.qHeroRule {
+  margin: var(--s-4) 0 var(--s-6);
+}
+
+.qHeadline {
+  font-family: var(--font-sans);
+  font-size: clamp(40px, 6.4vw, var(--t-3xl));
+  line-height: 1.05;
+  font-weight: 500;
+  letter-spacing: var(--track-display);
+  margin: 0 0 var(--s-6);
+  max-width: 22ch;
+}
+
+.qHeadlineMuted {
+  color: var(--muted);
+  font-weight: 300;
+}
+
+.qSubhead {
+  font-size: var(--t-lg);
+  line-height: 1.5;
+  color: var(--ink);
+  font-weight: 300;
+  margin: 0 0 var(--s-7);
+  max-width: 56ch;
+}
+
+.qCtaRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  flex-wrap: wrap;
+}
+
+/* ---------- Buttons ---------- */
+.qBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 14px 22px;
+  font-size: var(--t-sm);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  border-radius: 0; /* sharp corners — institutional */
+  transition: all var(--dur) var(--ease);
+  cursor: pointer;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.qBtnPrimary {
+  background: var(--navy);
+  color: var(--cream);
+}
+
+.qBtnPrimary:hover {
+  background: var(--navy-deep);
+  transform: translateY(-1px);
+}
+
+.qBtnGhost {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--hairline-strong);
+}
+
+.qBtnGhost:hover {
+  border-color: var(--ink);
+}
+
+/* ---------- Divider ---------- */
+.qDivider {
+  padding: 0;
+}
+
+/* ---------- 3-up grid ---------- */
+.qGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  padding: var(--s-9) 0;
+  position: relative;
+}
+
+.qCell {
+  padding: var(--s-2) var(--s-7) var(--s-2) 0;
+  border-right: 1px solid var(--hairline);
+}
+
+.qCell:last-child {
+  border-right: 0;
+  padding-right: 0;
+}
+
+.qCell + .qCell {
+  padding-left: var(--s-7);
+}
+
+.qCellNum {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: var(--track-eyebrow);
+  color: var(--gold);
+  margin-bottom: var(--s-5);
+}
+
+.qCellTitle {
+  font-size: var(--t-xl);
+  font-weight: 500;
+  letter-spacing: var(--track-display);
+  margin: 0 0 var(--s-4);
+  line-height: 1.15;
+}
+
+.qCellBody {
+  font-size: var(--t-base);
+  line-height: 1.65;
+  color: var(--muted);
+  margin: 0 0 var(--s-4);
+}
+
+.qChipList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.qChipList li {
+  font-size: var(--t-sm);
+  font-weight: 500;
+  color: var(--ink);
+  padding-left: var(--s-4);
+  position: relative;
+}
+
+.qChipList li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 8px;
+  height: 1px;
+  background: var(--gold);
+}
+
+/* ---------- Access ---------- */
+.qAccess {
+  padding: var(--s-9) 0 var(--s-10);
+}
+
+.qAccessInner {
+  max-width: 640px;
+}
+
+.qAccessTitle {
+  font-size: var(--t-2xl);
+  font-weight: 500;
+  letter-spacing: var(--track-display);
+  margin: var(--s-4) 0 var(--s-4);
+  line-height: 1.15;
+}
+
+.qAccessBody {
+  font-size: var(--t-md);
+  line-height: 1.65;
+  color: var(--muted);
+  margin: 0 0 var(--s-6);
+}
+
+.qAccessBody a {
+  color: var(--navy);
+  border-bottom: 1px solid var(--gold);
+  padding-bottom: 1px;
+}
+
+/* ---------- Footer ---------- */
+.qFoot {
+  border-top: 1px solid var(--hairline);
+  padding: var(--s-6) var(--s-7);
+}
+
+.qFootInner {
+  max-width: var(--maxw-wide);
+  margin: 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-6);
+  font-size: var(--t-xs);
+  color: var(--muted);
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+}
+
+.qFootBrand {
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: var(--track-wordmark);
+}
+
+.qFootRight {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: var(--track-body);
+}
+
+.qFootRight a:hover {
+  color: var(--ink);
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 880px) {
+  .qTop {
+    padding: var(--s-4) var(--s-5);
+  }
+
+  .qNav {
+    gap: var(--s-4);
+  }
+
+  .qNav a:not(.qNavCta) {
+    display: none;
+  }
+
+  .qMain {
+    padding: 0 var(--s-5);
+  }
+
+  .qHero {
+    padding: var(--s-8) 0 var(--s-7);
+  }
+
+  .qSubhead {
+    font-size: var(--t-md);
+  }
+
+  .qGrid {
+    grid-template-columns: 1fr;
+    padding: var(--s-7) 0;
+  }
+
+  .qCell {
+    border-right: 0;
+    border-bottom: 1px solid var(--hairline);
+    padding: var(--s-6) 0;
+  }
+
+  .qCell + .qCell {
+    padding-left: 0;
+  }
+
+  .qCell:last-child {
+    border-bottom: 0;
+  }
+
+  .qFootInner {
+    flex-wrap: wrap;
+    gap: var(--s-3);
+  }
+
+  .qFootRight {
+    margin-left: 0;
+    flex-basis: 100%;
+  }
+}

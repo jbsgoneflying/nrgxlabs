@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="230 0 440 320" role="img" aria-label="NRGX Labs  Private Capital Research" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <style><![CDATA[
+      @import url("https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500&display=swap");
+      .nrgx { font-family: "Inter Tight", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; font-weight: 400; font-size: 132px; letter-spacing: -3px; }
+      .labs { font-family: "Inter Tight", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; font-weight: 500; font-size: 26px; letter-spacing: 7px; }
+      .tag  { font-family: "Inter Tight", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; font-weight: 400; font-size: 13px; letter-spacing: 4.5px; }
+    ]]></style>
+  </defs>
+
+  <!-- NRG (ink) -->
+  <text class="nrgx" text-anchor="end" x="490" y="202" fill="#0E1116">NRG</text>
+
+  <!-- X letterform: two navy diagonals -->
+  <line x1="500" y1="200" x2="610" y2="70" stroke="#1B2A57" stroke-width="11" stroke-linecap="butt" />
+  <line x1="500" y1="70"  x2="610" y2="200" stroke="#1B2A57" stroke-width="11" stroke-linecap="butt" />
+
+  <!-- Gold blade extensions: upper-right and lower-right tapered tips -->
+  <polygon points="614.20,73.55 655.22,16.56 605.80,66.45" fill="#B5894A" />
+  <polygon points="605.80,203.55 655.22,253.44 614.20,196.45" fill="#B5894A" />
+
+  <!-- LABS row: gold rule, LABS (navy), gold rule extending toward blade tip -->
+  <line x1="290" y1="252" x2="370" y2="252" stroke="#B5894A" stroke-width="1.5" stroke-linecap="butt" />
+  <text class="labs" text-anchor="middle" x="440" y="262" fill="#1B2A57">LABS</text>
+  <line x1="510" y1="252" x2="652" y2="252" stroke="#B5894A" stroke-width="1.5" stroke-linecap="butt" />
+
+  <!-- Tagline -->
+  <text class="tag" text-anchor="middle" x="440" y="298" fill="#6B6E76">PRIVATE CAPITAL RESEARCH</text>
+</svg>

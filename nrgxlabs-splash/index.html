@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NRGX Labs — Signal research for private capital</title>
+    <meta name="description" content="NRGX Labs — signal research for private capital. A private research lab for self-directed capital." />
+    <meta name="theme-color" content="#fefefe" />
+
+    <!-- Open Graph / Twitter cards (link previews in iMessage, Slack, etc.) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="NRGX Labs" />
+    <meta property="og:description" content="Signal research for private capital." />
+    <meta property="og:url" content="https://nrgxlabs.com" />
+    <meta property="og:image" content="https://nrgxlabs.com/NRG-Logo.png" />
+    <meta property="og:site_name" content="NRGX Labs" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="NRGX Labs" />
+    <meta name="twitter:description" content="Signal research for private capital." />
+    <meta name="twitter:image" content="https://nrgxlabs.com/NRG-Logo.png" />
+
+    <!-- Favicons — generated from the X-only mark so they read cleanly at 16px. -->
+    <link rel="icon" href="favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="d-portal.css" />
+  </head>
+  <body class="portal">
+    <main class="pStage" role="main">
+      <header class="pHeader">
+        <span class="pCorner">NRGX/Labs</span>
+        <span class="pCorner pCornerRight">est. 2026</span>
+      </header>
+
+      <section class="pCenter">
+        <a class="pLogoLink" href="/" aria-label="NRGX Labs — Private Capital Research">
+          <img class="pLogo" src="NRG-Logo.png" alt="NRGX Labs — Private Capital Research" />
+        </a>
+
+        <p class="pTagline">
+          <span class="srOnly">Signal research for private capital.</span>
+          <span class="pTaglineText" data-typed aria-hidden="true">Signal research for private capital</span>
+        </p>
+
+        <section class="pLedger" aria-label="desk engines">
+          <header class="pLedgerHead">
+            <span class="pLedgerHeadLeft">
+              <span class="pLedgerDot" aria-hidden="true"></span>
+              <span class="pLedgerHeadTitle">desk · live</span>
+            </span>
+            <span class="pLedgerStamp" data-stamp>17:21 ET</span>
+          </header>
+          <ul class="pLedgerList">
+            <li class="pLedgerRow">
+              <span class="pLedgerCode">E1</span>
+              <span class="pLedgerName">Earnings IV crush</span>
+              <span class="pLedgerVal">+1.8σ</span>
+            </li>
+            <li class="pLedgerRow">
+              <span class="pLedgerCode">E2</span>
+              <span class="pLedgerName">SPX iron condors</span>
+              <span class="pLedgerVal pLedgerValMute">flat</span>
+            </li>
+            <li class="pLedgerRow">
+              <span class="pLedgerCode">E14</span>
+              <span class="pLedgerName">SPX scenario</span>
+              <span class="pLedgerVal">+0.6σ</span>
+            </li>
+            <li class="pLedgerRow">
+              <span class="pLedgerCode">MI</span>
+              <span class="pLedgerName">Regime intelligence</span>
+              <span class="pLedgerVal">neutral-vol</span>
+            </li>
+          </ul>
+        </section>
+
+        <a class="pDoor" href="https://app.nrgxlabs.com" rel="noopener">
+          <span class="pDoorLabel">Enter the desk</span>
+          <span class="pDoorArrow" aria-hidden="true">→</span>
+        </a>
+      </section>
+
+      <footer class="pFoot" role="contentinfo">
+        <span class="pFootMeta">By invitation.</span>
+        <a class="pFootMail" href="mailto:desk@nrgxlabs.com">desk@nrgxlabs.com</a>
+      </footer>
+    </main>
+
+    <script>
+      (function () {
+        var stamp = document.querySelector('[data-stamp]');
+        if (!stamp) return;
+        try {
+          var fmt = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'America/New_York',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+          });
+          stamp.textContent = fmt.format(new Date()) + ' ET';
+        } catch (_) {
+          /* keep fallback text */
+        }
+      })();
+
+      (function () {
+        var node = document.querySelector('.pTaglineText[data-typed]');
+        if (!node) return;
+        var host = node.parentElement;
+
+        var reduceMotion =
+          window.matchMedia &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (reduceMotion) return;
+
+        var fullText = node.textContent;
+        node.textContent = '';
+        host.setAttribute('data-typing', 'active');
+
+        var i = 0;
+        var startDelay = 380;
+        var charInterval = 55;
+        var midSentencePause = 850;
+
+        function step() {
+          if (i >= fullText.length) {
+            setTimeout(function () {
+              host.setAttribute('data-typing', 'done');
+            }, 1100);
+            return;
+          }
+          var ch = fullText.charAt(i);
+          node.textContent += ch;
+          i++;
+          var nextDelay = charInterval;
+          var nextCh = fullText.charAt(i);
+          if (ch === '.' && (nextCh === ' ' || nextCh === '\n')) {
+            nextDelay += midSentencePause;
+          }
+          setTimeout(step, nextDelay);
+        }
+
+        setTimeout(step, startDelay);
+      })();
+    </script>
+  </body>
+</html>
