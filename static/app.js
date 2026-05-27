@@ -3193,10 +3193,14 @@ function render(payload) {
   renderEarningsTable(payload.events || []);
 
   // ── Earnings IC Advisor (Vol Crush) ──
-  // E1 v2: advisor is now on-demand via the Wing Console "Run LLM Advisor
-  // Narrative" button; the auto-rendered advisor section is hidden.
-  // try { _renderE1AdvisorSection(payload); } catch (e) { console.warn("E1 advisor render:", e); }
-  try { const _adv = $("e1AdvisorSection"); if (_adv) _adv.classList.add("hidden"); } catch { /* ignore */ }
+  // Pre-trade scoping panel under the earnings table: VRP scorecard,
+  // Desk Consensus strip, EM × wing-width grid, and an on-demand "Run
+  // Advisor" button that fires the LLM. The Wing Decision Console that
+  // briefly hosted this trigger was retired 2026-05-20 (d4a65da); the
+  // panel belongs back here as the "is this trade worth scoping out"
+  // surface. Per-tracked / per-live position LLM advisor still lives on
+  // the trade cards downstream (Active Trades section).
+  try { _renderE1AdvisorSection(payload); } catch (e) { console.warn("E1 advisor render:", e); }
   try { _loadE1TradeJournal(); } catch (e) { console.warn("E1 journal load:", e); }
 }
 
@@ -3427,8 +3431,10 @@ function _renderE1AdvisorSection(payload) {
   // Width Comparison Table
   html += _buildE1WidthTable(wc, payload?.e1EmBreachSummary, payload?.e1EmPreference);
 
-  // Active Trades section placeholder
-  html += '<div id="e1ActiveTradesArea"></div>';
+  // NOTE: Active Trades has its own standalone section (#e1ActiveTrades)
+  // that auto-loads on page mount and after track/close events. We
+  // intentionally do NOT inline an #e1ActiveTradesArea here to avoid
+  // duplicating the same cards inside the advisor panel.
 
   el.innerHTML = html;
 
@@ -3444,9 +3450,6 @@ function _renderE1AdvisorSection(payload) {
   if (quickLog) quickLog.addEventListener("click", function () { _logE1DirectTrade(payload); });
   var adjustLog = $("e1AdjustLogBtn");
   if (adjustLog) adjustLog.addEventListener("click", function () { _showE1AdjustModal(payload); });
-
-  // Load active trades
-  _loadE1ActiveTrades();
 }
 
 function _vrpCard(label, value, sub, color) {
