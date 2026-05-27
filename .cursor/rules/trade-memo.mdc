@@ -37,8 +37,8 @@ Trade memos are data-heavy decision artifacts. Always render as a Cursor canvas 
 
 Run these IN PARALLEL on memo invocation (never serially):
 
-**Raven-Tech engines** — pull authoritative quant data:
-- **SPX flex IC**: `curl -sS "https://app.raven-tech.co/api/spx-ic/flex?ticker=SPX&entry_date=YYYY-MM-DD&expiry=YYYY-MM-DD&include_live_chain=1"` then `POST /api/spx-ic/flex/advisor` with the payload body for LLM verdict. Required field paths: `flexAnalytics.subsamples.{all|regimeMacro|holidayClass|exactHoliday}.breach`, `weekendStress.{level,termSpreadPts,notes}`, `liveChain.targets`, `hedgeSizer.{tiers,hedgeStrikes,shortStructure}`, `recommendation.{recommended,bestEffort,emPreference}`, `weeks` (historical analogues).
+**NRGX Labs engines** — pull authoritative quant data:
+- **SPX flex IC**: `curl -sS "https://app.nrgxlabs.com/api/spx-ic/flex?ticker=SPX&entry_date=YYYY-MM-DD&expiry=YYYY-MM-DD&include_live_chain=1"` then `POST /api/spx-ic/flex/advisor` with the payload body for LLM verdict. Required field paths: `flexAnalytics.subsamples.{all|regimeMacro|holidayClass|exactHoliday}.breach`, `weekendStress.{level,termSpreadPts,notes}`, `liveChain.targets`, `hedgeSizer.{tiers,hedgeStrikes,shortStructure}`, `recommendation.{recommended,bestEffort,emPreference}`, `weeks` (historical analogues).
 - **SPX weekly IC** (non-flex): `/api/spx-ic` + `/api/spx-ic/advisor` (same payload pattern).
 - **Earnings IV crush (E1)**: Use the matching Engine 1 endpoints — historical IV-crush distribution for the ticker, plus its advisor.
 

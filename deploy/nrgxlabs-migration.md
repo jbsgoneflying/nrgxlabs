@@ -1,9 +1,14 @@
 # NRGX Labs domain migration runbook
 
+> **STATUS: COMPLETE — `raven-tech.co` retired.** The old domain has been
+> released (no longer registered to us) and `nrgxlabs.com` is the sole live
+> hostname. This doc is kept as a historical record of the migration; Phase 5
+> "cut over" is moot because the source domain no longer exists.
+
 Step-by-step commands for moving the live site from `raven-tech.co` to
 `nrgxlabs.com`. Designed to be paste-runnable on the droplet, in order,
-with verification gates at each phase. **Both domains run side-by-side**
-during the migration so nothing breaks while we test.
+with verification gates at each phase. **Both domains ran side-by-side**
+during the migration so nothing broke while we tested.
 
 ---
 
@@ -72,8 +77,7 @@ sudo certbot --nginx -d app.nrgxlabs.com
 ```
 
 Certbot will rewrite the two vhost files to add the `listen 443 ssl;`
-blocks and an HTTP→HTTPS redirect (matching the existing
-`site-app.raven-tech.co.conf` pattern). Don't manually edit the files
+blocks and an HTTP→HTTPS redirect. Don't manually edit the files
 afterwards — let certbot manage them.
 
 **Verify (from your laptop, not the droplet):**

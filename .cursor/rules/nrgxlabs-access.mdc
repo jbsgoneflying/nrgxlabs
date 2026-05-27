@@ -1,15 +1,16 @@
 ---
-description: Raven Tech access credentials, deployment workflow, and testing procedures for autonomous development.
+description: NRGX Labs access credentials, deployment workflow, and testing procedures for autonomous development.
 globs:
 alwaysApply: true
 ---
 
-# Raven Tech — Autonomous Dev Access
+# NRGX Labs — Autonomous Dev Access
 
 ## Live Site
 
-- **URL**: https://app.raven-tech.co
+- **URL**: https://app.nrgxlabs.com
 - **Invite Code**: RAVEN-BETA-2026
+- **Note**: the legacy `raven-tech.co` domain has been retired and is no longer owned. Do not reference it anywhere in code, comments, links, tests, or workflows. The org name is **NRGX Labs**; the repo directory is still `raven-tech/` for historical reasons but that's just disk layout.
 
 ## Deployment
 
@@ -18,13 +19,13 @@ alwaysApply: true
 - **Deploy trigger**: Push to main triggers GitHub Actions (`.github/workflows/deploy.yml`)
 - **Manual deploy** (if GH Actions unavailable): SSH into Droplet via DO console, run:
   `cd /opt/breach-algo && git pull && docker compose up -d --build app`
-- **Health check**: `curl -sf https://app.raven-tech.co/api/health` (public, no auth)
+- **Health check**: `curl -sf https://app.nrgxlabs.com/api/health` (public, no auth)
 
 ## Browser Testing Workflow
 
 When testing the live site with the browser MCP tool:
 
-1. Navigate to https://app.raven-tech.co
+1. Navigate to https://app.nrgxlabs.com
 2. If redirected to /login, fill the invite code field with `RAVEN-BETA-2026` and submit
 3. After login, navigate to the target page
 4. Use browser_snapshot before any interaction to get element refs

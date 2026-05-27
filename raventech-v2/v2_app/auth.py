@@ -1,8 +1,8 @@
 """Invite-code gate compatible with v1.
 
 v2 verifies the same HMAC-signed cookie v1 issues, so a desk member who
-logs into ``app.raven-tech.co`` is automatically signed into
-``v2.app.raven-tech.co`` (cookie is set on the parent domain).
+logs into ``app.nrgxlabs.com`` is automatically signed into
+``v2.app.nrgxlabs.com`` (cookie is set on the parent domain).
 """
 
 from __future__ import annotations
@@ -85,4 +85,4 @@ async def invite_gate(request: Request, call_next, cfg: V2Config):
     nxt = request.url.path
     if request.url.query:
         nxt = f"{nxt}?{request.url.query}"
-    return RedirectResponse(url=f"https://app.raven-tech.co/login?next={nxt}", status_code=302)
+    return RedirectResponse(url=f"https://app.nrgxlabs.com/login?next={nxt}", status_code=302)

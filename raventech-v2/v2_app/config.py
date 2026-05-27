@@ -69,7 +69,7 @@ class V2Config:
 def get_config() -> V2Config:
     cors = _str(
         "V2_CORS_ORIGINS",
-        "https://app.raven-tech.co,https://raven-tech.co,https://v2.app.raven-tech.co,http://localhost:8000,http://localhost:8001",
+        "https://app.nrgxlabs.com,https://nrgxlabs.com,https://v2.app.nrgxlabs.com,http://localhost:8000,http://localhost:8001",
     )
     origins = tuple(o.strip() for o in cors.split(",") if o.strip())
     return V2Config(

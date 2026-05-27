@@ -275,7 +275,7 @@ def health():
     return {"ok": True, "v": "2026-02-28-router-split"}
 
 
-# robots.txt — the app domain (app.raven-tech.co / app.nrgxlabs.com) is
+# robots.txt — the app domain (app.nrgxlabs.com) is
 # invite-only and behind a login gate. We still serve an explicit
 # Disallow so the login page itself doesn't leak into search indexes,
 # and no crawler wastes time probing /api/* surfaces.

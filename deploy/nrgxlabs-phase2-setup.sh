@@ -15,9 +15,11 @@
 # What it does NOT do:
 #   - Provision TLS certificates (run certbot manually after this — see
 #     deploy/nrgxlabs-migration.md Phase 2b for the two commands).
-#   - Touch the existing raven-tech.co vhosts (the old domain keeps
-#     serving traffic alongside the new one until you cut over in
-#     Phase 5).
+#
+# Historical note: during the migration this script also coexisted with
+# the legacy `raven-tech.co` vhosts. That domain has since been retired
+# and is no longer registered to us, so only the `nrgxlabs.com` vhosts
+# remain.
 
 set -euo pipefail
 

@@ -1,9 +1,9 @@
-# Raven Tech v2
+# NRGX Labs v2
 
-A side-by-side rebuild of the Raven Tech trading platform on top of a learned
+A side-by-side rebuild of the NRGX Labs trading platform on top of a learned
 Foundation Brain and an agentic Claude reasoning layer. v1 keeps trading at
-[`app.raven-tech.co`](https://app.raven-tech.co); v2 grows up alongside it at
-[`v2.app.raven-tech.co`](https://v2.app.raven-tech.co).
+[`app.nrgxlabs.com`](https://app.nrgxlabs.com); v2 grows up alongside it at
+[`v2.app.nrgxlabs.com`](https://v2.app.nrgxlabs.com).
 
 The full architecture is in `/Users/.../.cursor/plans/raven_tech_v2_architecture_*.plan.md`.
 Phase 0 (this directory) is the scaffolding: separate FastAPI service, distinct
@@ -52,23 +52,23 @@ curl -sf http://localhost:8001/api/v2/health
 `docker-compose.yml` defines the `app-v2` service alongside the v1 `app`. They
 share Redis; v2 has read-only access to the v1 chain-cache volume.
 
-## Going live at `v2.app.raven-tech.co`
+## Going live at `v2.app.nrgxlabs.com`
 
 Three manual steps on the droplet (one-time):
 
-1. **DNS** — Add an A record for `v2.app.raven-tech.co` pointing at the droplet IP
-   (DigitalOcean → Networking → Domains → `raven-tech.co` → Add A record).
+1. **DNS** — Add an A record for `v2.app.nrgxlabs.com` pointing at the droplet IP
+   (DigitalOcean → Networking → Domains → `nrgxlabs.com` → Add A record).
 2. **nginx** —
    ```bash
-   sudo cp deploy/nginx/site-v2.app.raven-tech.co.conf \
-           /etc/nginx/sites-available/v2.app.raven-tech.co
-   sudo ln -s /etc/nginx/sites-available/v2.app.raven-tech.co \
-              /etc/nginx/sites-enabled/v2.app.raven-tech.co
+   sudo cp deploy/nginx/site-v2.app.nrgxlabs.com.conf \
+           /etc/nginx/sites-available/v2.app.nrgxlabs.com
+   sudo ln -s /etc/nginx/sites-available/v2.app.nrgxlabs.com \
+              /etc/nginx/sites-enabled/v2.app.nrgxlabs.com
    sudo nginx -t && sudo systemctl reload nginx
    ```
 3. **HTTPS** —
    ```bash
-   sudo certbot --nginx -d v2.app.raven-tech.co
+   sudo certbot --nginx -d v2.app.nrgxlabs.com
    ```
 
 Until those land, v2 is verifiable via SSH on the droplet:
@@ -78,7 +78,7 @@ hits that endpoint automatically and prints PASS/FAIL.
 ## Auth
 
 v2 reuses v1's HMAC-signed invite-code cookie. A desk member who logs into
-`app.raven-tech.co` is automatically authenticated on `v2.app.raven-tech.co`
+`app.nrgxlabs.com` is automatically authenticated on `v2.app.nrgxlabs.com`
 because the cookie is set on the parent domain. v2 boots in `PUBLIC_ACCESS=1`
 mode by default; set `PUBLIC_ACCESS=0` (and ensure `INVITE_CODE` +
 `AUTH_SECRET` are set) to engage the gate.

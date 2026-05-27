@@ -1,7 +1,7 @@
-"""Raven Tech v2 FastAPI entrypoint.
+"""NRGX Labs v2 FastAPI entrypoint.
 
 Runs on port 8001 (set by V2_BIND_PORT). Reverse-proxied at
-``v2.app.raven-tech.co`` (or ``/v2/*`` on the root domain pre-DNS).
+``v2.app.nrgxlabs.com`` (or ``/v2/*`` on the root domain pre-DNS).
 """
 
 from __future__ import annotations

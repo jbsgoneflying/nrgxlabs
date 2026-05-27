@@ -7,7 +7,7 @@ alwaysApply: true
 
 For **every task that touches runtime code** (backend, frontend, tests, configs, scripts — anything deployable), the task is **not complete** until the full cycle below is green. Pure docs/comments can skip.
 
-Credentials, droplet paths, and invite codes live in `raven-tech-access.mdc`.
+Credentials, droplet paths, and invite codes live in `nrgxlabs-access.mdc`.
 
 ## The Five-Step Cycle
 
@@ -36,10 +36,10 @@ git push origin main
 
 ### 4. Verify live
 Both of these must pass:
-- **Health**: `curl -sf https://raven-tech.co/api/health` returns 200.
+- **Health**: `curl -sf https://app.nrgxlabs.com/api/health` returns 200.
 - **Behavior probe**: hit the specific route(s) your change touched and confirm the new behavior is visible. Example: if you added `/api/ic-scenario/reconcile`, POST a realistic body and check the response shape. Poll with exponential backoff until the new code lands (don't assume instant).
 
-If the live site still shows the old behavior after 3 min, check `curl -sI https://raven-tech.co/` for unexpected cache headers and investigate GH Actions logs.
+If the live site still shows the old behavior after 3 min, check `curl -sI https://app.nrgxlabs.com/` for unexpected cache headers and investigate GH Actions logs.
 
 ### 5. Hand off to the desk
 Only after steps 1-4 are green. Report:

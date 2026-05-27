@@ -15,8 +15,8 @@ services:
       # lives here so a 2-year backfill is not wiped on every deploy.
       - app_data:/app/data
 
-  # ─── Raven Tech v2 (FastAPI) — separate service ───────────────
-  # Lives at v2.app.raven-tech.co (or /v2/* on the root domain
+  # ─── NRGX Labs v2 (FastAPI) — separate service ───────────────
+  # Lives at v2.app.nrgxlabs.com (or /v2/* on the root domain
   # before DNS for the subdomain is in place). Shares Redis with
   # v1 and reads (read-only) the same SQLite chain cache.
   app-v2:

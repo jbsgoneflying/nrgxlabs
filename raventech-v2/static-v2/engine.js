@@ -10,7 +10,7 @@
       badge: "phase 0 · scaffolding · v1 still primary",
       title: "Single-name <em>earnings IC</em>",
       sub: "v1 ranks earnings IC trades with hand-set VRP weights (30/25/20/15/10) and a fixed wing-console composite. v2 trains a learned ranker on your own desk PnL, retrieves cross-ticker analogues, and wraps every probability in a conformal coverage interval.",
-      cta: { href: "https://app.raven-tech.co", label: "Use v1 today" },
+      cta: { href: "https://app.nrgxlabs.com", label: "Use v1 today" },
       roadmap: [
         ["learned ranker", "offline contextual bandit", "Drops the 30/25/20/15/10 VRP weights. Trained on the existing trade journal in Redis. Doubly-robust off-policy estimator bounds improvement before live A/B."],
         ["cross-ticker analogues", "contrastive embedder", "Replaces same-ticker breach stats with up to 80 peer-event neighbors that share the same fingerprint."],
@@ -27,7 +27,7 @@
       badge: "phase 0 · the killer module · v1 still primary",
       title: "Earnings IC <em>scenario</em>",
       sub: "v1's biggest gap: same-ticker analogues only. v2 retrieves cross-ticker, cross-time neighbors in a contrastive embedding space — a NVDA setup can pull peer events from 8 tickers and 5 different years that share the same fingerprint. This is the v2 wedge: the moment a desk member says \"wait, it found analogues across other tickers? show me more.\"",
-      cta: { href: "https://app.raven-tech.co/earnings-ic", label: "Use v1 today" },
+      cta: { href: "https://app.nrgxlabs.com/earnings-ic", label: "Use v1 today" },
       roadmap: [
         ["contrastive matcher", "the killer module", "ANN search in a learned event-embedding space. Drops same-ticker filter. Up to 80 peer events with similar forward 5-day path distributions."],
         ["learned conditioning", "outcome regression", "Replaces hand-coded multipliers with a regression on retrieved analogues conditioned on (VRP, news theme, anncTod, regime embedding)."],
@@ -43,7 +43,7 @@
       badge: "phase 0 · scaffolding · v1 still primary",
       title: "SPX <em>weekly IC</em>",
       sub: "v1 bootstraps from historical weekly paths but the daily_returns field is unpopulated, so paths often degrade to a uniform-split fallback. v2 swaps bootstrap for a regime-conditional path generator, lets dealer gamma enter the wing composite directly as a learned feature, and calibrates every probability.",
-      cta: { href: "https://app.raven-tech.co/spx", label: "Use v1 today" },
+      cta: { href: "https://app.nrgxlabs.com/spx", label: "Use v1 today" },
       roadmap: [
         ["path generator", "regime-conditional diffusion", "Replaces bootstrap MC. Fixes the silent daily_returns gap. Calibrated path distributions per regime cluster."],
         ["gamma feature", "first-class wing input", "Dealer gamma enters the wing composite directly, not just as an EM-preference nudge."],
@@ -58,7 +58,7 @@
       badge: "phase 0 · scaffolding · v1 still primary",
       title: "SPX IC <em>scenario</em>",
       sub: "v1 ships hand-set kNN weights [vix 1.0, vix9d 0.8, vvix 0.6, term_slope 0.5, rv20 0.8, net_gex 0.5, credit 0.4] and deterministic Kelly sizing. v2 swaps the weighted-L2 kNN for a contrastive embedder, makes sizing risk-budget-aware on conformal width, and turns the exit-rule grid into a learned policy.",
-      cta: { href: "https://app.raven-tech.co/ic-scenario", label: "Use v1 today" },
+      cta: { href: "https://app.nrgxlabs.com/ic-scenario", label: "Use v1 today" },
       roadmap: [
         ["contrastive matcher", "drops weighted-L2 kNN", "Learned distance metric over a learned feature space. No more hand-set economic weights."],
         ["risk-budget sizing", "confidence-aware", "Position sizing conditions on committee confidence and conformal interval width, not just historical PnL series."],
@@ -73,7 +73,7 @@
       badge: "phase 0 · scaffolding · v1 still primary",
       title: "Market <em>brain</em>",
       sub: "v1's MI is an 8-factor Gaussian HMM with a misleadingly-named pc1_proxy_stress (z-composite, not real PCA) and two siloed LLM narrators. v2 collapses everything into one learned regime embedding with a live UMAP projection — \"today is closest to these 5 historical days\" with one-tap drill-in to how each engine behaved in those analogues.",
-      cta: { href: "https://app.raven-tech.co/market-intelligence", label: "Use v1 today" },
+      cta: { href: "https://app.nrgxlabs.com/market-intelligence", label: "Use v1 today" },
       roadmap: [
         ["regime encoder", "learned 64-d latent", "Replaces the HMM. Produces probabilities over learned clusters plus nearest historical days."],
         ["UMAP projection", "live spatial map", "2-D map of the embedding space. The desk literally sees where today sits relative to past episodes."],
