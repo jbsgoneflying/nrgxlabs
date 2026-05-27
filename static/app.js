@@ -3528,17 +3528,56 @@ async function _runE1Advisor(payload) {
 
   try {
     var ticker = payload?.ticker || "";
+
+    // E1 v2 requires event_date + event_timing on the advisor endpoint
+    // (E1_REQUIRE_EVENT_DATE + ENABLE_E1_V2 are both default-on). Pull
+    // them from the same sources _renderE1AdvisorSection uses, with a
+    // last-resort fallback to whatever the user typed in the form.
+    var ne = payload?.nextEvent || {};
+    var cur = payload?.current || {};
+    var eventDate = String(
+      ne.earnDateNext ||
+      cur.earnDate ||
+      ($("mcEventDate") && $("mcEventDate").value) ||
+      ""
+    ).slice(0, 10);
+    var eventTiming = String(
+      ne.timingPlanned ||
+      ne.earningsTiming ||
+      cur.earningsTiming ||
+      ($("mcEventTiming") && $("mcEventTiming").value) ||
+      ""
+    ).toUpperCase();
+    if (!eventDate || !["AMC", "BMO"].includes(eventTiming)) {
+      throw new Error("Engine 1 needs earnings date + timing (AMC/BMO) before running the advisor. Re-run Calculate with both filled.");
+    }
+
     var resp = await fetch("/api/breach/advisor", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker: ticker, n: payload?.params?.n || 20, years: payload?.params?.years || 5 }),
+      body: JSON.stringify({
+        ticker: ticker,
+        event_date: eventDate,
+        event_timing: eventTiming,
+        n: payload?.params?.n || 20,
+        years: payload?.params?.years || 5,
+      }),
     });
-    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    if (!resp.ok) {
+      var detail = "";
+      try {
+        var errBody = await resp.json();
+        detail = errBody?.detail || errBody?.error || "";
+      } catch (_) {
+        try { detail = await resp.text(); } catch (_) { /* ignore */ }
+      }
+      throw new Error("HTTP " + resp.status + (detail ? " — " + String(detail).slice(0, 200) : ""));
+    }
     var data = await resp.json();
     _e1AdvisorResult = data;
     _renderE1AdvisorResult(data);
   } catch (e) {
-    if (area) area.innerHTML = '<div style="padding:16px;color:#dc2626">Advisor failed: ' + e.message + '</div>';
+    if (area) area.innerHTML = '<div style="padding:16px;color:#dc2626">Advisor failed: ' + escapeHtml(e.message || String(e)) + '</div>';
   }
   if (btn) { btn.disabled = false; btn.textContent = "Run Advisor"; }
 }
