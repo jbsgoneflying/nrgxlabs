@@ -1424,6 +1424,26 @@ def compute_engine2_spx_ic(
         except Exception:
             pass
 
+    # --- Edge Analysis (deterministic 0-100 score) ---
+    # SPX analogue of E1's vrpAnalysis: a composite of regime, macro,
+    # vol pressure, dealer gamma, news gate and breach % at the preferred
+    # EM. Drives the pre-LLM scorecard and feeds the advisor prompt.
+    try:
+        from backend.spx_ic.edge_score import compute_edge_score
+        edge_analysis = compute_edge_score(
+            regime_score=_regime_score_value(regime_now),
+            regime_bucket=str(regime_now.get("bucket", "MODERATE")),
+            macro_multiplier=float(macro_now.get("multiplier", 1.0)),
+            vol_pressure_state=_vp_state,
+            dealer_gamma_sign=_dg_sign,
+            news_gate=_news_gate_for_consensus,
+            em_breach_summary=em_breach_summary or None,
+            preferred_em=em_pref,
+        )
+    except Exception as _e:  # pragma: no cover — defensive
+        LOG.warning("edge_score failed: %s", _e)
+        edge_analysis = None
+
     # --- Technicals (daily indicators + live overlay; additive, does not affect backtest) ---
     tech_bars: List[TechDailyBar] = []
     for b in bars:
@@ -1939,6 +1959,7 @@ def compute_engine2_spx_ic(
         "emPreference": em_preference,
         "emBreachSummary": em_breach_summary,
         "deskConsensus": desk_consensus,
+        "edgeAnalysis": edge_analysis,
         "technicals": technicals,
         "telemetry": telemetry,
         "notes": proxy_notes,

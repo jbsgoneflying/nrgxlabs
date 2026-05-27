@@ -251,6 +251,70 @@
   line-height: 1.5;
 }
 
+/* ----- Edge Scorecard (depth-upgrade parity with E1 VRP card) ------- */
+
+.e2EdgeScorecard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.e2EdgeTile {
+  flex: 1 1 130px;
+  min-width: 130px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  transition: background-color 120ms ease;
+}
+
+.e2EdgeTile:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.e2EdgeTileLabel {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-secondary, #9aa0a6);
+  margin-bottom: 6px;
+}
+
+.e2EdgeTileValue {
+  font-size: 24px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.e2EdgeFlagChip {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(255, 69, 58, 0.55);
+  letter-spacing: 0.3px;
+}
+
+/* Position Sizing block — both standard and flex advisor cards reuse
+   the same inline markup, so this is mostly here for theme/hover
+   parity with the rest of engine2-v2. */
+.e2PositionSizingBar {
+  height: 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.e2PositionSizingBar > span {
+  display: block;
+  height: 100%;
+}
+
 /* MI v2 regime probability bar (compact chip). */
 .e2RegimeMiV2 {
   display: inline-flex;

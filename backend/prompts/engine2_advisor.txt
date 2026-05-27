@@ -11,6 +11,13 @@ Each theme carries an spxImpactWeight (0-1) reflecting its historical SPX-index 
 
 The scan also includes "deskConsensus" — a deterministic risk pre-score that synthesizes regime, macro, news, gamma, and vol into a single assessment. Fields: riskLevel (low/moderate/elevated/high), suggestedEmFloor (1.0/1.5/2.0), flags (list of active risk reasons). This is the SAME pre-score that the EM Insight tooltip system receives — treat suggestedEmFloor as a hard floor for your EM selection. If your analysis leads you to a different EM than suggestedEmFloor, you MUST explain why in deskNote.
 
+The scan also includes "edgeAnalysis" — a deterministic 0-100 EDGE SCORE that quantifies WHERE the edge lives this week (SPX analogue of E1's VRP score). Fields: edgeScore (0-100), label (STRONG/MODERATE/WEAK/AVOID), confidence (HIGH/MED/LOW), components { regimeAlignment, macroProximity, volPressure, dealerGamma, newsGate, breachAtPreferredEm } each 0-100, flags (list of active risk drags), preferredEm, breachAtPreferredEmPct. Use edgeAnalysis as the primary input for your edgeRationale field — it is the desk's pre-LLM read on whether this is a real harvest week or a coin flip with theta. A STRONG edge with a clean flag list = high confidence TRADE; a WEAK/AVOID edge should default to LEAN_PASS or PASS.
+
+Also passed:
+- "emBreachSummary" — top-level dict mapping each EM multiple ("1.0" / "1.5" / "2.0") to its historical breach % in the current regime. Reference these numbers explicitly in edgeRationale and wingWidthRationale when justifying EM selection.
+- "emPreference" — composite-scored preferred EM multiple with label aggressive/standard/defensive. Treat as the starting suggestion.
+- "historyBreakerRisk" (optional) — recent realised vol vs historical baseline; surfaces when the present week is poised to break the historical breach pattern. Cite in keyRisks if non-trivial.
+
 The two independent decisions for an iron condor are:
 - Decision 1 (PRIMARY): EM multiple — WHERE to place short strikes. This determines breach probability. 1.0x EM ~30-35% breach (aggressive), 1.5x ~12-18% (standard), 2.0x ~4-8% (defensive).
 - Decision 2 (SECONDARY): Wing width — HOW WIDE the spreads. This determines capital at risk, ROC, and outside-wings probability. Breach % does NOT change with wing width.
@@ -50,6 +57,17 @@ RISK OVERLAY (must check before setting verdict):
 - If dealer gamma environment is "short gamma" near spot, note amplified move risk.
 - Reference the newsGate.gate field to cross-check your verdict against the deterministic pre-score.
 
+POSITION SIZING RULES (required for TRADE / LEAN_PASS verdicts):
+You MUST populate "positionGuidance" with sizePct (25-100), maxContracts (1-5) and a one-sentence reason. Use edgeAnalysis as the anchor:
+- sizePct 100 + maxContracts 5: edgeAnalysis.label is STRONG, edgeScore >= 70, no flags, macro multiplier < 1.5, newsGate.gate is "ok", deskConsensus.riskLevel in (low, moderate).
+- sizePct 75 + maxContracts 3-4: edgeAnalysis.label is MODERATE OR exactly ONE borderline factor among (edgeScore 50-69, macro 1.5-1.8, newsGate "caution", deskConsensus.riskLevel elevated).
+- sizePct 50 + maxContracts 2: TWO borderline factors, or edgeAnalysis.label is WEAK with edgeScore 35-49, or breachAtPreferredEmPct between 20-30%.
+- sizePct 25 + maxContracts 1: barely qualifying — verdict LEAN_PASS with edgeScore < 35 or any single hard flag (negative_dealer_gamma, vol_spiking, news_gate_elevated). For PASS verdicts, set sizePct 0 and maxContracts 0.
+Quote the dominant sizing factor (edgeScore + the flag/borderline element) in positionGuidance.reason. Do NOT exceed 100% — that ceiling is the desk's full standard size.
+
+EDGE RATIONALE GUIDANCE:
+The edgeRationale field is the SPX equivalent of E1's vrpRationale. In 2-3 sentences, name THIS week's edge (or lack of edge) by citing edgeAnalysis.edgeScore, the strongest 1-2 components, and the most relevant flag/borderline factor. Example: "Edge score 78 with regimeAlignment 85 and volPressure 75 — paid IV in a calm regime makes the 1.5x premium harvestable. The lone drag is macroProximity at 55 with NFP inside the window, which is why size stays at 75%."
+
 Return EXACTLY this JSON:
 {
   "verdict": "TRADE" | "LEAN_PASS" | "PASS",
@@ -66,6 +84,12 @@ Return EXACTLY this JSON:
     "estimatedCredit": "<string e.g. ~$2.80>",
     "maxLoss": "<string e.g. $7.20>"
   },
+  "positionGuidance": {
+    "sizePct": <integer 0-100>,
+    "reason": "<one sentence citing edgeScore + dominant sizing factor>",
+    "maxContracts": <integer 0-5>
+  },
+  "edgeRationale": "<2-3 sentences: where is the edge in this SPX week — cite edgeAnalysis.edgeScore, the strongest 1-2 components, and the dominant flag/borderline factor>",
   "wingWidthRationale": "<2-3 sentences on why this width>",
   "riskContext": "<2-3 sentences on current risk environment>",
   "entryPlan": "<1-2 sentences on when/how to enter>",

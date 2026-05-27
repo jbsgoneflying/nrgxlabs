@@ -545,6 +545,87 @@ class TestDeskConsensus:
 
 
 # ---------------------------------------------------------------------------
+# E2 depth upgrade — edgeAnalysis + emBreachSummary + emPreference in sanitizer
+# ---------------------------------------------------------------------------
+
+class TestSanitizerDepthUpgrade:
+    """The advisor depth upgrade promotes several deterministic blocks
+    from nested/embedded fields into top-level LLM context. These tests
+    pin that contract so the LLM always sees them."""
+
+    def test_sanitizer_passes_edge_analysis(self):
+        payload = {
+            "asOfDate": "2026-03-25",
+            "edgeAnalysis": {
+                "edgeScore": 78.0,
+                "label": "STRONG",
+                "components": {"regimeAlignment": 85.0, "macroProximity": 75.0},
+                "flags": [],
+                "confidence": "HIGH",
+            },
+        }
+        sanitized = _sanitize_e2_for_llm(payload)
+        assert "edgeAnalysis" in sanitized
+        assert sanitized["edgeAnalysis"]["edgeScore"] == 78.0
+        assert sanitized["edgeAnalysis"]["label"] == "STRONG"
+
+    def test_sanitizer_passes_em_breach_summary_and_preference(self):
+        payload = {
+            "asOfDate": "2026-03-25",
+            "emBreachSummary": {"1.0": 28.0, "1.5": 14.0, "2.0": 6.0},
+            "emPreference": {"emPreference": 1.5, "label": "standard"},
+        }
+        sanitized = _sanitize_e2_for_llm(payload)
+        assert sanitized["emBreachSummary"]["1.5"] == 14.0
+        assert sanitized["emPreference"]["emPreference"] == 1.5
+
+    def test_sanitizer_passes_history_breaker_risk(self):
+        payload = {
+            "asOfDate": "2026-03-25",
+            "historyBreakerRisk": {"score": 0.42, "label": "moderate"},
+        }
+        sanitized = _sanitize_e2_for_llm(payload)
+        assert "historyBreakerRisk" in sanitized
+        assert sanitized["historyBreakerRisk"]["score"] == 0.42
+
+    def test_sanitizer_includes_ichimoku_and_candles_in_technicals(self):
+        payload = {
+            "technicals": {
+                "rsi": {"value": 55},
+                "ichimoku": {"kijun": 5400, "tenkan": 5410},
+                "candles": {"engulfing": False},
+            },
+        }
+        sanitized = _sanitize_e2_for_llm(payload)
+        techs = sanitized["technicalsSummary"]
+        assert "ichimoku" in techs
+        assert "candles" in techs
+        assert techs["ichimoku"]["kijun"] == 5400
+
+
+class TestAdvisorRequiredKeys:
+    """The depth upgrade adds edgeRationale + positionGuidance to the
+    required-key set. The fallback object must also carry both so the
+    frontend always has a valid (if empty) positionGuidance dict."""
+
+    def test_required_keys_include_edge_rationale_and_position_guidance(self):
+        from backend.engine2_advisor import _ADVISOR_REQUIRED_KEYS
+        assert "edgeRationale" in _ADVISOR_REQUIRED_KEYS
+        assert "positionGuidance" in _ADVISOR_REQUIRED_KEYS
+
+    def test_fallback_initialises_position_guidance_dict(self):
+        flags = FeatureFlags(ENGINE2_ADVISOR_ENABLED=False)
+        result = generate_trade_analysis({}, flags=flags)
+        assert isinstance(result.get("positionGuidance"), dict)
+        assert result["positionGuidance"]["sizePct"] == 0
+        assert result["positionGuidance"]["maxContracts"] == 0
+        # All required keys must be present in the fallback shell
+        from backend.engine2_advisor import _ADVISOR_REQUIRED_KEYS
+        for k in _ADVISOR_REQUIRED_KEYS:
+            assert k in result, f"fallback missing required key: {k}"
+
+
+# ---------------------------------------------------------------------------
 # Adjusted trade tests
 # ---------------------------------------------------------------------------
 

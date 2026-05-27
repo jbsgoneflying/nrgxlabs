@@ -15,7 +15,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
     <link rel="stylesheet" href="/static/styles.css?v=9" />
     <link rel="stylesheet" href="/static/engine1-v2.css?v=2" />
-    <link rel="stylesheet" href="/static/engine2-v2.css?v=4" />
+    <link rel="stylesheet" href="/static/engine2-v2.css?v=5" />
     <link rel="stylesheet" href="/static/wing-console.css?v=1" />
   </head>
   <body class="cleanBg">
@@ -209,6 +209,7 @@
         <div class="sectionHeader">
           <h2 class="sectionTitle">Flex AI Advisor</h2>
         </div>
+        <div id="e2bFlexEdgeScorecard"></div>
         <div id="e2bFlexAdvisorBody"></div>
       </section>
 
@@ -221,11 +222,14 @@
         </section>
 
         <!-- Advisor sits directly under Track Builder so the desk can run the LLM narrative
-             alongside their tracked candidates. Width grid is hidden (see spx.js). -->
+             alongside their tracked candidates. Width grid is hidden (see spx.js).
+             The Edge Scorecard renders pre-LLM (deterministic 0-100 composite); the
+             Run Advisor button + LLM verdict card live inside e2AdvisorContent. -->
         <section class="surface hidden" id="e2AdvisorSection" aria-label="AI Trade Advisor">
           <div class="sectionHeader" data-insight="ai_advisor">
             <h2 class="sectionTitle">AI Trade Advisor</h2>
           </div>
+          <div id="e2EdgeScorecard"></div>
           <div id="e2AdvisorContent"></div>
         </section>
 
@@ -453,7 +457,7 @@
     <link rel="stylesheet" href="/static/mobile.css?v=1" />
     <script src="/static/ta_panel.js"></script>
     <script src="/static/zip_store.js"></script>
-    <script src="/static/spx.js?v=5"></script>
+    <script src="/static/spx.js?v=6"></script>
     <script src="/static/calculator.js"></script>
     <script src="/static/nav.js?v=12"></script>
     <script src="/static/raven-chat.js?v=4"></script>

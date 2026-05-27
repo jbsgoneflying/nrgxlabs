@@ -51,6 +51,8 @@ _FLEX_REQUIRED_KEYS = {
     "tradeTicket",
     "cohortUsed",
     "edgeAssessment",
+    "edgeRationale",
+    "positionGuidance",
     "wingWidthRationale",
     "riskContext",
     "entryPlan",
@@ -94,10 +96,12 @@ def sanitize_flex_for_llm(payload: Dict[str, Any]) -> Dict[str, Any]:
         "regime",
         "oddsLikeNow",
         "deskConsensus",
+        "edgeAnalysis",
         "recommendation",
         "recSimple",
         "emPreference",
         "emBreachSummary",
+        "historyBreakerRisk",
     ):
         if key in payload:
             out[key] = payload[key]
@@ -125,6 +129,7 @@ def _fallback_shell(reason: str) -> Dict[str, Any]:
     fb["keyRisks"] = []
     fb["tradeTicket"] = {}
     fb["cohortUsed"] = {}
+    fb["positionGuidance"] = {"sizePct": 0, "maxContracts": 0, "reason": None}
     return fb
 
 

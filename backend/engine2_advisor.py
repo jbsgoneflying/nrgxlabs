@@ -25,8 +25,10 @@ LOG = logging.getLogger(__name__)
 _PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
 _ADVISOR_REQUIRED_KEYS = {
-    "verdict", "confidence", "tradeTicket", "wingWidthRationale",
-    "riskContext", "entryPlan", "managementPlan", "exitRules",
+    "verdict", "confidence", "tradeTicket",
+    "edgeRationale", "positionGuidance",
+    "wingWidthRationale", "riskContext", "entryPlan",
+    "managementPlan", "exitRules",
     "keyRisks", "deskNote",
 }
 
@@ -318,12 +320,21 @@ def compute_desk_consensus(
 
 
 def _sanitize_e2_for_llm(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract the LLM-relevant slice from Engine 2 payload, capping size."""
+    """Extract the LLM-relevant slice from Engine 2 payload, capping size.
+
+    v2 expansion (E2 advisor depth upgrade): we now pass the top-level
+    ``emBreachSummary``, ``emPreference``, ``edgeAnalysis``, and
+    ``historyBreakerRisk`` blocks directly so the LLM no longer has to
+    fish them out of nested ``recommendation`` / per-row width grid
+    fields. The technicalsSummary also now carries the Ichimoku and
+    candle-signal payloads the prompt already references.
+    """
     scan: Dict[str, Any] = {}
     for key in (
         "asOfDate", "params", "underlying", "current", "expectedMove",
         "strikeTargets", "oddsLikeNow", "recommendation", "recSimple",
-        "deskConsensus",
+        "deskConsensus", "edgeAnalysis",
+        "emBreachSummary", "emPreference", "historyBreakerRisk",
     ):
         if key in payload:
             scan[key] = payload[key]
@@ -341,7 +352,10 @@ def _sanitize_e2_for_llm(payload: Dict[str, Any]) -> Dict[str, Any]:
     tech = payload.get("technicals") or {}
     scan["technicalsSummary"] = {
         k: tech.get(k)
-        for k in ("rsi", "macd", "bollinger", "signals", "narrative", "distances", "ema")
+        for k in (
+            "rsi", "macd", "bollinger", "signals", "narrative",
+            "distances", "ema", "ichimoku", "candles",
+        )
         if tech.get(k) is not None
     }
 
@@ -525,6 +539,7 @@ def generate_trade_analysis(
     fallback["confidence"] = 0
     fallback["keyRisks"] = []
     fallback["tradeTicket"] = {}
+    fallback["positionGuidance"] = {"sizePct": 0, "maxContracts": 0, "reason": None}
 
     if not f.ENGINE2_ADVISOR_ENABLED:
         fallback["_fallback_reason"] = "Advisor disabled"

@@ -104,6 +104,40 @@ def test_fallback_shell_has_required_keys():
         assert k in fb
 
 
+def test_flex_required_keys_include_depth_upgrade_keys():
+    """Flex advisor must enforce edgeRationale + positionGuidance (parity
+    with the standard E2 advisor) on top of cohortUsed + edgeAssessment."""
+    assert "edgeRationale" in _FLEX_REQUIRED_KEYS
+    assert "positionGuidance" in _FLEX_REQUIRED_KEYS
+    # Flex-specific extras still present.
+    assert "cohortUsed" in _FLEX_REQUIRED_KEYS
+    assert "edgeAssessment" in _FLEX_REQUIRED_KEYS
+
+
+def test_fallback_shell_initialises_position_guidance_dict():
+    fb = _fallback_shell("test")
+    assert isinstance(fb["positionGuidance"], dict)
+    assert fb["positionGuidance"]["sizePct"] == 0
+    assert fb["positionGuidance"]["maxContracts"] == 0
+
+
+def test_flex_sanitizer_includes_edge_analysis_and_history_breaker():
+    """Depth-upgrade contract: flex sanitizer must surface edgeAnalysis
+    and historyBreakerRisk to the LLM (in addition to the existing flex
+    cohort blocks)."""
+    p = _flex_payload()
+    p["edgeAnalysis"] = {
+        "edgeScore": 62.0, "label": "MODERATE", "components": {},
+        "flags": [], "confidence": "MED",
+    }
+    p["historyBreakerRisk"] = {"score": 0.31, "label": "low"}
+    ctx = sanitize_flex_for_llm(p)
+    assert "edgeAnalysis" in ctx
+    assert ctx["edgeAnalysis"]["edgeScore"] == 62.0
+    assert "historyBreakerRisk" in ctx
+    assert ctx["historyBreakerRisk"]["score"] == 0.31
+
+
 def test_generate_flex_advisor_returns_fallback_when_disabled():
     """If the advisor flag is off, we must not call OpenAI."""
 

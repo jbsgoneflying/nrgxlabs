@@ -1826,6 +1826,8 @@ function render(payload) {
     var advisorEl = $("e2AdvisorContent");
     if (advisorSec && advisorEl) {
       advisorSec.classList.remove("hidden");
+      // Edge Scorecard (deterministic pre-LLM, mirrors E1's VRP scorecard).
+      try { _renderE2EdgeScorecard(payload, "e2EdgeScorecard"); } catch (_e) {}
       advisorEl.innerHTML =
         '<div class="taPanel"><div class="taHeader"><div class="taHeaderRow">' +
         '<span class="taHeaderTitle">AI Trade Advisor</span>' +
@@ -3425,6 +3427,8 @@ async function _runFlexAdvisor() {
   if (sec && body) {
     sec.classList.remove("hidden");
     body.innerHTML = '<div style="padding:18px;text-align:center;color:var(--text-secondary);font-size:12px"><span class="btnSpinner" style="display:inline-block;margin-right:8px"></span>Running flex advisor (90s budget)…</div>';
+    // Edge Scorecard appears immediately (deterministic, no LLM call).
+    try { _renderE2EdgeScorecard(_lastFlexPayload, "e2bFlexEdgeScorecard"); } catch (_e) {}
   }
   _flexAdvisorRunning = true;
   try {
@@ -3495,13 +3499,35 @@ function _renderFlexAdvisor(data) {
     html += '</div></div>';
   }
 
+  // Position Sizing block (parity with standard advisor card).
+  const pg = a.positionGuidance || {};
+  if (pg.sizePct != null || pg.maxContracts != null || pg.reason) {
+    const sz = Number(pg.sizePct) || 0;
+    const szClamped = Math.max(0, Math.min(100, sz));
+    const szColor = szClamped >= 75 ? "#34c759" : szClamped >= 50 ? "#ff9f0a" : szClamped >= 25 ? "#ff7a2a" : "#ff453a";
+    html += '<div style="padding:12px 18px;border-bottom:1px solid var(--border)">';
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:8px">';
+    html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px">Position Sizing</div>';
+    html += '<div style="display:flex;align-items:baseline;gap:14px">';
+    html += `<div style="font-size:22px;font-weight:800;color:${szColor};line-height:1">${szClamped}%</div>`;
+    html += `<div style="font-size:11px;color:var(--text-secondary)">of standard size · max <strong>${pg.maxContracts == null ? "—" : Number(pg.maxContracts)}</strong> contracts</div>`;
+    html += '</div></div>';
+    html += `<div style="height:6px;border-radius:4px;background:rgba(255,255,255,0.06);overflow:hidden;margin-bottom:8px"><div style="width:${szClamped}%;height:100%;background:${szColor}"></div></div>`;
+    if (pg.reason) {
+      html += `<div style="font-size:12px;line-height:1.5;color:var(--text-primary)">${escapeHtml(String(pg.reason))}</div>`;
+    }
+    html += '</div>';
+  }
+
   const sections = [
+    ["Edge Rationale", a.edgeRationale],
     ["Edge Assessment", a.edgeAssessment],
     ["Wing Width Rationale", a.wingWidthRationale],
     ["Risk Context", a.riskContext],
     ["Entry Plan", a.entryPlan],
     ["Management Plan", a.managementPlan],
     ["Exit Rules", a.exitRules],
+    ["Desk Note", a.deskNote],
   ];
   if (a.passReason) sections.unshift(["Pass Reason", a.passReason]);
   html += '<div style="padding:12px 18px">';
@@ -3607,6 +3633,116 @@ function _reconcileBadge(reconcile) {
     'color:#fff;background:' + color + ';letter-spacing:0.2px;">' + escapeHtml(label) + '</span>';
 }
 
+// ── Edge Scorecard (deterministic pre-LLM scorecard) ───────────────────
+// Renders the SPX/SPY analogue of E1's VRP scorecard: six 0-100 tile
+// metrics + a verdict label + an Execution Quality strip. Drives the
+// pre-LLM read; the Run Advisor button below then layers the LLM card.
+function _edgeLabelColor(label) {
+  var s = String(label || "").toUpperCase();
+  if (s === "STRONG") return "#34c759";
+  if (s === "MODERATE") return "#ff9f0a";
+  if (s === "WEAK") return "#ff7a2a";
+  if (s === "AVOID") return "#ff453a";
+  return "#8e8e93";
+}
+
+function _edgeTileColor(score) {
+  var s = Number(score);
+  if (!Number.isFinite(s)) return "#8e8e93";
+  if (s >= 70) return "#34c759";
+  if (s >= 50) return "#ff9f0a";
+  if (s >= 30) return "#ff7a2a";
+  return "#ff453a";
+}
+
+function _renderE2EdgeScorecard(payload, mountId) {
+  var mount = $(mountId || "e2EdgeScorecard");
+  if (!mount) return;
+  var edge = payload && payload.edgeAnalysis;
+  if (!edge || typeof edge !== "object") {
+    mount.innerHTML = "";
+    return;
+  }
+  var comps = edge.components || {};
+  var labelColor = _edgeLabelColor(edge.label);
+  var conf = String(edge.confidence || "—").toUpperCase();
+  var preferred = edge.preferredEm == null ? "—" : Number(edge.preferredEm).toFixed(1) + "×";
+
+  function _tile(title, val, suffix) {
+    var v = (val == null || Number.isNaN(Number(val))) ? "—" : Number(val).toFixed(0);
+    var color = _edgeTileColor(val);
+    return '<div style="flex:1 1 130px;min-width:130px;padding:12px 14px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid var(--border)">' +
+      '<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--text-secondary);margin-bottom:6px">' + escapeHtml(title) + '</div>' +
+      '<div style="font-size:24px;font-weight:800;color:' + color + ';font-variant-numeric:tabular-nums;line-height:1.1">' + escapeHtml(String(v)) + (suffix || "") + '</div>' +
+      '</div>';
+  }
+
+  var flagsHtml = "";
+  if (Array.isArray(edge.flags) && edge.flags.length) {
+    flagsHtml = '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">';
+    edge.flags.forEach(function (fl) {
+      flagsHtml += '<span style="display:inline-block;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:600;color:#fff;background:rgba(255,69,58,0.55);letter-spacing:0.3px">' + escapeHtml(String(fl)) + '</span>';
+    });
+    flagsHtml += '</div>';
+  }
+
+  var breachPct = edge.breachAtPreferredEmPct;
+  var breachStr = (breachPct == null) ? "—" : Number(breachPct).toFixed(1) + "%";
+
+  var html = '<div class="taPanel" id="e2EdgeScorecardCard" style="margin-bottom:10px">';
+  html += '<div class="taHeader"><div class="taHeaderRow">' +
+    '<span class="taHeaderTitle">Edge Scorecard</span>' +
+    '<span class="taHeaderMeta" style="color:var(--text-secondary)">Deterministic pre-LLM read · confidence ' + escapeHtml(conf) + '</span>' +
+    '</div></div>';
+
+  html += '<div style="display:flex;align-items:center;gap:16px;padding:14px 20px;border-bottom:1px solid var(--border)">';
+  html += '<div style="display:flex;flex-direction:column;align-items:center;min-width:110px">';
+  html += '<div style="font-size:30px;font-weight:800;color:' + labelColor + ';letter-spacing:0.4px;line-height:1">' + escapeHtml(String(edge.edgeScore == null ? "—" : edge.edgeScore)) + '</div>';
+  html += '<div style="font-size:11px;font-weight:700;color:' + labelColor + ';letter-spacing:0.6px;margin-top:2px">' + escapeHtml(String(edge.label || "—")) + '</div>';
+  html += '<div style="font-size:10px;color:var(--text-secondary);margin-top:2px">Edge Score</div>';
+  html += '</div>';
+  html += '<div style="flex:1;font-size:12px;line-height:1.5;color:var(--text-primary)">';
+  html += 'Preferred EM <strong>' + escapeHtml(preferred) + '</strong>' +
+    ' · breach @ preferred <strong>' + escapeHtml(breachStr) + '</strong>' +
+    ' · ' + (Array.isArray(edge.flags) ? edge.flags.length : 0) + ' active flag(s).';
+  html += flagsHtml;
+  html += '</div></div>';
+
+  html += '<div style="display:flex;flex-wrap:wrap;gap:8px;padding:14px 20px">';
+  html += _tile("Regime", comps.regimeAlignment);
+  html += _tile("Macro", comps.macroProximity);
+  html += _tile("Vol Pressure", comps.volPressure);
+  html += _tile("Dealer Gamma", comps.dealerGamma);
+  html += _tile("News Gate", comps.newsGate);
+  html += _tile("Breach @ EM", comps.breachAtPreferredEm);
+  html += '</div>';
+
+  // Execution Quality strip — uses liveContext.volPressure when present.
+  var live = (payload && payload.liveContext) || {};
+  var vp = live.volPressure || {};
+  var weekly = (live.weeklyFriday || {});
+  var dg = weekly.dealerGamma || {};
+  var flipPx = weekly.gammaFlipStrike;
+  if (vp.state || dg.netGammaSign || flipPx != null) {
+    html += '<div style="padding:10px 20px 14px;border-top:1px solid var(--border)">';
+    html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px;margin-bottom:6px">Execution Quality</div>';
+    html += '<div style="display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--text-primary)">';
+    if (vp.state) {
+      html += '<div><span style="color:var(--text-secondary)">Vol pressure</span> <span class="mono" style="font-weight:600">' + escapeHtml(String(vp.state || "—")) + '</span></div>';
+    }
+    if (dg.netGammaSign) {
+      html += '<div><span style="color:var(--text-secondary)">Dealer gamma</span> <span class="mono" style="font-weight:600">' + escapeHtml(String(dg.netGammaSign)) + '</span></div>';
+    }
+    if (flipPx != null) {
+      html += '<div><span style="color:var(--text-secondary)">Gamma flip</span> <span class="mono" style="font-weight:600">' + escapeHtml(String(flipPx)) + '</span></div>';
+    }
+    html += '</div></div>';
+  }
+
+  html += '</div>';
+  mount.innerHTML = html;
+}
+
 function renderAdvisorPanel(advisorResult) {
   var el = $("e2AdvisorContent");
   var sec = $("e2AdvisorSection");
@@ -3664,13 +3800,39 @@ function renderAdvisorPanel(advisorResult) {
     html += '</div></div>';
   }
 
-  // Sections
+  // Position Sizing block — LLM-derived %size + max contracts + reason
+  var pg = a.positionGuidance || {};
+  if (pg.sizePct != null || pg.maxContracts != null || pg.reason) {
+    var sz = Number(pg.sizePct) || 0;
+    var szClamped = Math.max(0, Math.min(100, sz));
+    var szColor = szClamped >= 75 ? "#34c759" : szClamped >= 50 ? "#ff9f0a" : szClamped >= 25 ? "#ff7a2a" : "#ff453a";
+    html += '<div style="padding:12px 20px;border-bottom:1px solid var(--border)">';
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:8px">';
+    html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-secondary);letter-spacing:0.5px">Position Sizing</div>';
+    html += '<div style="display:flex;align-items:baseline;gap:14px">';
+    html += '<div style="font-size:22px;font-weight:800;color:' + szColor + ';line-height:1">' + szClamped + '%</div>';
+    html += '<div style="font-size:11px;color:var(--text-secondary)">of standard size · max <strong>' + (pg.maxContracts == null ? "—" : Number(pg.maxContracts)) + '</strong> contracts</div>';
+    html += '</div></div>';
+    html += '<div style="height:6px;border-radius:4px;background:rgba(255,255,255,0.06);overflow:hidden;margin-bottom:8px">' +
+      '<div style="width:' + szClamped + '%;height:100%;background:' + szColor + '"></div></div>';
+    if (pg.reason) {
+      html += '<div style="font-size:12px;line-height:1.5;color:var(--text-primary)">' + escapeHtml(String(pg.reason)) + '</div>';
+    }
+    html += '</div>';
+  }
+
+  // Sections — Edge Rationale is the SPX analogue of E1's vrpRationale.
+  // Desk Note gets promoted into its own labeled block above Key Risks
+  // (matches E1's display order; the inline copy at the top of the
+  // verdict row stays for at-a-glance reads).
   var sections = [
+    ["Edge Rationale", a.edgeRationale],
     ["Wing Width Rationale", a.wingWidthRationale],
     ["Risk Context", a.riskContext],
     ["Entry Plan", a.entryPlan],
     ["Management Plan", a.managementPlan],
     ["Exit Rules", a.exitRules],
+    ["Desk Note", a.deskNote],
   ];
   if (a.passReason) sections.unshift(["Pass Reason", a.passReason]);
 

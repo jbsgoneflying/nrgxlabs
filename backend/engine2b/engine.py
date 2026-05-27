@@ -698,6 +698,26 @@ def compute_engine2b_flex_ic(
     except Exception:
         desk_consensus = {"riskLevel": "moderate", "suggestedEmFloor": 1.5, "flags": []}
 
+    # Edge Analysis (deterministic 0-100 SPX edge score). Flex doesn't
+    # currently surface live dealer gamma / vol pressure / news gate, so
+    # those inputs default to neutral; regime + macro + breach drive the
+    # signal for the flex card.
+    try:
+        from backend.spx_ic.edge_score import compute_edge_score
+        edge_analysis = compute_edge_score(
+            regime_score=_regime_score_value(regime_now),
+            regime_bucket=str(regime_now.get("bucket", "MODERATE")),
+            macro_multiplier=float(macro_now.get("multiplier", 1.0)),
+            vol_pressure_state="NEUTRAL",
+            dealer_gamma_sign="unknown",
+            news_gate={},
+            em_breach_summary=em_breach_summary or None,
+            preferred_em=em_pref,
+        )
+    except Exception as _e:  # pragma: no cover — defensive
+        LOG.warning("edge_score (flex) failed: %s", _e)
+        edge_analysis = None
+
     policy = {
         "maxBreachPct": float(risk_target_breach_pct) if risk_target_breach_pct is not None else float(flags.ENGINE2_POLICY_MAX_BREACH_PCT),
         "maxOutsideWingsPct": float(flags.ENGINE2_POLICY_MAX_OUTSIDE_WINGS_PCT),
@@ -1040,6 +1060,7 @@ def compute_engine2b_flex_ic(
         "emPreference": em_preference,
         "emBreachSummary": em_breach_summary,
         "deskConsensus": desk_consensus,
+        "edgeAnalysis": edge_analysis,
         "weeks": week_rows,
         "telemetry": telemetry,
         "notes": proxy_notes,

@@ -59,8 +59,12 @@ You receive a structured JSON payload with these top-level sections:
 
 6. "deskConsensus" — deterministic risk pre-score (riskLevel, suggestedEmFloor, flags).
 
+6b. "edgeAnalysis" — deterministic 0-100 SPX EDGE SCORE (regime + macro + vol + gamma + news + breach). Fields: edgeScore, label (STRONG/MODERATE/WEAK/AVOID), components, flags, confidence. Flex sets live vol/gamma/news to neutral, so regime+macro+breach drive the signal — read it that way. Use this as the anchor for your edgeRationale and your sizing.
+
 7. "oddsLikeNow" — legacy regime/macro-filtered odds (mirrors what /api/spx-ic returns).
    Use this as one input, NOT the primary one — flexAnalytics is the better source.
+
+8. "historyBreakerRisk" (optional) — recent realised vol vs historical baseline. Cite in keyRisks if non-trivial.
 
 DECISION FRAMEWORK
 ==================
@@ -119,6 +123,12 @@ OUTPUT JSON (return EXACTLY this shape)
     "openOrCloseBreachPct": <number>,
     "openGapP95Pct": <number or null>
   },
+  "positionGuidance": {
+    "sizePct": <integer 0-100>,
+    "reason": "<one sentence citing cohort n, edgeScore and dominant sizing factor>",
+    "maxContracts": <integer 0-5>
+  },
+  "edgeRationale": "<2-3 sentences: where is the edge for THIS (entry, expiry) shape — cite edgeAnalysis.edgeScore, the cohort breach %, and the dominant flag/borderline factor>",
   "edgeAssessment": "<2-3 sentences: is there exploitable edge for THIS shape, or is this a coin flip with theta?>",
   "wingWidthRationale": "<2-3 sentences>",
   "riskContext": "<2-3 sentences on regime/macro/gap risk>",
@@ -129,6 +139,15 @@ OUTPUT JSON (return EXACTLY this shape)
   "keyRisks": ["<risk 1>", "<risk 2>", ...],
   "deskNote": "<1-2 sentence actionable summary — cite the n and the breach % you used>"
 }
+
+POSITION SIZING RULES (required for TRADE / LEAN_PASS verdicts):
+You MUST populate "positionGuidance" with sizePct (0-100), maxContracts (0-5), and a one-sentence reason. Anchor on edgeAnalysis + cohort quality:
+- sizePct 100 + maxContracts 5: primary cohort n>=8, edgeAnalysis.label is STRONG, openOrCloseBreachPct <= 15%, weekendStress.level NORMAL.
+- sizePct 75 + maxContracts 3-4: primary cohort n>=8 with edgeAnalysis MODERATE OR exactly one borderline (5<=n<8, openOrCloseBreachPct 15-25%, weekendStress MODERATE, liveChain disabled).
+- sizePct 50 + maxContracts 2: TWO borderline factors, or edgeAnalysis.label is WEAK, or weekendStress ELEVATED.
+- sizePct 25 + maxContracts 1: barely qualifying — LEAN_PASS only; n<5 or openOrCloseBreachPct 25-35% or weekendStress SEVERE.
+- sizePct 0 + maxContracts 0: PASS.
+Quote the dominant factor (cohort n + edgeScore) in positionGuidance.reason.
 
 CRITICAL RULES:
 - NEVER quote a breach % without citing the n and which subsample it came from.
