@@ -287,23 +287,83 @@
      inherit min-width: 220px from .controlGroup which forces a
      two-up layout on 390px viewports and crowds the dates against
      the Run Flex button + preset chips. Stack everything full-width
-     and give the preset chips a clean row of their own. */
+     and give the preset chips a clean row of their own.
+     -------------------------------------------------------------
+     ALL rules below are !important + width:100% because iOS Safari's
+     <input type="date"> has an intrinsic minimum width that can
+     beat width:100% if the precedence chain isn't airtight, and the
+     inline `min-width: 140px` on the date inputs / 120px on the
+     select would otherwise win. */
   #e2bFlexForm {
     gap: 10px !important;
     align-items: stretch !important;
   }
+  #e2bFlexForm > * {
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
   #e2bFlexForm > .controlGroup,
   #e2bFlexForm > button {
     flex: 1 1 100% !important;
-    min-width: 0 !important;
-    width: 100%;
+    width: 100% !important;
   }
   #e2bFlexForm input[type="date"],
   #e2bFlexForm select.controlSelect {
+    width: 100% !important;
     min-width: 0 !important;
-    width: 100%;
+    max-width: 100% !important;
   }
   #e2bFlexForm #e2bRunBtn { min-height: 42px; }
+  /* Preset chip row (Fri→Tue / Tue→Fri / Mon→Fri) is a sibling div
+     inside the form. Cap its width and let chips wrap naturally. */
+  #e2bFlexForm > div {
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+  #e2bFlexForm .chipToggle {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  /* ---- Engine 1 Earnings date + Timing row ---------------------- */
+  /* engine1-v2.css pins .e1EventRow to `flex-wrap: nowrap` with
+     date `width: 150px` + select `width: 210px` = ~360px minimum,
+     which clips past the form card's inner width on a 390px
+     viewport. Let the row wrap and let each control fill the card
+     width on its own line — the Timing select label "AMC (After-
+     Market Close)" is too long to comfortably squeeze into half a
+     row anyway. */
+  .e1EventRow {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+  .e1EventRow .controlInput[type="date"],
+  .e1EventRow .controlSelect {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+  /* The source-provenance chip (.e1SourceChip) is fine inline. */
+
+  /* ---- Market Intelligence: Factor Stack rows ------------------- */
+  /* Defined inline in market-intelligence.html as a 4-col grid
+     `200px 1fr 80px 60px` with 12px gap → 376px+ of fixed columns
+     before the bar's 1fr even gets a slice. That blows past the
+     ~350px usable width inside a .miCard on iPhone, so the right-
+     most chip column ("OK"/"MISSING") clips off-screen and forces
+     a horizontal scroll. Collapse to label + value + chip on
+     phones; the visual bar is redundant with the z-score number
+     and gets hidden. */
+  .miFactorRow {
+    grid-template-columns: minmax(0, 1fr) auto auto !important;
+    gap: 8px !important;
+    padding: 8px !important;
+    font-size: 11px !important;
+  }
+  .miFactorRow .miFactorBarWrap { display: none !important; }
+  .miFactorLabel { font-size: 11.5px; min-width: 0; }
+  .miFactorZ { font-size: 11px; }
+  .miFactorChip { font-size: 9px; padding: 2px 5px; }
 
   /* ---- Tooltip popups (legacy .tipBubble) ----------------------- */
   /* The "i" tip bubble needs the same don't-overflow treatment. */
