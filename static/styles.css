@@ -641,7 +641,18 @@ a.ravenTempDisabled {
 
 @media (max-width: 980px) {
   .metricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .controlBarForm { flex-wrap: wrap; height: auto; padding: 8px 0; }
+  /* Both the base form and the .controlBarForm--engine2 variant need
+     flex-wrap + auto height once the controls can't fit one row.
+     Without overriding the variant, its `height: 56px` lock makes
+     wrapped children render visually below the form's box, where
+     they overlap the .status text and any subsequent siblings
+     (caption, <details> panels, results sections). */
+  .controlBarForm,
+  .controlBarForm.controlBarForm--engine2 {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 8px 0;
+  }
   .controlSpacer { display: none; }
 }
 

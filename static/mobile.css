@@ -256,17 +256,54 @@
   /* ---- Form / control bar --------------------------------------- */
   /* Default existing 980px breakpoint already lets the form wrap;
      on phones tighten gap so the wrap stays compact and the
-     "Calculate" button is full-width. */
-  .controlBarForm {
+     "Calculate" button is full-width.
+     -------------------------------------------------------------
+     We also pin .controlBarForm--engine2 (used by E2/E7/E3/E4/E5/E6
+     pages) to the same wrap+auto-height behaviour. Without this the
+     variant's `height: 56px` rule from styles.css keeps the form box
+     locked at one row even when its children wrap, which makes the
+     wrapped controls visually collide with the .status text and any
+     siblings below (caption strip, <details> panels, results). The
+     980px breakpoint already fixes this once; we repeat it here so
+     the rule sticks regardless of source order. */
+  .controlBarForm,
+  .controlBarForm.controlBarForm--engine2 {
     gap: 8px;
     padding: 8px 0;
+    height: auto;
+    flex-wrap: wrap;
   }
-  .controlBarForm > * { flex: 1 1 100%; }
+  .controlBarForm > *,
+  .controlBarForm.controlBarForm--engine2 > * { flex: 1 1 100%; }
   .controlBarForm #runBtn,
   .controlBarForm button[type="submit"] {
     flex: 1 1 100%;
     width: 100%;
   }
+
+  /* ---- Engine 2b Flex Expiry form (#e2bFlexForm) ---------------- */
+  /* Inline-styled form inside the <details> panel. Its inline
+     `flex-wrap: wrap` lets it wrap, but the child controlGroups
+     inherit min-width: 220px from .controlGroup which forces a
+     two-up layout on 390px viewports and crowds the dates against
+     the Run Flex button + preset chips. Stack everything full-width
+     and give the preset chips a clean row of their own. */
+  #e2bFlexForm {
+    gap: 10px !important;
+    align-items: stretch !important;
+  }
+  #e2bFlexForm > .controlGroup,
+  #e2bFlexForm > button {
+    flex: 1 1 100% !important;
+    min-width: 0 !important;
+    width: 100%;
+  }
+  #e2bFlexForm input[type="date"],
+  #e2bFlexForm select.controlSelect {
+    min-width: 0 !important;
+    width: 100%;
+  }
+  #e2bFlexForm #e2bRunBtn { min-height: 42px; }
 
   /* ---- Tooltip popups (legacy .tipBubble) ----------------------- */
   /* The "i" tip bubble needs the same don't-overflow treatment. */
