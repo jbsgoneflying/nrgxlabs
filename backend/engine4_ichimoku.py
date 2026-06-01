@@ -1593,6 +1593,10 @@ def build_ichimoku_signal(
         "kijunDistanceAtr": None,
         "recentTenkanTouch": None,
         "isImpulseBar": None,
+        "triggerAlreadyRan": None,
+        "triggerRanDistanceAtr": None,
+        "impulseReclaim": None,
+        "reclaimBarRangeAtr": None,
     }
     
     if bars and closes and tenkan_series and atr:

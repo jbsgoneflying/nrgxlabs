@@ -116,16 +116,24 @@ class TestIchimokuSeries:
         assert len(result["chikou_series"]) == 80
 
     def test_cloud_series_aligned(self):
-        """Cloud series should be shifted back 26 bars."""
+        """Cloud series should be shifted back 26 bars.
+
+        The cloud at bar[i] is built from Span A/B values computed 26 bars
+        earlier. Span B is a 52-period midpoint, so its first non-None value
+        is at index 51 (needs 52 bars). Combined with the 26-bar back-shift,
+        the first plottable cloud value lands at index 51 + 26 = 77.
+        """
         bars = make_bars(80)
         result = compute_ichimoku_series(bars)
-        
-        # First 26 cloud values should be None (no data to shift from)
-        for i in range(26):
+
+        first_valid = 77
+
+        # Everything before the warmup boundary should be None.
+        for i in range(first_valid):
             assert result["cloud_series"][i] is None
-        
-        # After that, cloud values should exist
-        for i in range(26, 80):
+
+        # From the boundary onward, cloud values should exist.
+        for i in range(first_valid, 80):
             assert result["cloud_series"][i] is not None
             assert "cloudTop" in result["cloud_series"][i]
             assert "cloudBottom" in result["cloud_series"][i]

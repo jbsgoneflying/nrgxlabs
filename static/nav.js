@@ -11,6 +11,8 @@
     { href: "/",                label: "Market Intelligence", desc: "Pre-open roadmap and cross-asset stress" },
     { href: "/breach",          label: "Engine 1",  desc: "Earnings IC / IV-crush desktop" },
     { href: "/spx",             label: "Engine 2",  desc: "SPX/SPY iron condor scanner" },
+    { href: "/red-dog",         label: "Engine 4",  desc: "Mean-reversion scanner (Red Dog)" },
+    { href: "/ichimoku",        label: "Engine 5",  desc: "Trend-continuation scanner (Ichimoku)" },
     { href: "/post-event",      label: "Engine 7",  desc: "Post-event trade extension evaluator" },
     { href: "/compare",         label: "Engine 10", desc: "Multi-ticker side-by-side" },
   ];
