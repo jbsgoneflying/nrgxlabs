@@ -339,7 +339,16 @@ function renderSignals(payload) {
   
   if (actionable.length > 0) {
     actionableGrid.innerHTML = actionable.map(s => renderSignalCard(s, false)).join("");
-    actionableMeta.textContent = `${actionable.length} fresh trigger${actionable.length !== 1 ? 's' : ''} ready to trade`;
+    // Lead with the reconciled verdict mix so the header never overstates "ready
+    // to trade" when the regime/gamma has stood names down.
+    const vCount = (st) => actionable.filter(s => (s.verdict && s.verdict.status) === st).length;
+    const vt = vCount("TRADABLE"), vw = vCount("WATCH"), vs = vCount("STAND_DOWN");
+    const vParts = [];
+    if (vt) vParts.push(`${vt} tradable`);
+    if (vw) vParts.push(`${vw} watch`);
+    if (vs) vParts.push(`${vs} stand-down`);
+    actionableMeta.textContent = `${actionable.length} fresh trigger${actionable.length !== 1 ? 's' : ''}` +
+      (vParts.length ? ` — ${vParts.join(", ")}` : "");
     actionableSection.classList.remove("hidden");
   } else {
     actionableSection.classList.add("hidden");
@@ -477,13 +486,14 @@ async function handleScan(e) {
     }
     
     const actionable = payload.actionableCount ?? 0;
-    const structure = payload.structureCount ?? 0;
+    const structureTotal = payload.structureTotal ?? payload.structureCount ?? 0;
     const rejected = payload.rejectedCount ?? 0;
-    const total = actionable + structure;
-    
-    let statusMsg = `Found ${total} A+ setup${total !== 1 ? 's' : ''}`;
-    if (actionable > 0) statusMsg += ` (${actionable} actionable)`;
-    if (rejected > 0) statusMsg += `. ${rejected} rejected as impulse bars.`;
+    const totalAPlus = payload.totalAPlus ?? (actionable + structureTotal);
+
+    let statusMsg = `Found ${totalAPlus} A+ setup${totalAPlus !== 1 ? 's' : ''}`;
+    if (actionable > 0) statusMsg += ` · ${actionable} actionable now`;
+    if (structureTotal > 0) statusMsg += ` · ${structureTotal} approaching`;
+    if (rejected > 0) statusMsg += ` · ${rejected} rejected (impulse bars)`;
     setStatus(statusMsg);
     
     // Newly scanned signals are persisted server-side; refresh the tracker view.
@@ -533,6 +543,14 @@ async function deskTrack(ticker, status, signalDate, note) {
     }
     const data = await resp.json();
     renderTracker(data.signals);
+    // Optimistically reflect the desk state on any matching card button.
+    try {
+      const sel = `.signalCard[data-ticker="${(window.CSS && CSS.escape) ? CSS.escape(ticker) : ticker}"] .ikTrackBtn`;
+      document.querySelectorAll(sel).forEach(b => {
+        b.textContent = status;
+        b.classList.add("isTracked");
+      });
+    } catch (_) { /* selector best-effort */ }
     setStatus(`${ticker} marked "${status}".`);
   } catch (e) {
     setStatus(`Tracker error: ${e.message}`, "error");
