@@ -229,3 +229,103 @@ def test_build_opportunity_set_combines_sources():
     summary = aggregator.summarize_opportunities(opps)
     assert summary["total"] == len(opps)
     assert summary["actionable"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# Earnings radar (facts) + aggregator wiring
+# ---------------------------------------------------------------------------
+
+
+import datetime as _dt
+
+from backend.desk_brain import earnings_radar as _radar
+
+
+def _fake_calendar(start, end):
+    """Mimic eodhd_earnings_calendar.get_earnings_calendar output shape."""
+    return {
+        "2026-06-02": [
+            {"ticker": "AVGO", "name": "Broadcom", "report_date": "2026-06-02",
+             "timing_label": "AMC", "market_cap": 2_100_000_000_000.0, "sector": "Technology"},
+        ],
+        "2026-06-05": [
+            {"ticker": "ORCL", "name": "Oracle", "report_date": "2026-06-05",
+             "timing_label": "BMO", "market_cap": 400_000_000_000.0, "sector": "Technology"},
+        ],
+    }
+
+
+def test_earnings_radar_facts_and_base_materiality(monkeypatch):
+    monkeypatch.setattr(
+        "backend.eodhd_earnings_calendar.get_earnings_calendar", _fake_calendar, raising=False
+    )
+    radar = _radar.get_earnings_radar(
+        days_ahead=7, with_llm=False, as_of=_dt.date(2026, 6, 1)
+    )
+    assert radar["count"] == 2
+    by_ticker = {r["ticker"]: r for r in radar["reporters"]}
+    # Facts preserved verbatim from the calendar source.
+    assert by_ticker["AVGO"]["timing"] == "AMC"
+    assert by_ticker["AVGO"]["reportDate"] == "2026-06-02"
+    assert by_ticker["ORCL"]["timing"] == "BMO"
+    # Base materiality is bounded and AVGO (bigger + sooner) outranks ORCL.
+    for r in radar["reporters"]:
+        assert 0.0 <= r["materiality"] <= 100.0
+        assert r["llmMateriality"] is None  # LLM disabled
+    assert by_ticker["AVGO"]["materiality"] > by_ticker["ORCL"]["materiality"]
+    # Sorted by materiality descending.
+    assert radar["reporters"][0]["ticker"] == "AVGO"
+    assert radar["llmSource"] == "none"
+
+
+def test_earnings_radar_handles_source_failure(monkeypatch):
+    def _boom(start, end):
+        raise RuntimeError("EODHD_API_TOKEN not set")
+
+    monkeypatch.setattr(
+        "backend.eodhd_earnings_calendar.get_earnings_calendar", _boom, raising=False
+    )
+    radar = _radar.get_earnings_radar(days_ahead=7, with_llm=False, as_of=_dt.date(2026, 6, 1))
+    assert radar["count"] == 0
+    assert radar["reporters"] == []
+
+
+def test_aggregator_from_earnings_radar():
+    radar = {
+        "reporters": [
+            {"ticker": "AVGO", "name": "Broadcom", "reportDate": "2026-06-02", "timing": "AMC",
+             "marketCap": 2_100_000_000_000.0, "sector": "Technology", "daysToReport": 1, "materiality": 92.0},
+            {"ticker": "ORCL", "name": "Oracle", "reportDate": "2026-06-05", "timing": "BMO",
+             "marketCap": 400_000_000_000.0, "sector": "Technology", "daysToReport": 4, "materiality": 55.0},
+        ]
+    }
+    opps = aggregator.from_earnings_radar(radar)
+    assert len(opps) == 2
+    avgo = next(o for o in opps if o.ticker == "AVGO")
+    assert avgo.engine_id == 1
+    assert avgo.sleeve == sleeves.SLEEVE_VOLATILITY
+    assert avgo.structure == "earnings_ic"
+    assert avgo.conviction == 92.0
+    assert avgo.is_actionable
+    assert "2026-06-02" in avgo.summary and "AMC" in avgo.summary
+    # Empty / malformed input degrades safely.
+    assert aggregator.from_earnings_radar(None) == []
+    assert aggregator.from_earnings_radar({}) == []
+
+
+def test_aggregator_from_vix_alert():
+    # No spike -> no opportunity.
+    assert aggregator.from_vix_alert({"detected": False}) == []
+    assert aggregator.from_vix_alert(None) == []
+    # Spike detected -> one fade opportunity in the volatility sleeve.
+    opps = aggregator.from_vix_alert(
+        {"detected": True, "vixCurrent": 32.0, "spikePctAboveMA": 45.0, "zScore": 2.4}
+    )
+    assert len(opps) == 1
+    o = opps[0]
+    assert o.engine_id == 12
+    assert o.ticker == "VIX"
+    assert o.sleeve == sleeves.SLEEVE_VOLATILITY
+    assert o.direction == "sell_vol"
+    assert 40.0 <= o.conviction <= 100.0
+    assert o.is_actionable

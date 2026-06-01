@@ -229,6 +229,81 @@ def from_signal_list(
     return out
 
 
+def from_earnings_radar(radar: Optional[Dict[str, Any]]) -> List[Opportunity]:
+    """Normalise the earnings radar into volatility/income opportunities.
+
+    Each mega-cap reporter becomes an E1 earnings-IC candidate carrying its
+    *factual* report date + BMO/AMC timing (from EODHD) and a materiality-driven
+    conviction. This is how Desk Brain auto-flags the names to run E1/E15 on.
+    """
+    out: List[Opportunity] = []
+    if not isinstance(radar, dict):
+        return out
+    edge = sleeves.get_engine_edge(1)
+    for r in (radar.get("reporters") or []):
+        ticker = str(r.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        timing = str(r.get("timing") or "TBD")
+        report_date = str(r.get("reportDate") or "")
+        mcap_b = round(float(r.get("marketCap") or 0.0) / 1e9, 0)
+        out.append(
+            Opportunity(
+                engine_id=1,
+                engine_name=edge.engine_name or "Earnings Hold Risk (IC)",
+                sleeve=sleeves.SLEEVE_VOLATILITY,
+                ticker=ticker,
+                direction="sell_vol",
+                structure="earnings_ic",
+                conviction=max(0.0, min(100.0, float(r.get("materiality") or 0.0))),
+                verdict=_VERDICT_TRADABLE,
+                desk_status="",
+                summary=f"Earnings {report_date} {timing} · ${mcap_b:.0f}B · {r.get('sector') or ''}".strip(),
+                source="earnings_radar",
+                raw={
+                    "reportDate": report_date,
+                    "timing": timing,
+                    "marketCap": r.get("marketCap"),
+                    "sector": r.get("sector"),
+                    "daysToReport": r.get("daysToReport"),
+                },
+            )
+        )
+    return out
+
+
+def from_vix_alert(alert: Optional[Dict[str, Any]]) -> List[Opportunity]:
+    """Normalise the cheap E12 Redis spike alert into a fade opportunity.
+
+    Only emits when a spike is currently detected. Conviction scales with the
+    spike magnitude above the 20d MA (capped) — bigger dislocations are richer
+    fades, though the E12 engine itself sizes/structures the actual trade.
+    """
+    if not isinstance(alert, dict) or not alert.get("detected"):
+        return []
+    edge = sleeves.get_engine_edge(12)
+    spike_pct = _f(alert.get("spikePctAboveMA")) or 0.0
+    # 0% above MA -> 40 conviction floor; ~+60% -> ~100.
+    conviction = max(40.0, min(100.0, 40.0 + spike_pct))
+    vix = _f(alert.get("vixCurrent"))
+    return [
+        Opportunity(
+            engine_id=12,
+            engine_name=edge.engine_name or "VIX Spike Fade",
+            sleeve=sleeves.SLEEVE_VOLATILITY,
+            ticker="VIX",
+            direction="sell_vol",
+            structure="vix_fade",
+            conviction=conviction,
+            verdict=_VERDICT_TRADABLE,
+            desk_status="",
+            summary=f"VIX spike detected: {vix if vix is not None else '?'} ({spike_pct:.0f}% > 20d MA) — fadeable",
+            source="e12_alert",
+            raw={"vixCurrent": vix, "spikePctAboveMA": spike_pct, "zScore": alert.get("zScore")},
+        )
+    ]
+
+
 def from_consensus(consensus: Any) -> List[Opportunity]:
     """Normalise a consensus_engine.ConsensusResult's income-sleeve signals.
 
@@ -285,12 +360,16 @@ def build_opportunity_set(
     reddog_tracker: Optional[Dict[str, Any]] = None,
     ichimoku_tracker: Optional[Dict[str, Any]] = None,
     consensus: Any = None,
+    earnings_radar: Optional[Dict[str, Any]] = None,
+    vix_alert: Optional[Dict[str, Any]] = None,
     extra: Optional[List[Opportunity]] = None,
 ) -> List[Opportunity]:
     """Assemble the normalised opportunity set from all wired sources."""
     opps: List[Opportunity] = []
     opps.extend(from_reddog_tracker(reddog_tracker))
     opps.extend(from_ichimoku_tracker(ichimoku_tracker))
+    opps.extend(from_earnings_radar(earnings_radar))
+    opps.extend(from_vix_alert(vix_alert))
     if consensus is not None:
         opps.extend(from_consensus(consensus))
     if extra:

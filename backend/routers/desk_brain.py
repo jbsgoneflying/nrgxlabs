@@ -27,6 +27,8 @@ LOG = logging.getLogger("desk_brain")
 router = APIRouter()
 
 _BOOK_CACHE_KEY = "desk_brain:book:latest"
+_EARNINGS_CACHE_KEY = "desk_brain:earnings:latest"
+_EARNINGS_TTL_S = 6 * 60 * 60  # earnings facts don't change intraday
 _build_lock = threading.Lock()
 
 
@@ -73,6 +75,56 @@ def _ichimoku_tracker() -> Optional[Dict[str, Any]]:
         return get_all_signals()
     except Exception as exc:  # pragma: no cover - defensive
         LOG.warning("desk_brain: ichimoku tracker read failed: %s", exc)
+        return None
+
+
+def _earnings_radar(
+    *,
+    store: Any,
+    with_llm: bool,
+    force_refresh: bool = False,
+) -> Optional[Dict[str, Any]]:
+    """Next-7d mega-cap earnings radar (EODHD facts + optional LLM materiality).
+
+    Cached in Redis for 6h keyed by trade date so the (factual) calendar and
+    the LLM materiality call are not repeated on every book rebuild. Earnings
+    dates don't move intraday, so this is safe and keeps LLM cost bounded.
+    """
+    today = dt.date.today().isoformat()
+    if not force_refresh and store is not None:
+        try:
+            cached = store.get_json(_EARNINGS_CACHE_KEY)
+            if cached and cached.get("asOf") == today:
+                return cached
+        except Exception:  # pragma: no cover - defensive
+            pass
+    try:
+        from backend.config import get_flags
+        from backend.desk_brain.earnings_radar import get_earnings_radar
+
+        radar = get_earnings_radar(
+            days_ahead=7,
+            with_llm=with_llm and getattr(get_flags(), "ENABLE_FRONT_LAYER_LLM", True),
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        LOG.warning("desk_brain: earnings radar build failed: %s", exc)
+        return None
+    if store is not None and radar.get("reporters"):
+        try:
+            store.set_json(_EARNINGS_CACHE_KEY, radar, ttl_s=_EARNINGS_TTL_S)
+        except Exception:  # pragma: no cover - defensive
+            pass
+    return radar
+
+
+def _vix_alert(store: Any) -> Optional[Dict[str, Any]]:
+    """Cheap E12 spike-alert read from Redis (written by the spike monitor)."""
+    if store is None:
+        return None
+    try:
+        return store.get_json("e12:alert:latest")
+    except Exception as exc:  # pragma: no cover - defensive
+        LOG.warning("desk_brain: vix alert read failed: %s", exc)
         return None
 
 
@@ -170,11 +222,15 @@ def _build_book(*, force_refresh: bool, with_llm: bool = True) -> Dict[str, Any]
     reddog = _reddog_tracker()
     ichimoku = _ichimoku_tracker()
     consensus = _consensus(regime)
+    earnings = _earnings_radar(store=store, with_llm=with_llm, force_refresh=force_refresh)
+    vix_alert = _vix_alert(store)
 
     opportunities = aggregator.build_opportunity_set(
         reddog_tracker=reddog,
         ichimoku_tracker=ichimoku,
         consensus=consensus,
+        earnings_radar=earnings,
+        vix_alert=vix_alert,
         extra=_regime_income_lean(regime),
     )
     opp_summary = aggregator.summarize_opportunities(opportunities)
@@ -228,6 +284,7 @@ def _build_book(*, force_refresh: bool, with_llm: bool = True) -> Dict[str, Any]
         "sleeveCatalogue": sleeves.sleeve_list(),
         "opportunities": [o.to_dict() for o in opportunities],
         "opportunitySummary": opp_summary,
+        "earnings": earnings or {},
         "llm": synthesis,
         "cached": False,
     }
@@ -277,6 +334,29 @@ def refresh_book(with_llm: bool = Query(True, description="Include LLM desk-head
         except Exception as exc:
             LOG.exception("desk_brain: book refresh failed")
             raise HTTPException(status_code=500, detail=f"Desk Brain refresh failed: {exc}")
+
+
+@router.get("/api/desk-brain/earnings")
+def get_earnings_radar_route(
+    with_llm: bool = Query(True, description="Include LLM materiality ranking + narrative"),
+    refresh: bool = Query(False, description="Force a fresh EODHD + LLM pull"),
+):
+    """Next-7d mega-cap earnings radar (EODHD facts + LLM materiality).
+
+    Standalone view of the names Desk Brain is flagging to run E1/E15 on.
+    """
+    _require_enabled()
+    try:
+        from backend.redis_store import get_store_optional
+
+        store = get_store_optional()
+        radar = _earnings_radar(store=store, with_llm=with_llm, force_refresh=refresh)
+        return radar or {"asOf": dt.date.today().isoformat(), "count": 0, "reporters": [], "narrative": {}}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        LOG.exception("desk_brain: earnings radar failed")
+        raise HTTPException(status_code=500, detail=f"Desk Brain earnings radar failed: {exc}")
 
 
 @router.post("/api/desk-brain/paper/record")

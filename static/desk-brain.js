@@ -128,6 +128,57 @@
     el.innerHTML = html || '<span class="dbMuted">No desk-head synthesis available.</span>';
   }
 
+  function capB(v) { return (v == null ? "—" : "$" + (Math.round(v / 1e8) / 10).toFixed(1) + "B"); }
+
+  function timingBadge(t) {
+    var k = String(t || "TBD").toUpperCase();
+    var cls = k === "BMO" ? "dbTiming--bmo" : (k === "AMC" ? "dbTiming--amc" : "dbTiming--tbd");
+    return '<span class="dbTiming ' + cls + '">' + esc(k) + "</span>";
+  }
+
+  function renderEarnings(radar) {
+    var body = $("dbEarnBody");
+    var empty = $("dbEarnEmpty");
+    var badge = $("dbEarnSource");
+    var narr = $("dbEarnNarrative");
+    body.innerHTML = "";
+    radar = radar || {};
+    var reporters = radar.reporters || [];
+
+    badge.textContent = radar.llmSource === "llm" ? "EODHD + LLM" : (reporters.length ? "EODHD (facts)" : "");
+
+    var n = radar.narrative || {};
+    var rows = [["Lead names", n.lead_names], ["Sector read", n.sector_read], ["Desk takeaway", n.desk_takeaway]];
+    var nhtml = rows.map(function (r) {
+      if (!r[1]) return "";
+      return '<div class="dbLlmRow"><b>' + esc(r[0]) + "</b><span>" + esc(r[1]) + "</span></div>";
+    }).join("");
+    narr.innerHTML = nhtml || '<span class="dbMuted">Factual EODHD calendar — $100B+ names reporting in the next 7 sessions. Materiality = market-cap × proximity' + (radar.llmSource === "llm" ? " × LLM read." : ".") + "</span>";
+
+    if (!reporters.length) {
+      empty.style.display = "block";
+      empty.textContent = "No $100B+ earnings in the next 7 days, or the calendar source is unavailable.";
+      return;
+    }
+    empty.style.display = "none";
+    reporters.forEach(function (r) {
+      var mat = Math.max(0, Math.min(100, r.materiality || 0));
+      var tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td>" + esc(r.reportDate) + "</td>" +
+        "<td><b>" + esc(r.ticker) + "</b></td>" +
+        "<td>" + esc(r.name) + "</td>" +
+        "<td>" + timingBadge(r.timing) + "</td>" +
+        "<td>" + esc(r.sector || "—") + "</td>" +
+        '<td class="dbNum">' + capB(r.marketCap) + "</td>" +
+        '<td class="dbNum"><div style="display:flex;align-items:center;gap:8px;justify-content:flex-end">' +
+          '<span>' + num(mat, 0) + '</span>' +
+          '<div class="dbMatBar"><div class="dbMatFill" style="width:' + mat.toFixed(0) + '%"></div></div>' +
+        "</div></td>";
+      body.appendChild(tr);
+    });
+  }
+
   function renderConflicts(book) {
     var el = $("dbConflicts");
     var items = (book.conflicts || []).concat(book.notes || []);
@@ -240,6 +291,7 @@
     renderBanner(book);
     renderSleeves(book);
     renderBook(book);
+    renderEarnings(payload.earnings);
     renderLlm(payload.llm);
     renderConflicts(book);
     renderEdges(payload.edges);

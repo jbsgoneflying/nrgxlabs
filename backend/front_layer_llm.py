@@ -1341,6 +1341,26 @@ and total heat. Under 220 words.
 Return valid JSON:
 { "lean_today": "...", "conflicts": "...", "what_would_change_my_mind": "...",
   "sleeve_tilt": { "volatility": 1.0, "directional": 1.0, "overlay": 1.0 }, "desk_takeaway": "..." }""",
+
+    "earnings_radar": """You are the earnings-desk lead at a multi-strategy prop firm, triaging the
+mega-cap ($100B+) names reporting over the next several sessions for IV-crush / iron-condor candidates.
+
+You are given a FACTUAL list of reporters (ticker, name, report date, BMO/AMC timing, market cap, sector,
+days to report). THESE DATES AND TIMES ARE GROUND TRUTH — never change, second-guess, or invent them.
+
+Your job is to score *materiality* — which names are most worth running the earnings engines on — and to
+flag clustering risk. Materiality should reward: large size, market-moving / index-weight names, clean
+single-stock setups, and rich-IV sectors; and penalise names whose move is unlikely to be tradable.
+
+1. MATERIALITY — Score EVERY reporter 0-100 (100 = top-priority to work today). Use the provided facts only.
+2. LEAD NAMES — The 2-4 names the desk should prep first and why (cite date + BMO/AMC).
+3. SECTOR READ — Any clustering (e.g. several Tech names same week) and what that means for risk/correlation.
+4. DESK TAKEAWAY — One sentence: how the desk should approach this earnings window.
+
+Rules: Never invent or alter a reporting date/time. Never recommend specific strikes or sizes. Under 220 words.
+
+Return valid JSON:
+{ "materiality": { "TICKER": 0-100, ... }, "lead_names": "...", "sector_read": "...", "desk_takeaway": "..." }""",
 }
 
 _CARD_INSIGHT_KEYS: Dict[str, set] = {
@@ -1399,12 +1419,14 @@ _CARD_INSIGHT_KEYS: Dict[str, set] = {
     "ik_gate": {"gate_status", "regime_for_continuation", "vol_direction_impact", "desk_takeaway"},
     # Desk Brain (meta-allocator) card type
     "desk_brain": {"lean_today", "conflicts", "what_would_change_my_mind", "sleeve_tilt", "desk_takeaway"},
+    "earnings_radar": {"materiality", "lead_names", "sector_read", "desk_takeaway"},
 }
 
 _CARD_TOKEN_LIMITS: Dict[str, int] = {
     "e1_decision": 3000,
     "e2_expected_move": 3000,
     "desk_brain": 2000,
+    "earnings_radar": 2200,
 }
 
 
@@ -1688,6 +1710,89 @@ def generate_desk_brain_synthesis(
 
     except Exception as e:
         return _desk_brain_fallback(f"{type(e).__name__}: {e}")
+
+
+def _earnings_radar_fallback(reason: str) -> Dict[str, Any]:
+    """Safe fallback: empty materiality so the deterministic base score stands."""
+    return {
+        "materiality": {},
+        "lead_names": "LLM materiality unavailable; using deterministic cap x proximity ranking.",
+        "sector_read": "",
+        "desk_takeaway": "Work the largest, soonest reporters first.",
+        "_source": "fallback",
+        "_fallback_reason": reason,
+    }
+
+
+def generate_earnings_radar_synthesis(
+    context: Dict[str, Any],
+    *,
+    model: Optional[str] = None,
+) -> Dict[str, Any]:
+    """LLM materiality ranking + narrative for the earnings radar.
+
+    Returns a NUMERIC ``materiality`` dict (ticker -> 0..100) plus narrative
+    strings. The reporter facts (dates / BMO-AMC) are NEVER sent back as
+    mutable — the caller keeps the EODHD truth and only consumes the scores.
+    Never raises — degrades to an empty-materiality fallback.
+    """
+    client = _get_openai_client()
+    if client is None:
+        return _earnings_radar_fallback("LLM client unavailable")
+
+    if not _rate_limiter.acquire():
+        return _earnings_radar_fallback(_rate_limit_msg("Earnings Radar"))
+
+    system_prompt = _CARD_INSIGHT_PROMPTS.get("earnings_radar", "")
+    required_keys = _CARD_INSIGHT_KEYS.get("earnings_radar", set())
+    model = model or os.getenv("DESK_BRAIN_MODEL", "gpt-5.5").strip()
+
+    # Tickers we will accept scores for (ignore any hallucinated symbols).
+    valid_tickers = {
+        str(r.get("ticker", "")).upper()
+        for r in (context.get("reporters") or [])
+        if r.get("ticker")
+    }
+
+    try:
+        payload_str = json.dumps(context, default=str)
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": payload_str},
+            ],
+            temperature=1,
+            max_completion_tokens=_CARD_TOKEN_LIMITS.get("earnings_radar", 2200),
+            timeout=30,
+            response_format={"type": "json_object"},
+        )
+        content = response.choices[0].message.content.strip()
+        result = _parse_llm_json(content)
+        if result is None or not required_keys.issubset(set(result.keys())):
+            return _earnings_radar_fallback("LLM returned invalid JSON")
+
+        raw_scores = result.get("materiality") or {}
+        materiality: Dict[str, float] = {}
+        if isinstance(raw_scores, dict):
+            for tk, val in raw_scores.items():
+                tkey = str(tk).upper()
+                if tkey not in valid_tickers:
+                    continue
+                try:
+                    materiality[tkey] = round(max(0.0, min(100.0, float(val))), 1)
+                except (TypeError, ValueError):
+                    continue
+
+        return {
+            "materiality": materiality,
+            "lead_names": str(result.get("lead_names", ""))[:800],
+            "sector_read": str(result.get("sector_read", ""))[:800],
+            "desk_takeaway": str(result.get("desk_takeaway", ""))[:800],
+            "_source": "llm",
+        }
+    except Exception as e:
+        return _earnings_radar_fallback(f"{type(e).__name__}: {e}")
 
 
 # ---------------------------------------------------------------------------
