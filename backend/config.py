@@ -565,6 +565,8 @@ class FeatureFlags:
     # 20-day average dollar volume floor for the Red Dog universe (liquidity).
     ENGINE3_MIN_DOLLAR_ADV: float = 20_000_000.0
     GATE_ICH_REGIME_ALLOW: str = "Risk-On,Transitional"
+    # Direction-aware: bearish continuation is favored in risk-off / stressed tape.
+    GATE_ICH_REGIME_ALLOW_SHORT: str = "Risk-Off,Stressed,Transitional"
     GATE_ICH_VOL_STATE_ALLOW: str = "compressing,stable,NORMAL,FALLING,falling,flat"
     GATE_ICH_MACRO_PROXIMITY_DAYS: int = 1
 
@@ -1012,6 +1014,7 @@ class FeatureFlags:
             GATE_RD_VOL_STATE_ALLOW=os.getenv("GATE_RD_VOL_STATE_ALLOW", "expanding,unstable,RISING,rising"),
             GATE_RD_MACRO_PROXIMITY_DAYS=_get_int("GATE_RD_MACRO_PROXIMITY_DAYS", 1),
             GATE_ICH_REGIME_ALLOW=os.getenv("GATE_ICH_REGIME_ALLOW", "Risk-On,Transitional"),
+            GATE_ICH_REGIME_ALLOW_SHORT=os.getenv("GATE_ICH_REGIME_ALLOW_SHORT", "Risk-Off,Stressed,Transitional"),
             GATE_ICH_VOL_STATE_ALLOW=os.getenv("GATE_ICH_VOL_STATE_ALLOW", "compressing,stable,NORMAL,FALLING,falling,flat"),
             GATE_ICH_MACRO_PROXIMITY_DAYS=_get_int("GATE_ICH_MACRO_PROXIMITY_DAYS", 1),
 

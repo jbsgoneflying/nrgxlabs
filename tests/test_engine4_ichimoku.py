@@ -43,6 +43,7 @@ from backend.engine4_ichimoku import (
 )
 from backend.gating import (
     reconcile_ichimoku_verdict,
+    gate_ichimoku,
     VERDICT_TRADABLE,
     VERDICT_WATCH,
     VERDICT_STAND_DOWN,
@@ -768,6 +769,33 @@ class TestReconcileIchimokuVerdict:
         v = reconcile_ichimoku_verdict(sig)
         assert v["status"] == VERDICT_STAND_DOWN
 
+class TestDirectionAwareGate:
+    def test_bearish_continuation_allowed_in_stressed(self):
+        """A short continuation should NOT be suppressed in a stressed tape —
+        that's exactly when down-trends accelerate."""
+        d = gate_ichimoku(ticker="ABT", setup_direction="bearish",
+                          regime_label="Stressed", vol_direction="falling")
+        assert d.status != "SUPPRESS"
+
+    def test_bullish_continuation_suppressed_in_stressed(self):
+        """A long continuation in a stressed tape is correctly stood down."""
+        d = gate_ichimoku(ticker="HWM", setup_direction="bullish",
+                          regime_label="Stressed", vol_direction="falling")
+        assert d.status == "SUPPRESS"
+
+    def test_bullish_continuation_allowed_in_risk_on(self):
+        d = gate_ichimoku(ticker="HWM", setup_direction="bullish",
+                          regime_label="Risk-On", vol_direction="falling")
+        assert d.status != "SUPPRESS"
+
+    def test_bearish_continuation_suppressed_in_risk_on(self):
+        """A short continuation while the tape is risk-on is a fade — stand down."""
+        d = gate_ichimoku(ticker="ABT", setup_direction="bearish",
+                          regime_label="Risk-On", vol_direction="falling")
+        assert d.status == "SUPPRESS"
+
+
+class TestReconcileIchimokuVerdictHostileGamma:
     def test_hostile_gamma_caps_at_watch(self):
         sig = {"quality": {"grade": "A+", "score": 85}, "freshness": {"bucket": "actionable"},
                "gate": {"status": "TRADABLE"}, "tags": []}

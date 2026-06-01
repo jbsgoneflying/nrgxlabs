@@ -160,12 +160,18 @@ def engine4_ichimoku_scan(
         if flags.ENABLE_GATING and isinstance(result, dict):
             try:
                 gate_ctx = _get_gate_context(flags)
+                regime_allow = [s.strip() for s in str(flags.GATE_ICH_REGIME_ALLOW).split(",") if s.strip()]
+                regime_allow_short = [s.strip() for s in str(flags.GATE_ICH_REGIME_ALLOW_SHORT).split(",") if s.strip()]
+                vol_state_allow = [s.strip() for s in str(flags.GATE_ICH_VOL_STATE_ALLOW).split(",") if s.strip()]
                 for key in ("actionable", "structure", "watchlist"):
                     setups = result.get(key)
                     if isinstance(setups, list):
                         gate_scan_results(
                             scan_results=setups,
                             engine="engine4_ichimoku",
+                            regime_allow=regime_allow,
+                            regime_allow_short=regime_allow_short,
+                            vol_state_allow=vol_state_allow,
                             **gate_ctx,
                         )
                 gs = summarize_gates(

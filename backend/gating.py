@@ -242,17 +242,25 @@ def gate_ichimoku(
     high_events_within_days: int = 0,
     # Config overrides
     regime_allow: Optional[List[str]] = None,
+    regime_allow_short: Optional[List[str]] = None,
     vol_state_allow: Optional[List[str]] = None,
     macro_proximity_days: int = 1,
 ) -> GateDecision:
     """Gate an Ichimoku Cloud Continuation setup.
 
-    Ichimoku thrives when:
-      - Regime is Risk-On or stable Transitional
-      - Vol state is compressing or stable
+    Continuation is *direction-aware* — a trend-following engine should not be
+    suppressed simply because the tape is risk-off; it depends which way the
+    name is trending:
+      - Bullish continuation thrives in Risk-On / stable Transitional tape.
+      - Bearish continuation thrives in Risk-Off / Stressed / Transitional tape
+        (short trends accelerate exactly when the broad regime is stressed).
+      - Either way, prefer non-expanding vol so the pullback resolves cleanly.
     """
     reasons: List[GateReason] = []
-    allowed_regimes = regime_allow or ["Risk-On", "Transitional"]
+    allowed_long = regime_allow or ["Risk-On", "Transitional"]
+    allowed_short = regime_allow_short or ["Risk-Off", "Stressed", "Transitional"]
+    is_bearish = str(setup_direction or "").lower() in ("bearish", "bear", "short")
+    allowed_regimes = allowed_short if is_bearish else allowed_long
     allowed_vol = vol_state_allow or ["compressing", "stable", "NORMAL", "FALLING", "falling", "flat"]
 
     r = _check_regime(regime_label, allowed_regimes, severity="HARD")
@@ -395,21 +403,24 @@ def gate_scan_results(
     gamma_ctx: Optional[dict] = None,
     high_events_within_days: int = 0,
     regime_allow: Optional[List[str]] = None,
+    regime_allow_short: Optional[List[str]] = None,
     vol_state_allow: Optional[List[str]] = None,
 ) -> List[dict]:
     """Apply gating to a list of scan results, adding gate decision to each.
 
     Returns the same list with 'gate' field injected into each result dict.
-    `regime_allow` / `vol_state_allow` let the router pass config-driven
-    allow-lists (so the policy is tunable without a code change).
+    `regime_allow` / `regime_allow_short` / `vol_state_allow` let the router
+    pass config-driven allow-lists (so the policy is tunable without a code
+    change). `regime_allow_short` is Ichimoku-only (direction-aware gating).
     """
+    is_ichimoku = engine != "engine3_red_dog"
     gate_fn = gate_red_dog if engine == "engine3_red_dog" else gate_ichimoku
 
     for result in scan_results:
         ticker = str(result.get("ticker") or result.get("symbol") or "")
         direction = str(result.get("direction") or "")
 
-        decision = gate_fn(
+        kwargs = dict(
             ticker=ticker,
             setup_direction=direction or None,
             regime_label=regime_label,
@@ -419,6 +430,10 @@ def gate_scan_results(
             regime_allow=regime_allow,
             vol_state_allow=vol_state_allow,
         )
+        if is_ichimoku:
+            kwargs["regime_allow_short"] = regime_allow_short
+
+        decision = gate_fn(**kwargs)
         result["gate"] = decision.to_dict()
 
     return scan_results
