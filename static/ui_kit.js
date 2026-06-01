@@ -734,6 +734,10 @@ function initDrag(popupEl, headerEl, opts) {
 
   function onDown(e) {
     if (o.closeSelector && e.target.closest(o.closeSelector)) return;
+    // When a handleSelector is set, the listener can be bound to a persistent
+    // container while drags are only initiated from the handle (e.g. a header
+    // that gets re-rendered). Ignore presses that don't start on the handle.
+    if (o.handleSelector && !e.target.closest(o.handleSelector)) return;
     dragging = true;
     popupEl.classList.add("isDragging");
     const p = pointer(e);

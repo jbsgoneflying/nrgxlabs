@@ -190,10 +190,12 @@
       closeBtn.addEventListener("click", closeCalculator);
     }
 
-    // Drag functionality
+    // Drag functionality. Bind to the persistent container (not the header):
+    // the header is re-rendered every time the calculator opens on a new card,
+    // so a listener attached to the header would be lost after the first open.
+    // handleSelector keeps drags initiated only from the header.
     if (!_posCalcDragBound) {
-      const header = calc.querySelector(".posCalcHeader");
-      if (header) initDrag(calc, header, { closeSelector: ".posCalcCloseBtn" });
+      initDrag(calc, calc, { handleSelector: ".posCalcHeader", closeSelector: ".posCalcCloseBtn" });
       _posCalcDragBound = true;
     }
 
