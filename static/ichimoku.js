@@ -13,6 +13,7 @@ function fmtMoney(x) {
 
 // State
 let lastPayload = null;
+let lastTrackerSignals = null;  // last desk-tracker payload, for row-level insight lookups
 
 function setLoading(isLoading, statusMsg) {
   const btn = $("runBtn");
@@ -564,6 +565,7 @@ function renderTracker(signals) {
   const summary = $("trackerSummary");
   if (!body) return;
   if (!signals) { body.innerHTML = '<div class="muted" style="font-size:12px;">No tracked signals yet.</div>'; return; }
+  lastTrackerSignals = signals;
 
   const counts = signals.counts || {};
   if (summary) {
@@ -607,6 +609,7 @@ function renderTracker(signals) {
           <option value="">advance…</option>
           ${opts}
         </select>
+        <button type="button" class="trkInsight" data-ticker="${t}" data-date="${sd}" title="Desk insight on this trade" style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;border:1px solid rgba(0,122,255,.25);background:rgba(0,122,255,.06);color:#0a62c9;cursor:pointer;">Insight</button>
         <button type="button" class="trkRemove" data-ticker="${t}" data-date="${sd}" title="Remove from desk book" style="border:none;background:none;color:var(--muted);cursor:pointer;font-size:13px;line-height:1;">✕</button>
       </div>`;
   }).join("");
@@ -817,6 +820,32 @@ if (document.readyState === "loading") {
   }
   if (actionableGrid) actionableGrid.addEventListener("click", onCardClick);
   if (structureGrid) structureGrid.addEventListener("click", onCardClick);
+
+  // ── Desk Tracker rows → check in on a tracked trade with desk insight ──
+  // The scan card disappears once a name is no longer surfaced, so the tracker
+  // is where you "check in" on an open trade as the days progress.
+  var trackerBody = $("trackerBody");
+  if (trackerBody) {
+    trackerBody.addEventListener("click", function (ev) {
+      var btn = ev.target.closest(".trkInsight");
+      if (!btn || !lastTrackerSignals) return;
+      ev.stopPropagation();
+      var ticker = btn.getAttribute("data-ticker");
+      var date = btn.getAttribute("data-date");
+      var buckets = ["watching", "entered", "working", "broken", "exited",
+                     "triggered", "pending", "target_hit", "stopped", "expired", "invalidated"];
+      var rec = null;
+      for (var i = 0; i < buckets.length && !rec; i++) {
+        var arr = lastTrackerSignals[buckets[i]] || [];
+        for (var j = 0; j < arr.length; j++) {
+          if (arr[j].ticker === ticker && (!date || String(arr[j].signalDate || "") === date)) { rec = arr[j]; break; }
+        }
+      }
+      if (!rec) return;
+      var ix = Math.max(20, window.innerWidth - 470);
+      fetchInsight("ik_signal", rec, "Ichimoku: " + ticker + " (" + (rec.direction || "") + ", " + (rec.status || "tracked") + ")", ix, 96);
+    });
+  }
 
   // ── Gamma Context (SPX + NDX) ──
   var gammaEl = $("gammaSection");
