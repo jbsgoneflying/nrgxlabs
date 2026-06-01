@@ -151,6 +151,8 @@ class FeatureFlags:
     ENGINE4_MAX_WORKERS: int = 10                # Parallel workers for scanning
     ENGINE4_MIN_SCORE_DEFAULT: int = 50          # Default minimum score filter
     ENGINE4_APLUS_THRESHOLD: int = 75            # A+ grade threshold
+    ENGINE4_MIN_DOLLAR_ADV: float = 20_000_000.0  # 20d avg $ volume liquidity floor
+    ENGINE4_STRUCTURE_MAX: int = 8               # Cap the "Approaching" structure list
 
     # Engine 2 policy knobs (risk-only; env-driven; safe defaults)
     # NOTE (v2): these three flags are retained for backwards compatibility
@@ -689,6 +691,8 @@ class FeatureFlags:
             ENGINE4_MAX_WORKERS=_get_int("ENGINE4_MAX_WORKERS", 10),
             ENGINE4_MIN_SCORE_DEFAULT=_get_int("ENGINE4_MIN_SCORE_DEFAULT", 50),
             ENGINE4_APLUS_THRESHOLD=_get_int("ENGINE4_APLUS_THRESHOLD", 75),
+            ENGINE4_MIN_DOLLAR_ADV=_get_float("ENGINE4_MIN_DOLLAR_ADV", 20_000_000.0),
+            ENGINE4_STRUCTURE_MAX=_get_int("ENGINE4_STRUCTURE_MAX", 8),
 
             ENGINE2_ENTRY_DAYS=os.getenv("ENGINE2_ENTRY_DAYS", "mon,tue,wed"),
             ENGINE2_EM_MULTS=os.getenv("ENGINE2_EM_MULTS", "0.7,0.8,0.9,1.0,1.1,1.2"),
@@ -1215,6 +1219,8 @@ class FeatureFlags:
             ("ENGINE4_CACHE_TTL_BARS", int(self.ENGINE4_CACHE_TTL_BARS)),
             ("ENGINE4_CACHE_TTL_SCAN", int(self.ENGINE4_CACHE_TTL_SCAN)),
             ("ENGINE4_MAX_WORKERS", int(self.ENGINE4_MAX_WORKERS)),
+            ("ENGINE4_MIN_DOLLAR_ADV", float(self.ENGINE4_MIN_DOLLAR_ADV)),
+            ("ENGINE4_STRUCTURE_MAX", int(self.ENGINE4_STRUCTURE_MAX)),
             ("ENGINE4_MIN_SCORE_DEFAULT", int(self.ENGINE4_MIN_SCORE_DEFAULT)),
             ("ENGINE4_APLUS_THRESHOLD", int(self.ENGINE4_APLUS_THRESHOLD)),
         )

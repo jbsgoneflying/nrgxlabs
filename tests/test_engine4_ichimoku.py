@@ -38,7 +38,16 @@ from backend.engine4_ichimoku import (
     score_ichimoku_setup,
     build_ichimoku_signal,
     signal_to_dict,
+    compute_distance_to_actionable,
+    _entry_offset,
 )
+from backend.gating import (
+    reconcile_ichimoku_verdict,
+    VERDICT_TRADABLE,
+    VERDICT_WATCH,
+    VERDICT_STAND_DOWN,
+)
+from backend.engine4_backtest import backtest_from_bars
 
 
 # ---------------------------------------------------------------------------
@@ -655,3 +664,150 @@ class TestAtrSeries:
         result = compute_atr_series(bars, period=14)
         
         assert result["enabled"] is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: Continuous Scoring (2026-06 hardening sprint)
+# ---------------------------------------------------------------------------
+
+def _base_signal(**over):
+    s = {
+        "direction": "bullish", "chikouTangled": False, "volumeRatio": 1.3,
+        "closePosition": 0.70, "kijunSlope": "positive", "rsi": 58.0,
+        "cloudBias": "bullish", "cloudThickness": 3.0, "close": 100.0,
+        "timeInCloud": 2, "kijunFlatDays": 0,
+    }
+    s.update(over)
+    return s
+
+
+class TestContinuousScoring:
+    def test_volume_credit_is_continuous(self):
+        """Volume credit should ramp, not jump 0->15."""
+        low = score_ichimoku_setup(_base_signal(volumeRatio=1.0))["scores"]["volume"]
+        mid = score_ichimoku_setup(_base_signal(volumeRatio=1.3))["scores"]["volume"]
+        full = score_ichimoku_setup(_base_signal(volumeRatio=1.6))["scores"]["volume"]
+        assert low == 0.0
+        assert 0.0 < mid < 15.0
+        assert full == 15.0
+        assert low < mid < full
+
+    def test_rsi_credit_is_continuous(self):
+        """RSI recovery credit should scale with distance above 50."""
+        weak = score_ichimoku_setup(_base_signal(rsi=51.0))["scores"]["rsi"]
+        strong = score_ichimoku_setup(_base_signal(rsi=64.0))["scores"]["rsi"]
+        assert 0.0 < weak < strong <= 10.0
+
+    def test_two_aplus_setups_differentiate(self):
+        """Two strong setups with different magnitudes should not tie."""
+        a = score_ichimoku_setup(_base_signal(volumeRatio=1.25, rsi=53, closePosition=0.68),
+                                  gamma_context={"netGammaSign": "positive"})
+        b = score_ichimoku_setup(_base_signal(volumeRatio=1.6, rsi=64, closePosition=0.80),
+                                  gamma_context={"netGammaSign": "positive"})
+        assert b["score"] > a["score"]
+
+    def test_bearish_mirrors_bullish(self):
+        """A clean bearish setup should earn comparable credit to its bullish mirror."""
+        bull = score_ichimoku_setup(_base_signal(direction="bullish", rsi=64, closePosition=0.80,
+                                                  cloudBias="bullish", kijunSlope="positive"))
+        bear = score_ichimoku_setup(_base_signal(direction="bearish", rsi=36, closePosition=0.20,
+                                                  cloudBias="bearish", kijunSlope="negative"))
+        assert bull["scores"]["rsi"] == bear["scores"]["rsi"]
+        assert bull["scores"]["candle"] == bear["scores"]["candle"]
+
+
+class TestEntryOffset:
+    def test_atr_scaled_offset(self):
+        """Entry offset should scale with ATR, never below the floor."""
+        assert _entry_offset(None) == 0.05
+        assert _entry_offset(1.0) == 0.05  # 5% of 1.0 = 0.05 floor
+        assert _entry_offset(10.0) == 0.5  # 5% of 10 = 0.50
+
+    def test_entry_uses_offset(self):
+        bar = DailyBar(trade_date="2024-01-01", open=99, high=200.0, low=198.0,
+                       close=199.5, volume=1_000_000, vwap=None)
+        levels = compute_entry_levels(bar=bar, kijun=195.0, direction="bullish", atr=8.0)
+        # 5% of 8 = 0.40 above the high, not a flat penny.
+        assert abs(levels["entry"] - 200.4) < 1e-6
+
+
+class TestDistanceToActionable:
+    def test_actionable_is_zero(self):
+        assert compute_distance_to_actionable({"bucket": "actionable"}) == 0.0
+
+    def test_rejected_is_max(self):
+        assert compute_distance_to_actionable({"bucket": "rejected"}) == 999.0
+
+    def test_structure_ranks_by_staleness(self):
+        near = compute_distance_to_actionable({
+            "bucket": "structure", "barsSinceReclaim": 4, "kijunDistanceAtr": 1.6,
+        })
+        far = compute_distance_to_actionable({
+            "bucket": "structure", "barsSinceReclaim": 9, "kijunDistanceAtr": 4.0,
+            "triggerAlreadyRan": True,
+        })
+        assert 0.0 < near < far
+
+
+class TestReconcileIchimokuVerdict:
+    def test_actionable_clean_is_tradable(self):
+        sig = {"quality": {"grade": "A+", "score": 88}, "freshness": {"bucket": "actionable"},
+               "gate": {"status": "TRADABLE"}, "tags": []}
+        v = reconcile_ichimoku_verdict(sig, gamma_ctx={"environment": "supportive"})
+        assert v["status"] == VERDICT_TRADABLE
+
+    def test_structure_caps_at_watch(self):
+        sig = {"quality": {"grade": "A+", "score": 80}, "freshness": {"bucket": "structure"},
+               "gate": {"status": "TRADABLE"}, "tags": []}
+        v = reconcile_ichimoku_verdict(sig)
+        assert v["status"] == VERDICT_WATCH
+
+    def test_suppress_gate_stands_down(self):
+        sig = {"quality": {"grade": "A+", "score": 90}, "freshness": {"bucket": "actionable"},
+               "gate": {"status": "SUPPRESS"}, "tags": []}
+        v = reconcile_ichimoku_verdict(sig)
+        assert v["status"] == VERDICT_STAND_DOWN
+
+    def test_hostile_gamma_caps_at_watch(self):
+        sig = {"quality": {"grade": "A+", "score": 85}, "freshness": {"bucket": "actionable"},
+               "gate": {"status": "TRADABLE"}, "tags": []}
+        v = reconcile_ichimoku_verdict(sig, gamma_ctx={"environment": "challenging"})
+        assert v["status"] == VERDICT_WATCH
+
+
+class TestBacktestHarness:
+    def test_returns_expected_shape(self):
+        """Backtest should run on synthetic bars and return grade+bucket breakdowns."""
+        bars_by_ticker = {
+            "UP": make_bars(160, trend="up"),
+            "DOWN": make_bars(160, trend="down"),
+        }
+        result = backtest_from_bars(bars_by_ticker, min_score=0.0, warmup=80)
+        assert "overall" in result
+        assert "byGrade" in result
+        assert "byBucket" in result
+        assert result["params"]["tickersTested"] == 2
+        # Overall must always carry the standard stat keys.
+        for k in ("signals", "triggered", "winRate", "avgR", "expectancy"):
+            assert k in result["overall"]
+
+
+class TestDeskTracker:
+    def test_set_desk_status_persists(self):
+        from backend import engine4_screener as scr
+        scr._persist_signals([{
+            "ticker": "ZZTEST", "signalDate": "2024-02-02", "direction": "bullish",
+            "levels": {"entryTrigger": 10, "stopLoss": 9, "target1": 12},
+            "status": "pending",
+        }])
+        res = scr.set_desk_status("ZZTEST", desk_status="entered", note="filled at open")
+        assert res["ok"] is True
+        assert res["record"]["status"] == "entered"
+        all_sigs = scr.get_all_signals()
+        entered = [r for r in all_sigs.get("entered", []) if r.get("ticker") == "ZZTEST"]
+        assert len(entered) == 1
+
+    def test_invalid_desk_status_rejected(self):
+        from backend import engine4_screener as scr
+        res = scr.set_desk_status("ZZTEST", desk_status="bogus")
+        assert res["ok"] is False

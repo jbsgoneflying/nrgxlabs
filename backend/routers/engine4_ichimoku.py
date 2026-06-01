@@ -25,8 +25,14 @@ from backend.engine4_screener import (
     scan_single_ticker as compute_engine4_single_ticker,
     get_all_signals as get_engine4_signals,
     refresh_signal_statuses as refresh_engine4_statuses,
+    set_desk_status as set_engine4_desk_status,
 )
-from backend.gating import gate_scan_results, summarize_gates
+from backend.gating import (
+    gate_scan_results,
+    summarize_gates,
+    reconcile_ichimoku_verdict,
+    summarize_verdicts,
+)
 from backend.orats_client import OratsError
 
 router = APIRouter()
@@ -167,6 +173,24 @@ def engine4_ichimoku_scan(
                 )
                 result["gateSummary"] = gs
                 result["gateContext"] = gate_ctx
+
+                # Reconcile grade + freshness + gate + gamma into one
+                # continuation verdict per name, and lead the card with it.
+                market_gamma = result.get("marketGamma", {}) if isinstance(result.get("marketGamma"), dict) else {}
+                regime_label = gate_ctx.get("regime_label", "")
+                for key in ("actionable", "structure", "watchlist"):
+                    setups = result.get(key)
+                    if not isinstance(setups, list):
+                        continue
+                    for sig in setups:
+                        membership = str(sig.get("indexMembership") or "sp500")
+                        gctx = market_gamma.get("ndx") if membership == "nasdaq100" else market_gamma.get("spx")
+                        sig["verdict"] = reconcile_ichimoku_verdict(
+                            sig, gamma_ctx=gctx, regime_label=regime_label
+                        )
+                result["verdictSummary"] = summarize_verdicts(
+                    (result.get("actionable") or []) + (result.get("structure") or [])
+                )
             except Exception as gate_err:
                 LOG.warning(f"Gate injection failed for engine4: {gate_err}")
 
@@ -230,6 +254,105 @@ def engine4_ichimoku_status(
         raise
     except Exception as e:
         LOG.exception("Unhandled failure (engine4-ichimoku/status)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@router.post("/api/engine4-ichimoku/track")
+async def engine4_ichimoku_track(request: Request):
+    """Desk Trade Tracker override.
+
+    Body: {ticker, status, signalDate?, note?, pinned?}
+    `status` is one of watching/entered/working/broken/exited. Desk states
+    survive scan refreshes and are never clobbered by the auto-evaluator.
+    """
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE4_ICHIMOKU:
+        raise HTTPException(status_code=503, detail="Engine 4 (Ichimoku Continuation) is disabled.")
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body.")
+
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object.")
+
+    ticker = str(body.get("ticker") or "").strip().upper()
+    status = str(body.get("status") or "").strip().lower()
+    if not ticker or not status:
+        raise HTTPException(status_code=400, detail="ticker and status are required.")
+
+    try:
+        result = set_engine4_desk_status(
+            ticker,
+            desk_status=status,
+            signal_date=body.get("signalDate"),
+            note=body.get("note"),
+            pinned=body.get("pinned"),
+        )
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=result.get("error", "Could not update."))
+        return {"ok": True, "record": result.get("record"), "signals": get_engine4_signals()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOG.exception("Unhandled failure (engine4-ichimoku/track)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@router.get("/api/engine4-ichimoku/backtest")
+def engine4_ichimoku_backtest(
+    request: Request,
+    start: Optional[str] = Query(None, description="Backtest start (YYYY-MM-DD)"),
+    end: Optional[str] = Query(None, description="Backtest end (YYYY-MM-DD)"),
+    min_score: float = Query(75.0, ge=0, le=100, description="Min score to include"),
+    max_tickers: int = Query(40, ge=1, le=120, description="Universe cap (runtime)"),
+    tickers: Optional[str] = Query(None, description="Comma-separated tickers (defaults to universe sample)"),
+):
+    """Engine 4: walk-forward continuation backtest (measured edge).
+
+    Win-rate / R / expectancy / MAE-MFE broken out by grade AND by freshness
+    bucket — so the desk can see whether 'structure' actually pays.
+    """
+    import datetime as _dt
+
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE4_ICHIMOKU:
+        raise HTTPException(status_code=503, detail="Engine 4 (Ichimoku Continuation) is disabled.")
+
+    try:
+        client = get_client_optional()
+        if client is None:
+            raise HTTPException(status_code=503, detail="ORATS unavailable (missing ORATS_TOKEN).")
+
+        end_d = _dt.date.fromisoformat(end[:10]) if end else _dt.date.today()
+        start_d = _dt.date.fromisoformat(start[:10]) if start else (end_d - _dt.timedelta(days=365))
+
+        if tickers:
+            universe = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+        else:
+            from backend.universe import load_universe_sp500_and_nasdaq100
+            universe = load_universe_sp500_and_nasdaq100()
+
+        from backend.engine4_backtest import backtest_ichimoku
+        result = backtest_ichimoku(
+            client,
+            tickers=universe,
+            start=start_d,
+            end=end_d,
+            min_score=min_score,
+            max_tickers=max_tickers,
+        )
+        return result
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid date: {e}") from e
+    except OratsError as e:
+        LOG.exception("ORATS failure (engine4-ichimoku/backtest)")
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        LOG.exception("Unhandled failure (engine4-ichimoku/backtest)")
         raise HTTPException(status_code=500, detail="Internal error") from e
 
 

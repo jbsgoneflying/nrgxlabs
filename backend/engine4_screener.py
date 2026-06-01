@@ -95,9 +95,23 @@ _scan_cache_lock = threading.Lock()
 _bars_cache: TTLCache = TTLCache(maxsize=600, ttl=6 * 60 * 60)
 _bars_cache_lock = threading.Lock()
 
-# Signal persistence store (in-memory, refreshed on scan)
+# Signal persistence store (Redis-aware, in-memory fallback). Mirrors the
+# Red Dog tracker so E4/E5 lifecycle handling is identical.
 _signal_store: Dict[str, Dict[str, Any]] = {}
 _signal_store_lock = threading.Lock()
+
+_SIGNAL_TTL_S = 21 * 24 * 3600  # keep tracked signals ~3 weeks
+_REDIS_PREFIX = "engine4:signal:"
+_REDIS_INDEX = "engine4:signal:index"
+
+# Auto-evaluated lifecycle states (driven by price action).
+_TERMINAL_STATUSES = {"target_hit", "stopped", "invalidated", "expired"}
+# Desk-managed states (set by the trader, never overwritten by auto-eval).
+DESK_STATUSES = {"watching", "entered", "working", "broken", "exited"}
+
+
+def _signal_key(ticker: str, signal_date: str) -> str:
+    return f"{ticker}:{signal_date}"
 
 
 def _cache_key_scan(as_of: str, min_score: int, direction: Optional[str]) -> str:
@@ -340,6 +354,21 @@ def _fetch_gamma_context_for_symbol(
 # Single Ticker Scan
 # ---------------------------------------------------------------------------
 
+def _compute_dollar_adv(bars: List[DailyBar], lookback: int = 20) -> Optional[float]:
+    """20-day average dollar volume (close * volume) — a liquidity floor."""
+    window = bars[-lookback:] if len(bars) >= lookback else bars
+    vals = []
+    for b in window:
+        try:
+            if b.close and b.volume:
+                vals.append(float(b.close) * float(b.volume))
+        except (TypeError, ValueError):
+            continue
+    if not vals:
+        return None
+    return round(sum(vals) / len(vals), 2)
+
+
 def scan_ticker(
     client: OratsClient,
     *,
@@ -348,6 +377,7 @@ def scan_ticker(
     index_membership: str,
     gamma_context: Optional[Dict[str, Any]] = None,
     benzinga_client: Any = None,
+    min_dollar_adv: float = 0.0,
 ) -> Optional[IchimokuSignal]:
     """
     Scan a single ticker for Ichimoku continuation setup.
@@ -357,6 +387,11 @@ def scan_ticker(
         bars = fetch_bars_for_ticker(client, ticker=ticker, as_of_date=as_of_date)
         
         if not bars or len(bars) < 60:
+            return None
+        
+        # Item 7: liquidity filter — skip names that can't absorb desk size.
+        dollar_adv = _compute_dollar_adv(bars)
+        if min_dollar_adv > 0 and (dollar_adv is None or dollar_adv < min_dollar_adv):
             return None
         
         # Check earnings
@@ -390,6 +425,7 @@ def scan_ticker(
             gamma_context=gamma_context,
             earnings_days_ahead=earnings_days,
             index_membership=index_membership,
+            dollar_adv=dollar_adv,
         )
         
         return signal
@@ -467,12 +503,18 @@ def scan_single_ticker(
     }
     
     if detection.get("hasSignal"):
+        from backend.technicals import compute_ichimoku_series
+        ich_series = compute_ichimoku_series(bars)
         signal = build_ichimoku_signal(
             ticker=t,
             detection=detection,
+            bars=bars,
+            closes=ich_series.get("closes", []),
+            tenkan_series=ich_series.get("tenkan_series", []),
             gamma_context=gamma_context,
             earnings_days_ahead=earnings_days,
             index_membership=index_membership,
+            dollar_adv=_compute_dollar_adv(bars),
         )
         if signal:
             result["signal"] = signal_to_dict(signal)
@@ -518,6 +560,10 @@ def run_universe_scan(
     
     as_of_str = today.isoformat()
     
+    flags = get_flags()
+    min_dollar_adv = float(getattr(flags, "ENGINE4_MIN_DOLLAR_ADV", 0.0) or 0.0)
+    structure_max = int(getattr(flags, "ENGINE4_STRUCTURE_MAX", 8) or 8)
+    
     # Check cache
     cache_key = _cache_key_scan(as_of_str, min_score, direction)
     with _scan_cache_lock:
@@ -553,6 +599,7 @@ def run_universe_scan(
             index_membership=membership,
             gamma_context=gamma,
             benzinga_client=benzinga_client,
+            min_dollar_adv=min_dollar_adv,
         )
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -593,11 +640,20 @@ def run_universe_scan(
             rejected_count += 1
             # Don't include rejected signals in output
     
-    # Update signal store (only actionable and structure)
-    with _signal_store_lock:
-        for s in actionable + structure:
-            key = f"{s.ticker}:{s.signal_date}"
-            _signal_store[key] = signal_to_dict(s)
+    # Item 1: trim structure to a tight, ranked "Approaching" shortlist.
+    # Sort by distance-to-actionable (closest first), then score; cap the list
+    # so the desk isn't drowning in names that are days away from a trigger.
+    structure.sort(
+        key=lambda x: ((x.distance_to_actionable if x.distance_to_actionable is not None else 999.0), -x.score)
+    )
+    structure_total = len(structure)
+    if structure_max > 0:
+        structure = structure[:structure_max]
+    
+    # Persist actionable + structure to the tracker store (Redis-aware,
+    # preserves desk overrides). Only fresh actionable names auto-enter as
+    # "pending"; structure stays as a watch surface.
+    _persist_signals(actionable + structure)
     
     elapsed_ms = int((time.time() - start_time) * 1000)
     
@@ -607,6 +663,7 @@ def run_universe_scan(
         "totalAPlus": len(aplus_signals),
         "actionableCount": len(actionable),
         "structureCount": len(structure),
+        "structureTotal": structure_total,
         "rejectedCount": rejected_count,
         "actionable": [signal_to_dict(s) for s in actionable],
         "structure": [signal_to_dict(s) for s in structure],
@@ -617,6 +674,8 @@ def run_universe_scan(
         "meta": {
             "scanDurationMs": elapsed_ms,
             "direction": direction,
+            "minDollarAdv": min_dollar_adv,
+            "structureMax": structure_max,
             "errors": errors[:10] if errors else [],
         },
     }
@@ -629,163 +688,225 @@ def run_universe_scan(
 
 
 # ---------------------------------------------------------------------------
-# Signal Status Management
+# Desk Trade Tracker (Redis-aware lifecycle + desk-managed states)
 # ---------------------------------------------------------------------------
 
-def get_all_signals() -> Dict[str, Any]:
+def _persist_signals(signal_dicts: List[Dict[str, Any]]) -> None:
+    """Persist freshly scanned signals for later outcome tracking.
+
+    Never downgrades a signal that already has a terminal/triggered status or
+    a desk-managed state — the trader's view of an in-flight position wins.
     """
-    Get all tracked signals with current status.
-    """
+    if not signal_dicts:
+        return
+    from backend.redis_store import get_store_optional
+
+    store = get_store_optional()
+    protected = _TERMINAL_STATUSES | {"triggered"} | DESK_STATUSES
     with _signal_store_lock:
-        signals = list(_signal_store.values())
-    
-    # Group by status
-    pending = [s for s in signals if s.get("status") == "pending"]
-    triggered = [s for s in signals if s.get("status") == "triggered"]
-    stopped = [s for s in signals if s.get("status") == "stopped"]
-    invalidated = [s for s in signals if s.get("status") == "invalidated"]
-    
+        index_keys = set()
+        if store:
+            index_keys = set(store.get_json(_REDIS_INDEX) or [])
+        for d in signal_dicts:
+            ticker = d.get("ticker", "")
+            sig_date = d.get("signalDate", "")
+            if not ticker or not sig_date:
+                continue
+            key = _signal_key(ticker, sig_date)
+
+            prior = _signal_store.get(key)
+            if store and prior is None:
+                prior = store.get_json(_REDIS_PREFIX + key)
+            if prior and prior.get("status") in protected:
+                # Refresh the scored snapshot but keep desk/lifecycle state.
+                merged = dict(d)
+                for fld in ("status", "deskNotes", "outcome", "statusUpdatedAt",
+                            "trackedAt", "pinned", "invalidationReason"):
+                    if fld in prior:
+                        merged[fld] = prior[fld]
+                _signal_store[key] = merged
+                if store:
+                    store.set_json(_REDIS_PREFIX + key, merged, ttl_s=_SIGNAL_TTL_S)
+                    index_keys.add(key)
+                continue
+
+            record = dict(d)
+            record.setdefault("status", "pending")
+            record["trackedAt"] = dt.datetime.utcnow().isoformat() + "Z"
+            _signal_store[key] = record
+            if store:
+                store.set_json(_REDIS_PREFIX + key, record, ttl_s=_SIGNAL_TTL_S)
+                index_keys.add(key)
+        if store:
+            store.set_json(_REDIS_INDEX, sorted(index_keys), ttl_s=_SIGNAL_TTL_S)
+
+
+def _all_records() -> List[Dict[str, Any]]:
+    """Return every tracked signal, preferring Redis when present."""
+    from backend.redis_store import get_store_optional
+
+    store = get_store_optional()
+    records: Dict[str, Dict[str, Any]] = {}
+    if store:
+        for key in (store.get_json(_REDIS_INDEX) or []):
+            rec = store.get_json(_REDIS_PREFIX + key)
+            if rec:
+                records[key] = rec
+    with _signal_store_lock:
+        for key, rec in _signal_store.items():
+            records.setdefault(key, rec)
+    return list(records.values())
+
+
+def _write_record(key: str, record: Dict[str, Any]) -> None:
+    with _signal_store_lock:
+        _signal_store[key] = record
+    from backend.redis_store import get_store_optional
+
+    store = get_store_optional()
+    if store:
+        store.set_json(_REDIS_PREFIX + key, record, ttl_s=_SIGNAL_TTL_S)
+        index = set(store.get_json(_REDIS_INDEX) or [])
+        index.add(key)
+        store.set_json(_REDIS_INDEX, sorted(index), ttl_s=_SIGNAL_TTL_S)
+
+
+def _find_record(ticker: str, signal_date: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Locate a tracked record by ticker (+ optional signal date)."""
+    ticker = (ticker or "").upper()
+    candidates = [r for r in _all_records() if (r.get("ticker") or "").upper() == ticker]
+    if not candidates:
+        return None
+    if signal_date:
+        for r in candidates:
+            if str(r.get("signalDate", ""))[:10] == str(signal_date)[:10]:
+                return r
+    # Most recent signal date wins.
+    candidates.sort(key=lambda r: str(r.get("signalDate", "")), reverse=True)
+    return candidates[0]
+
+
+def get_all_signals() -> Dict[str, Any]:
+    """Group tracked Ichimoku signals by lifecycle + desk-managed status."""
+    records = _all_records()
+    buckets: Dict[str, List[Dict[str, Any]]] = {
+        "pending": [], "triggered": [], "target_hit": [], "stopped": [],
+        "invalidated": [], "expired": [],
+        "watching": [], "entered": [], "working": [], "broken": [], "exited": [],
+    }
+    for rec in records:
+        status = rec.get("status", "pending")
+        buckets.setdefault(status, []).append(rec)
+
+    resolved = buckets["target_hit"] + buckets["stopped"]
+    wins = len(buckets["target_hit"])
+    win_rate = round(100.0 * wins / len(resolved), 1) if resolved else None
+    # "Desk book" = anything the trader is actively managing.
+    desk_book = sum(len(buckets[s]) for s in DESK_STATUSES)
+
     return {
-        "totalSignals": len(signals),
-        "pending": pending,
-        "triggered": triggered,
-        "stopped": stopped,
-        "invalidated": invalidated,
+        "totalSignals": len(records),
+        "counts": {k: len(v) for k, v in buckets.items()},
+        "winRate": win_rate,
+        "resolvedCount": len(resolved),
+        "deskBookCount": desk_book,
+        **buckets,
     }
 
 
-def update_signal_status(
+def set_desk_status(
     ticker: str,
-    signal_date: str,
-    new_status: str,
-    reason: Optional[str] = None,
-) -> bool:
-    """
-    Update the status of a tracked signal.
-    
-    Args:
-        ticker: Ticker symbol
-        signal_date: Signal date (YYYY-MM-DD)
-        new_status: New status ("pending", "triggered", "stopped", "target_hit", "invalidated")
-        reason: Optional reason for status change
-    
-    Returns:
-        True if updated, False if not found
-    """
-    key = f"{ticker}:{signal_date}"
-    
-    with _signal_store_lock:
-        if key not in _signal_store:
-            return False
-        
-        _signal_store[key]["status"] = new_status
-        if reason:
-            _signal_store[key]["invalidationReason"] = reason
-        
-        # Add note about status change
-        notes = _signal_store[key].get("notes", [])
-        timestamp = dt.datetime.now().isoformat()
-        notes.append(f"Status changed to {new_status} at {timestamp}")
-        _signal_store[key]["notes"] = notes
-    
-    return True
+    *,
+    desk_status: str,
+    signal_date: Optional[str] = None,
+    note: Optional[str] = None,
+    pinned: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Desk override: mark a name watching/entered/working/broken/exited.
 
+    Returns {ok, record|error}. Desk states survive scan refreshes and are
+    never clobbered by the auto-evaluator.
+    """
+    desk_status = (desk_status or "").strip().lower()
+    if desk_status not in DESK_STATUSES:
+        return {"ok": False, "error": f"Invalid desk status '{desk_status}'. Allowed: {sorted(DESK_STATUSES)}"}
 
-def check_signal_invalidation(
-    client: OratsClient,
-    signal: Dict[str, Any],
-    as_of_date: dt.date,
-) -> Optional[str]:
-    """
-    Check if a signal should be invalidated based on current price action.
-    
-    Invalidation conditions:
-    - Price closes below stop level
-    - Price closes deep into cloud
-    - Trend regime changes
-    
-    Returns:
-        Invalidation reason if invalidated, None otherwise
-    """
-    ticker = signal.get("ticker")
-    if not ticker:
-        return None
-    
-    try:
-        bars = fetch_bars_for_ticker(client, ticker=ticker, as_of_date=as_of_date, lookback_days=10)
-        if not bars:
-            return None
-        
-        last_bar = bars[-1]
-        close = float(last_bar.close) if last_bar.close else None
-        
-        if close is None:
-            return None
-        
-        levels = signal.get("levels", {})
-        stop = levels.get("stopLoss")
-        direction = signal.get("direction")
-        
-        # Check stop level
-        if stop is not None:
-            if direction == "bullish" and close < stop:
-                return f"Price closed below stop ({close:.2f} < {stop:.2f})"
-            elif direction == "bearish" and close > stop:
-                return f"Price closed above stop ({close:.2f} > {stop:.2f})"
-        
-        # Check entry trigger hit (for status update)
-        entry = levels.get("entryTrigger")
-        if entry is not None:
-            if direction == "bullish" and close > entry:
-                # Entry was triggered - update status
-                update_signal_status(ticker, signal.get("signalDate", ""), "triggered")
-            elif direction == "bearish" and close < entry:
-                update_signal_status(ticker, signal.get("signalDate", ""), "triggered")
-        
-    except Exception as e:
-        LOG.warning(f"Error checking invalidation for {ticker}: {e}")
-    
-    return None
+    rec = _find_record(ticker, signal_date)
+    if rec is None:
+        return {"ok": False, "error": f"No tracked signal for {ticker}."}
+
+    rec = dict(rec)
+    rec["status"] = desk_status
+    rec["statusUpdatedAt"] = dt.datetime.utcnow().isoformat() + "Z"
+    if pinned is not None:
+        rec["pinned"] = bool(pinned)
+    if note:
+        notes = list(rec.get("deskNotes", []))
+        notes.append({"ts": rec["statusUpdatedAt"], "status": desk_status, "note": note})
+        rec["deskNotes"] = notes
+
+    _write_record(_signal_key(rec.get("ticker", ""), rec.get("signalDate", "")), rec)
+    return {"ok": True, "record": rec}
 
 
 def refresh_signal_statuses(
     client: OratsClient,
     as_of_date: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """Re-evaluate every auto-tracked signal against forward price action.
+
+    Desk-managed states are left untouched (the trader owns those); only
+    pending/triggered signals get auto-promoted to target_hit/stopped/expired.
     """
-    Refresh status of all tracked signals.
-    """
+    from backend.engine3_red_dog import evaluate_outcome
+
     today = dt.date.today()
     if as_of_date:
         try:
             today = dt.date.fromisoformat(str(as_of_date)[:10])
         except Exception:
             today = dt.date.today()
-    
+
     updated = 0
-    invalidated = 0
-    
-    with _signal_store_lock:
-        signals = list(_signal_store.values())
-    
-    for signal in signals:
-        if signal.get("status") in ("stopped", "target_hit", "invalidated"):
+    changed = 0
+    for rec in _all_records():
+        status = rec.get("status")
+        if status in _TERMINAL_STATUSES or status in DESK_STATUSES:
             continue
-        
-        reason = check_signal_invalidation(client, signal, today)
-        if reason:
-            update_signal_status(
-                signal.get("ticker", ""),
-                signal.get("signalDate", ""),
-                "invalidated",
-                reason,
-            )
-            invalidated += 1
-        else:
-            updated += 1
-    
+        ticker = rec.get("ticker", "")
+        sig_date = rec.get("signalDate", "")
+        levels = rec.get("levels", {}) or {}
+        direction = rec.get("direction", "")
+        if not ticker or not sig_date:
+            continue
+
+        try:
+            bars = fetch_bars_for_ticker(client, ticker=ticker, as_of_date=today)
+        except Exception:
+            continue
+        forward = [b for b in bars if str(b.trade_date)[:10] > str(sig_date)[:10]]
+        if not forward:
+            continue
+
+        outcome = evaluate_outcome(
+            direction=direction,
+            entry_trigger=float(levels.get("entryTrigger") or 0.0),
+            stop_loss=float(levels.get("stopLoss") or 0.0),
+            target_1=float(levels.get("target1") or 0.0),
+            forward_bars=forward,
+        )
+        new_status = outcome["status"]
+        updated += 1
+        if new_status != status:
+            rec = dict(rec)
+            rec["status"] = new_status
+            rec["outcome"] = outcome
+            rec["statusUpdatedAt"] = dt.datetime.utcnow().isoformat() + "Z"
+            _write_record(_signal_key(ticker, sig_date), rec)
+            changed += 1
+
     return {
         "updated": updated,
-        "invalidated": invalidated,
+        "changed": changed,
         "asOfDate": today.isoformat(),
     }

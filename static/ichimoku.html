@@ -382,6 +382,15 @@
           <div id="gateReasons" style="margin-top:6px; font-size:11px; color:var(--muted);"></div>
         </section>
 
+        <!-- Desk Verdict Banner -->
+        <section class="surface" id="verdictBanner" style="display:none; margin-bottom:12px;">
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <span style="font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);">Desk Verdict</span>
+            <span id="verdictSummary" style="font-size:13px; font-weight:700;"></span>
+          </div>
+          <div id="verdictNote" style="margin-top:6px; font-size:11px; color:var(--muted);">Reconciled continuation read = grade + freshness + gate + dealer gamma.</div>
+        </section>
+
         <!-- Stats Summary -->
         <section class="surface" id="statsSection">
           <div class="sectionHeader" data-insight="scanner_result">
@@ -515,30 +524,80 @@
           <div id="actionableGrid" class="watchlistGrid"></div>
         </section>
 
-        <!-- Structure Only (Watchlist) Section -->
+        <!-- Approaching (Watchlist) Section — capped, ranked by distance-to-actionable -->
         <section class="surface" id="structureSection">
           <div class="sectionHeader" data-insight="score_breakdown">
             <h2 class="sectionTitle">
-              Structure Only (Watchlist)
+              Approaching (Watchlist)
               <span class="tipWrap">
-                <button class="tipBtn" type="button" aria-label="Structure setups help" aria-expanded="false">i</button>
+                <button class="tipBtn" type="button" aria-label="Approaching setups help" aria-expanded="false">i</button>
                 <div class="tipPanel" role="tooltip">
-                  <div class="tipTitle">Structure Only Setups</div>
+                  <div class="tipTitle">Approaching Setups</div>
                   <div class="tipBody">
-                    <p>A+ quality setups but not actionable right now. Failed one or more freshness checks:</p>
+                    <p>A+ quality structure that isn't a fresh trigger today. Ranked by how close each is to becoming actionable, and capped so the list stays tight:</p>
                     <ul>
                       <li><b>Reclaim Too Old</b>: Tenkan reclaim more than 3 bars ago</li>
                       <li><b>Extended</b>: Price too far from Kijun (> 1.5 ATR)</li>
                       <li><b>No Recent Touch</b>: No Tenkan interaction in last 5 bars</li>
                     </ul>
-                    <p>Add to watchlist and wait for next pullback to Kijun.</p>
+                    <p>Collapsed by default — the desk leads with Actionable Now.</p>
                   </div>
                 </div>
               </span>
             </h2>
             <div class="sectionMeta muted" id="structureMeta">—</div>
+            <button id="approachingToggle" class="ghostButton" type="button" style="margin-left:auto;">Show approaching</button>
           </div>
-          <div id="structureGrid" class="watchlistGrid"></div>
+          <div id="structureGrid" class="watchlistGrid" style="display:none;"></div>
+        </section>
+
+        <!-- Desk Trade Tracker -->
+        <section class="surface" id="trackerSection">
+          <div class="sectionHeader" data-insight="score_breakdown">
+            <h2 class="sectionTitle">
+              Desk Trade Tracker
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Tracker help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Desk Trade Tracker</div>
+                  <div class="tipBody">
+                    <p>Tracks the lifecycle of every signal so the desk is never left holding the bag once the engine stops surfacing it:</p>
+                    <ul>
+                      <li><b>Auto</b>: pending → triggered → target_hit / stopped / expired (priced off forward bars)</li>
+                      <li><b>Desk</b>: watching / entered / working / broken / exited (you own these; survive refreshes)</li>
+                    </ul>
+                    <p>Click a card's <b>Watch</b> button to add it; use the controls here to advance state.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="trackerMeta">—</div>
+            <button id="trackerRefreshBtn" class="ghostButton" type="button" style="margin-left:auto;">Refresh statuses</button>
+          </div>
+          <div id="trackerSummary" style="margin:4px 0 10px; display:flex; gap:6px; flex-wrap:wrap;"></div>
+          <div id="trackerBody"></div>
+        </section>
+
+        <!-- Backtest (measured edge) -->
+        <section class="surface" id="backtestSection">
+          <div class="sectionHeader" data-insight="score_breakdown">
+            <h2 class="sectionTitle">
+              Backtest — Measured Edge
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Backtest help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Walk-forward continuation backtest</div>
+                  <div class="tipBody">
+                    <p>Replays history bar-by-bar with the exact production detector + scorer, then prices each trade with the live outcome engine.</p>
+                    <p>Broken out <b>by grade</b> and <b>by bucket</b> — so you can see whether the "Approaching/structure" surface actually pays or is noise.</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted" id="backtestMeta">~1y, A+ only, capped universe</div>
+            <button id="backtestRunBtn" class="ghostButton" type="button" style="margin-left:auto;">Run backtest</button>
+          </div>
+          <div id="backtestBody"><div class="muted" style="font-size:12px;">Run a walk-forward replay to measure the live edge by grade and bucket.</div></div>
         </section>
 
         <!-- Empty State -->
@@ -570,6 +629,31 @@
       .ikInsightSource{font-size:10px;color:rgba(255,255,255,.35);text-align:right;margin-top:12px;font-style:italic}
       @keyframes ikDotPulse{0%,100%{opacity:.3}50%{opacity:1}}
       .ikClick{cursor:pointer;transition:box-shadow .15s ease}.ikClick:hover{box-shadow:0 2px 12px rgba(0,0,0,.08)}
+      /* Desk verdict strip (leads each card) */
+      .verdictStrip{display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:5px 8px;border-radius:8px;font-size:11px}
+      .verdictStrip .verdictPill{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:12px}
+      .verdictStrip .verdictDriver{color:var(--muted);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .verdictStrip.vTradable{background:rgba(52,199,89,.10)}.verdictStrip.vTradable .verdictPill{background:rgba(52,199,89,.18);color:#1b8a3e}
+      .verdictStrip.vWatch{background:rgba(255,149,0,.10)}.verdictStrip.vWatch .verdictPill{background:rgba(255,149,0,.18);color:#995c00}
+      .verdictStrip.vStandDown{background:rgba(255,59,48,.10)}.verdictStrip.vStandDown .verdictPill{background:rgba(255,59,48,.18);color:#cc2f26}
+      /* Card action buttons */
+      .signalCardActions{display:flex;gap:6px;margin-top:10px;border-top:1px solid rgba(0,0,0,.06);padding-top:8px}
+      .ikCardBtn{flex:1;font-size:11px;font-weight:700;padding:5px 8px;border-radius:8px;border:1px solid rgba(0,0,0,.1);background:rgba(0,0,0,.02);color:var(--text);cursor:pointer;transition:background .12s ease}
+      .ikCardBtn:hover{background:rgba(0,122,255,.08);border-color:rgba(0,122,255,.25)}
+      .ikCardBtn.isTracked{background:rgba(52,199,89,.12);border-color:rgba(52,199,89,.3);color:#1b8a3e}
+      /* Ghost buttons in section headers */
+      .ghostButton{font-size:11px;font-weight:700;padding:5px 12px;border-radius:8px;border:1px solid rgba(0,0,0,.12);background:#fff;color:var(--text);cursor:pointer;transition:background .12s ease}
+      .ghostButton:hover{background:rgba(0,122,255,.06);border-color:rgba(0,122,255,.3)}
+      .ghostButton:disabled{opacity:.5;cursor:wait}
+      /* Tracker + backtest tables */
+      .trkPill{display:inline-block;font-size:10px;font-weight:800;padding:3px 9px;border-radius:20px;text-transform:uppercase;letter-spacing:.03em}
+      .trkRow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid rgba(0,0,0,.05);font-size:12px}
+      .trkRow .trkSym{font-weight:800;min-width:54px}
+      .trkRow select{font-size:11px;padding:3px 6px;border-radius:6px;border:1px solid rgba(0,0,0,.12)}
+      .btTable{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+      .btTable th,.btTable td{padding:6px 8px;text-align:right;border-bottom:1px solid rgba(0,0,0,.06)}
+      .btTable th:first-child,.btTable td:first-child{text-align:left;font-weight:700}
+      .btTable thead th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
     </style>
     <div class="ikInsightPopup" id="ikInsightPopup">
       <div class="ikInsightHeader" id="ikInsightHeader">
@@ -586,7 +670,7 @@
     <script src="/static/desk-insight.js?v=2"></script>
     <script src="/static/ui_kit.js?v=5"></script>
     <script src="/static/position_calculator.js?v=3"></script>
-    <script src="/static/ichimoku.js?v=7"></script>
+    <script src="/static/ichimoku.js?v=8"></script>
     <script src="/static/calculator.js"></script>
     <script src="/static/nav.js?v=13"></script>
     <script src="/static/raven-chat.js?v=4"></script>

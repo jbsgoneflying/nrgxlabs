@@ -108,19 +108,19 @@ class IchimokuSignal:
     status: str = "pending"  # "pending", "triggered", "stopped", "target_hit", "invalidated"
     invalidation_reason: Optional[str] = None
     
-    # Quality scoring
-    score: int = 0
+    # Quality scoring (continuous — see score_ichimoku_setup)
+    score: float = 0.0
     grade: str = "C"
     
     # Component scores (for transparency)
-    chikou_score: int = 0
-    volume_score: int = 0
-    candle_score: int = 0
-    kijun_slope_score: int = 0
-    rsi_score: int = 0
-    cloud_bias_score: int = 0
-    cloud_thickness_score: int = 0
-    gamma_score: int = 0
+    chikou_score: float = 0.0
+    volume_score: float = 0.0
+    candle_score: float = 0.0
+    kijun_slope_score: float = 0.0
+    rsi_score: float = 0.0
+    cloud_bias_score: float = 0.0
+    cloud_thickness_score: float = 0.0
+    gamma_score: float = 0.0
     
     # Penalty scores
     time_in_cloud_penalty: int = 0
@@ -156,6 +156,32 @@ class IchimokuSignal:
     trigger_ran_distance_atr: Optional[float] = None
     impulse_reclaim: Optional[bool] = None
     reclaim_bar_range_atr: Optional[float] = None
+
+    # --- Institutional hardening fields (2026-06 sprint) ---
+    dollar_adv: Optional[float] = None             # 20d avg dollar volume (liquidity)
+    distance_to_actionable: Optional[float] = None  # 0 = actionable; higher = staler structure
+    verdict: Optional[Dict[str, Any]] = None        # reconciled desk verdict
+
+
+def _ramp(x: Optional[float], lo: float, hi: float) -> float:
+    """Linear ramp: 0 at lo, 1 at hi, clamped to [0,1]. Supports lo>hi (descending)."""
+    if x is None:
+        return 0.0
+    if hi == lo:
+        return 1.0 if ((x >= hi) if hi >= lo else (x <= hi)) else 0.0
+    t = (x - lo) / (hi - lo)
+    return max(0.0, min(1.0, t))
+
+
+def _entry_offset(atr: Optional[float]) -> float:
+    """Tick/ATR-scaled trigger offset (a flat $0.01 fills on noise for pricey names)."""
+    return max(0.05, round((atr or 0.0) * 0.05, 2))
+
+
+# Continuous-scoring ramp anchors (bullish framing; bearish mirrors at 100-x / 1-x)
+VOL_RAMP_LO, VOL_RAMP_HI = VOLUME_LOW_THRESHOLD, 1.6   # 1.0 → 1.6 for full volume credit
+RSI_RAMP_LO, RSI_RAMP_HI = 50.0, 65.0                  # 50 → 65 for full recovery credit
+CANDLE_RAMP_LO, CANDLE_RAMP_HI = 0.50, 0.80            # close position within range
 
 
 # ---------------------------------------------------------------------------
@@ -681,9 +707,10 @@ def compute_entry_levels(
     
     h, l = float(bar.high), float(bar.low)
     atr_buffer = (atr * ATR_BUFFER_MULT) if atr else 0.10
+    trigger_offset = _entry_offset(atr)  # tick/ATR-scaled, not a flat penny
     
     if direction == "bullish":
-        entry = round(h + 0.01, 4)  # Penny above high
+        entry = round(h + trigger_offset, 4)  # ATR-scaled above high
         stop = round(min(kijun, l) - atr_buffer, 4)
         risk = entry - stop
         
@@ -696,7 +723,7 @@ def compute_entry_levels(
         trail = round(kijun, 4)
     
     else:  # bearish
-        entry = round(l - 0.01, 4)  # Penny below low
+        entry = round(l - trigger_offset, 4)  # ATR-scaled below low
         stop = round(max(kijun, h) + atr_buffer, 4)
         risk = stop - entry
         
@@ -1264,15 +1291,15 @@ def score_ichimoku_setup(
     """
     direction = signal.get("direction", "bullish")
     
-    scores: Dict[str, int] = {
-        "chikou": 0,
-        "volume": 0,
-        "candle": 0,
-        "kijunSlope": 0,
-        "rsi": 0,
-        "cloudBias": 0,
-        "cloudThickness": 0,
-        "gamma": 0,
+    scores: Dict[str, float] = {
+        "chikou": 0.0,
+        "volume": 0.0,
+        "candle": 0.0,
+        "kijunSlope": 0.0,
+        "rsi": 0.0,
+        "cloudBias": 0.0,
+        "cloudThickness": 0.0,
+        "gamma": 0.0,
     }
     
     penalties: Dict[str, int] = {
@@ -1294,24 +1321,26 @@ def score_ichimoku_setup(
     elif chikou_tangled is True:
         notes.append("Chikou tangled with prior candles.")
     
-    # --- Volume surge (15 points) ---
+    # --- Volume surge (15 points, continuous ramp 1.0x→1.6x) ---
     volume_ratio = signal.get("volumeRatio")
     if volume_ratio is not None:
+        scores["volume"] = round(_ramp(volume_ratio, VOL_RAMP_LO, VOL_RAMP_HI) * SCORE_VOLUME_SURGE, 2)
         if volume_ratio >= VOLUME_SURGE_THRESHOLD:
-            scores["volume"] = SCORE_VOLUME_SURGE
             tags.append("Vol Surge")
         elif volume_ratio < VOLUME_LOW_THRESHOLD:
             penalties["lowVolume"] = PENALTY_LOW_VOLUME
             notes.append(f"Low volume on trigger ({volume_ratio:.2f}x avg).")
     
-    # --- Candle strength (15 points) ---
+    # --- Candle strength (15 points, continuous close-position ramp) ---
     close_position = signal.get("closePosition")
     if close_position is not None:
-        if direction == "bullish" and close_position >= CANDLE_STRENGTH_BULLISH:
-            scores["candle"] = SCORE_CANDLE_STRENGTH
-            tags.append("Strong Close")
-        elif direction == "bearish" and close_position <= CANDLE_STRENGTH_BEARISH:
-            scores["candle"] = SCORE_CANDLE_STRENGTH
+        if direction == "bullish":
+            candle_credit = _ramp(close_position, CANDLE_RAMP_LO, CANDLE_RAMP_HI)
+        else:
+            candle_credit = _ramp(close_position, 1.0 - CANDLE_RAMP_LO, 1.0 - CANDLE_RAMP_HI)
+        scores["candle"] = round(candle_credit * SCORE_CANDLE_STRENGTH, 2)
+        if (direction == "bullish" and close_position >= CANDLE_STRENGTH_BULLISH) or \
+           (direction == "bearish" and close_position <= CANDLE_STRENGTH_BEARISH):
             tags.append("Strong Close")
     
     # --- Kijun slope (10 points) ---
@@ -1324,14 +1353,15 @@ def score_ichimoku_setup(
             scores["kijunSlope"] = SCORE_KIJUN_SLOPE
             tags.append("Kijun Falling")
     
-    # --- RSI recovery (10 points) ---
+    # --- RSI recovery (10 points, continuous ramp around 50) ---
     rsi = signal.get("rsi")
     if rsi is not None:
-        if direction == "bullish" and rsi > 50:
-            scores["rsi"] = SCORE_RSI_RECOVERY
-            tags.append("RSI Confirm")
-        elif direction == "bearish" and rsi < 50:
-            scores["rsi"] = SCORE_RSI_RECOVERY
+        if direction == "bullish":
+            rsi_credit = _ramp(rsi, RSI_RAMP_LO, RSI_RAMP_HI)
+        else:
+            rsi_credit = _ramp(rsi, 100.0 - RSI_RAMP_LO, 100.0 - RSI_RAMP_HI)
+        scores["rsi"] = round(rsi_credit * SCORE_RSI_RECOVERY, 2)
+        if (direction == "bullish" and rsi > 50) or (direction == "bearish" and rsi < 50):
             tags.append("RSI Confirm")
     
     # --- Cloud bias (10 points) ---
@@ -1350,13 +1380,18 @@ def score_ichimoku_setup(
     close = signal.get("close", 1)
     if cloud_thickness is not None and close > 0:
         thickness_pct = (cloud_thickness / close) * 100
+        # Smooth "tent": full credit in the [0.5%, 5%] band, ramping to 0 at
+        # 0% (razor thin) and 10% (too massive to traverse).
         if 0.5 <= thickness_pct <= 5.0:
-            scores["cloudThickness"] = SCORE_CLOUD_THICKNESS
+            thickness_credit = 1.0
             tags.append("Cloud Optimal")
-        elif thickness_pct > 5.0:
-            notes.append(f"Thick cloud ({thickness_pct:.1f}% of price) may slow progress.")
-        else:
+        elif thickness_pct < 0.5:
+            thickness_credit = _ramp(thickness_pct, 0.0, 0.5)
             notes.append(f"Thin cloud ({thickness_pct:.1f}% of price) - less reliable support.")
+        else:  # > 5.0
+            thickness_credit = _ramp(thickness_pct, 10.0, 5.0)
+            notes.append(f"Thick cloud ({thickness_pct:.1f}% of price) may slow progress.")
+        scores["cloudThickness"] = round(thickness_credit * SCORE_CLOUD_THICKNESS, 2)
     
     # --- Gamma supportive (15 points) ---
     if gamma_context is not None:
@@ -1411,7 +1446,7 @@ def score_ichimoku_setup(
     # --- Calculate total score ---
     total_positive = sum(scores.values())
     total_penalties = sum(penalties.values())  # Already negative
-    total_score = max(0, min(100, total_positive + total_penalties))
+    total_score = round(max(0.0, min(100.0, total_positive + total_penalties)), 2)
     
     # Determine grade
     if total_score >= APLUS_THRESHOLD:
@@ -1547,6 +1582,39 @@ def classify_freshness(
     }
 
 
+def compute_distance_to_actionable(freshness: Dict[str, Any]) -> float:
+    """Rank a structure signal by how close it is to becoming actionable.
+
+    0 = actionable today; small = one pullback / a bar or two away (worth
+    watching); large = the move already ran (skip). Used to cap + sort the
+    structure list so the watch surface stays tight.
+    """
+    bucket = freshness.get("bucket")
+    if bucket == "actionable":
+        return 0.0
+    if bucket == "rejected":
+        return 999.0
+
+    d = 0.0
+    bsr = freshness.get("barsSinceReclaim")
+    if bsr is None:
+        d += 5.0
+    elif bsr > FRESHNESS_RECLAIM_MAX_BARS:
+        d += float(bsr - FRESHNESS_RECLAIM_MAX_BARS)
+
+    kd = freshness.get("kijunDistanceAtr")
+    if kd is not None and kd > FRESHNESS_KIJUN_DISTANCE_ATR:
+        d += float(kd - FRESHNESS_KIJUN_DISTANCE_ATR)
+
+    if freshness.get("recentTenkanTouch") is False:
+        d += 2.0
+    if freshness.get("triggerAlreadyRan"):
+        d += 6.0  # the move you wanted already happened — deprioritize hard
+    if freshness.get("impulseReclaim"):
+        d += 6.0
+    return round(d, 2)
+
+
 def build_ichimoku_signal(
     *,
     ticker: str,
@@ -1557,6 +1625,7 @@ def build_ichimoku_signal(
     gamma_context: Optional[Dict[str, Any]] = None,
     earnings_days_ahead: Optional[int] = None,
     index_membership: str = "sp500",
+    dollar_adv: Optional[float] = None,
 ) -> Optional[IchimokuSignal]:
     """
     Build a complete IchimokuSignal from detection results.
@@ -1669,6 +1738,8 @@ def build_ichimoku_signal(
         trigger_ran_distance_atr=freshness["triggerRanDistanceAtr"],
         impulse_reclaim=freshness["impulseReclaim"],
         reclaim_bar_range_atr=freshness["reclaimBarRangeAtr"],
+        dollar_adv=dollar_adv,
+        distance_to_actionable=compute_distance_to_actionable(freshness),
     )
 
 
@@ -1732,6 +1803,7 @@ def signal_to_dict(signal: IchimokuSignal) -> Dict[str, Any]:
             "kijunSlope": signal.kijun_slope,
             "timeInCloud": signal.time_in_cloud,
             "chikouTangled": signal.chikou_tangled,
+            "dollarAdv": signal.dollar_adv,
         },
         "freshness": {
             "bucket": signal.freshness_bucket,
@@ -1744,7 +1816,9 @@ def signal_to_dict(signal: IchimokuSignal) -> Dict[str, Any]:
             "triggerRanDistanceAtr": signal.trigger_ran_distance_atr,
             "impulseReclaim": signal.impulse_reclaim,
             "reclaimBarRangeAtr": signal.reclaim_bar_range_atr,
+            "distanceToActionable": signal.distance_to_actionable,
         },
+        "verdict": signal.verdict,
         "tags": list(signal.tags) if signal.tags else [],
         "notes": list(signal.notes) if signal.notes else [],
         "indexMembership": signal.index_membership,

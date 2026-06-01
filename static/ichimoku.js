@@ -108,7 +108,7 @@ async function fetchScan(direction) {
 function renderStats(payload) {
   const scanned = payload.scannedCount ?? 0;
   const actionableCount = payload.actionableCount ?? 0;
-  const structureCount = payload.structureCount ?? 0;
+  const structureCount = payload.structureTotal ?? payload.structureCount ?? 0;
   const rejectedCount = payload.rejectedCount ?? 0;
   const duration = payload.meta?.scanDurationMs ?? 0;
   
@@ -222,7 +222,11 @@ function renderSignalCard(signal, isStructure = false) {
       freshnessHtml += `<span class="freshBadge positive">${fmt2(kijunDist)} ATR from Kijun</span>`;
     }
   } else {
-    // Structure - show the reasons why not actionable
+    // Structure - lead with distance-to-actionable, then the reasons
+    const dist = freshness.distanceToActionable;
+    if (dist !== null && dist !== undefined) {
+      freshnessHtml += `<span class="freshBadge positive">≈${fmt2(dist)} to actionable</span>`;
+    }
     const reasons = freshness.reasons || [];
     for (const reason of reasons.slice(0, 2)) {
       freshnessHtml += `<span class="freshBadge warning">${escapeHtml(reason)}</span>`;
@@ -240,8 +244,28 @@ function renderSignalCard(signal, isStructure = false) {
     gatePillHtml = `<div style="margin:4px 0 2px;"><span style="display:inline-block;font-size:9px;font-weight:800;padding:2px 8px;border-radius:12px;text-transform:uppercase;${gCls}">${gate.status}</span>${reasons ? `<span style="font-size:10px;color:var(--muted);margin-left:4px;">${escapeHtml(reasons)}</span>` : ""}</div>`;
   }
 
+  // Reconciled desk verdict — leads the card
+  const verdict = signal.verdict || {};
+  let verdictHtml = "";
+  if (verdict.status) {
+    const vCls = verdict.status === "TRADABLE" ? "vTradable" : (verdict.status === "STAND_DOWN" ? "vStandDown" : "vWatch");
+    const driver = (verdict.drivers && verdict.drivers[0]) ? verdict.drivers[0] : "";
+    verdictHtml = `<div class="verdictStrip ${vCls}"><span class="verdictPill">${escapeHtml(verdict.label || verdict.status)}</span><span class="verdictDriver">${escapeHtml(driver)}</span></div>`;
+  }
+
+  // Liquidity (20d $ ADV) + tracker state
+  const dollarAdv = indicators.dollarAdv;
+  const advTxt = (dollarAdv && Number.isFinite(Number(dollarAdv))) ? `$${(Number(dollarAdv) / 1e6).toFixed(0)}M` : "—";
+  const isTracked = ["watching", "entered", "working", "broken", "exited"].includes(status);
+  const actionsHtml = `
+      <div class="signalCardActions">
+        <button type="button" class="ikCardBtn ikInsightBtn" data-ticker="${ticker}">Insight</button>
+        <button type="button" class="ikCardBtn ikTrackBtn ${isTracked ? 'isTracked' : ''}" data-ticker="${ticker}" data-act="watching">${isTracked ? escapeHtml(status) : 'Watch'}</button>
+      </div>`;
+
   return `
     <div class="signalCard ${isStructure ? 'structureCard' : 'actionableCard'}" data-ticker="${ticker}">
+      ${verdictHtml}
       <div class="signalCardHeader">
         <div class="signalCardTicker">
           <span class="signalCardSymbol">${ticker}</span>
@@ -278,6 +302,10 @@ function renderSignalCard(signal, isStructure = false) {
           <span class="k">Vol Ratio</span>
           <span class="v">${fmt2(indicators.volumeRatio)}x</span>
         </div>
+        <div class="signalCardMetric">
+          <span class="k">$ ADV</span>
+          <span class="v">${advTxt}</span>
+        </div>
       </div>
       <div class="signalCardIchimoku">
         <div class="ichimokuValue">
@@ -295,6 +323,7 @@ function renderSignalCard(signal, isStructure = false) {
       </div>
       ${tagsHtml ? `<div class="signalCardTags">${tagsHtml}</div>` : ""}
       ${isStructure ? '<div class="structureNote">Watch for next pullback to Kijun</div>' : ""}
+      ${actionsHtml}
     </div>
   `;
 }
@@ -316,15 +345,24 @@ function renderSignals(payload) {
     actionableSection.classList.add("hidden");
   }
   
-  // Structure Only (Watchlist) Section
+  // Approaching (Watchlist) Section — capped + ranked, collapsed by default
   const structureGrid = $("structureGrid");
   const structureSection = $("structureSection");
   const structureMeta = $("structureMeta");
+  const total = payload.structureTotal ?? structure.length;
   
   if (structure.length > 0) {
     structureGrid.innerHTML = structure.map(s => renderSignalCard(s, true)).join("");
-    structureMeta.textContent = `${structure.length} setup${structure.length !== 1 ? 's' : ''} for watchlist`;
+    const capNote = total > structure.length ? ` (top ${structure.length} of ${total})` : "";
+    structureMeta.textContent = `${structure.length} approaching setup${structure.length !== 1 ? 's' : ''}${capNote} — ranked by distance to actionable`;
     structureSection.classList.remove("hidden");
+    // Keep collapsed by default; reset toggle label each render.
+    const toggle = $("approachingToggle");
+    if (toggle) {
+      structureGrid.style.display = "none";
+      toggle.textContent = `Show approaching (${structure.length})`;
+      toggle.style.display = "";
+    }
   } else {
     structureSection.classList.add("hidden");
   }
@@ -374,10 +412,35 @@ function renderGateBanner(payload) {
   }
 }
 
+function renderVerdictBanner(payload) {
+  const banner = $("verdictBanner");
+  if (!banner) return;
+  const vs = payload.verdictSummary;
+  if (!vs || !vs.total) { banner.style.display = "none"; return; }
+  banner.style.display = "block";
+
+  const pill = (cls, text) =>
+    `<span style="display:inline-block;font-size:10px;font-weight:800;padding:3px 10px;border-radius:20px;text-transform:uppercase;letter-spacing:0.04em;${cls}">${text}</span>`;
+
+  const tradable = vs.TRADABLE || 0;
+  const watch = vs.WATCH || 0;
+  const stand = vs.STAND_DOWN || 0;
+  const el = $("verdictSummary");
+  if (el) {
+    el.innerHTML = [
+      tradable > 0 ? pill("background:rgba(52,199,89,0.14);color:#1b8a3e;", `${tradable} Tradable`) : "",
+      watch > 0 ? pill("background:rgba(255,149,0,0.14);color:#995c00;", `${watch} Watch`) : "",
+      stand > 0 ? pill("background:rgba(255,59,48,0.14);color:#cc2f26;", `${stand} Stand Down`) : "",
+      pill("background:rgba(11,11,15,0.04);color:var(--muted);", `${vs.total} Total`),
+    ].filter(Boolean).join(" ");
+  }
+}
+
 function render(payload) {
   lastPayload = payload;
   showResults(true);
   renderGateBanner(payload);
+  renderVerdictBanner(payload);
   renderStats(payload);
   renderGammaContext(payload);
   renderSignals(payload);
@@ -422,6 +485,9 @@ async function handleScan(e) {
     if (actionable > 0) statusMsg += ` (${actionable} actionable)`;
     if (rejected > 0) statusMsg += `. ${rejected} rejected as impulse bars.`;
     setStatus(statusMsg);
+    
+    // Newly scanned signals are persisted server-side; refresh the tracker view.
+    loadTracker(false);
   } catch (err) {
     console.error("Scan failed:", err);
     setStatus(`Error: ${err.message}`, "error");
@@ -431,27 +497,171 @@ async function handleScan(e) {
   }
 }
 
-function handleCardClick(e) {
-  const card = e.target.closest(".signalCard");
-  if (!card) return;
-  
-  const ticker = card.dataset.ticker;
-  if (!ticker) return;
-  
-  // Find the signal data for this ticker
-  if (!lastPayload) return;
-  
-  const allSignals = [
-    ...(lastPayload.actionable || []),
-    ...(lastPayload.structure || []),
-  ];
-  
-  const signal = allSignals.find(s => s.ticker === ticker);
-  if (!signal) return;
-  
-  // Open the Position Calculator with this signal's data
-  if (window.PositionCalculator) {
-    window.PositionCalculator.open(signal, e);
+// -----------------------------------------------------------------------------
+// Desk Trade Tracker + Backtest
+// -----------------------------------------------------------------------------
+
+const TRACKER_STATUSES = ["watching", "entered", "working", "broken", "exited"];
+
+function trkPillStyle(status) {
+  const map = {
+    pending: "background:rgba(11,11,15,0.06);color:var(--muted);",
+    triggered: "background:rgba(0,122,255,0.14);color:#0a62c9;",
+    target_hit: "background:rgba(52,199,89,0.16);color:#1b8a3e;",
+    stopped: "background:rgba(255,59,48,0.14);color:#cc2f26;",
+    expired: "background:rgba(11,11,15,0.06);color:var(--muted);",
+    invalidated: "background:rgba(255,59,48,0.10);color:#cc2f26;",
+    watching: "background:rgba(255,149,0,0.16);color:#995c00;",
+    entered: "background:rgba(0,122,255,0.16);color:#0a62c9;",
+    working: "background:rgba(0,122,255,0.10);color:#0a62c9;",
+    broken: "background:rgba(255,59,48,0.16);color:#cc2f26;",
+    exited: "background:rgba(11,11,15,0.08);color:var(--text);",
+  };
+  return map[status] || map.pending;
+}
+
+async function deskTrack(ticker, status, signalDate, note) {
+  try {
+    const resp = await fetch("/api/engine4-ichimoku/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker, status, signalDate, note }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    renderTracker(data.signals);
+    setStatus(`${ticker} marked "${status}".`);
+  } catch (e) {
+    setStatus(`Tracker error: ${e.message}`, "error");
+  }
+}
+
+function renderTracker(signals) {
+  const body = $("trackerBody");
+  const meta = $("trackerMeta");
+  const summary = $("trackerSummary");
+  if (!body) return;
+  if (!signals) { body.innerHTML = '<div class="muted" style="font-size:12px;">No tracked signals yet.</div>'; return; }
+
+  const counts = signals.counts || {};
+  if (summary) {
+    const order = ["watching", "entered", "working", "pending", "triggered", "target_hit", "stopped", "broken", "exited", "expired", "invalidated"];
+    summary.innerHTML = order
+      .filter(k => (counts[k] || 0) > 0)
+      .map(k => `<span class="trkPill" style="${trkPillStyle(k)}">${counts[k]} ${k.replace('_', ' ')}</span>`)
+      .join("");
+  }
+  if (meta) {
+    const wr = signals.winRate;
+    meta.textContent = `${signals.totalSignals || 0} tracked · ${signals.deskBookCount || 0} in desk book` +
+      (wr !== null && wr !== undefined ? ` · ${wr}% win (resolved ${signals.resolvedCount || 0})` : "");
+  }
+
+  // Desk book first (anything the trader is managing), then live auto-tracked.
+  const deskBook = [].concat(
+    signals.watching || [], signals.entered || [], signals.working || [],
+    signals.broken || [], signals.exited || []
+  );
+  const live = [].concat(signals.triggered || [], signals.pending || []);
+  const rows = deskBook.concat(live).slice(0, 40);
+
+  if (!rows.length) {
+    body.innerHTML = '<div class="muted" style="font-size:12px;">No tracked signals yet. Click <b>Watch</b> on a card to start a desk book.</div>';
+    return;
+  }
+
+  body.innerHTML = rows.map(r => {
+    const t = escapeHtml(r.ticker || "");
+    const sd = escapeHtml(r.signalDate || "");
+    const st = r.status || "pending";
+    const dir = escapeHtml(r.direction || "");
+    const opts = TRACKER_STATUSES.map(s => `<option value="${s}" ${s === st ? 'selected' : ''}>${s}</option>`).join("");
+    return `
+      <div class="trkRow" data-ticker="${t}" data-date="${sd}">
+        <span class="trkSym">${t}</span>
+        <span class="muted" style="font-size:11px;">${dir} · ${sd}</span>
+        <span class="trkPill" style="${trkPillStyle(st)}">${st.replace('_', ' ')}</span>
+        <select class="trkSelect" data-ticker="${t}" data-date="${sd}">
+          <option value="">advance…</option>
+          ${opts}
+        </select>
+      </div>`;
+  }).join("");
+
+  body.querySelectorAll(".trkSelect").forEach(sel => {
+    sel.addEventListener("change", (ev) => {
+      const v = ev.target.value;
+      if (!v) return;
+      deskTrack(ev.target.getAttribute("data-ticker"), v, ev.target.getAttribute("data-date"));
+    });
+  });
+}
+
+async function loadTracker(refresh) {
+  const btn = $("trackerRefreshBtn");
+  try {
+    if (btn) btn.disabled = true;
+    const url = `/api/engine4-ichimoku/status${refresh ? "?refresh=true" : ""}`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    renderTracker(data.signals);
+  } catch (e) {
+    setStatus(`Tracker load error: ${e.message}`, "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function btRow(label, s) {
+  if (!s) return "";
+  const cell = (v, suffix) => (v === null || v === undefined) ? "—" : `${v}${suffix || ""}`;
+  return `<tr>
+    <td>${escapeHtml(label)}</td>
+    <td>${s.signals || 0}</td>
+    <td>${s.triggered || 0}</td>
+    <td>${cell(s.winRate, "%")}</td>
+    <td>${cell(s.avgR)}</td>
+    <td>${cell(s.expectancy)}</td>
+    <td>${cell(s.avgMae)}</td>
+    <td>${cell(s.avgMfe)}</td>
+  </tr>`;
+}
+
+async function runBacktest() {
+  const btn = $("backtestRunBtn");
+  const body = $("backtestBody");
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = "Running…"; }
+    if (body) body.innerHTML = '<div class="muted" style="font-size:12px;">Replaying history — this can take a moment…</div>';
+    const resp = await fetch("/api/engine4-ichimoku/backtest?min_score=75&max_tickers=40");
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    const head = `<thead><tr><th>Cohort</th><th>Signals</th><th>Trig</th><th>Win</th><th>Avg R</th><th>Exp</th><th>MAE</th><th>MFE</th></tr></thead>`;
+    let rows = btRow("Overall", data.overall);
+    const byGrade = data.byGrade || {};
+    Object.keys(byGrade).forEach(g => { rows += btRow(`Grade ${g}`, byGrade[g]); });
+    const byBucket = data.byBucket || {};
+    Object.keys(byBucket).forEach(b => { rows += btRow(`Bucket: ${b}`, byBucket[b]); });
+    const p = data.params || {};
+    const win = data.window || {};
+    if (body) {
+      body.innerHTML = `
+        <table class="btTable">${head}<tbody>${rows}</tbody></table>
+        <div class="muted" style="font-size:11px;margin-top:8px;">
+          ${win.start || "?"} → ${win.end || "?"} · ${p.tickersWithSignals || 0}/${p.tickersTested || 0} names with signals · min score ${p.minScore}
+        </div>`;
+    }
+  } catch (e) {
+    if (body) body.innerHTML = `<div style="font-size:12px;color:var(--red,#cc2f26);">Backtest error: ${escapeHtml(e.message)}</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Run backtest"; }
   }
 }
 
@@ -472,11 +682,30 @@ function init() {
     runBtn.addEventListener("click", handleScan);
   }
   
-  // Card click handler
-  document.addEventListener("click", handleCardClick);
+  // Approaching (structure) toggle — collapsed by default
+  const approachingToggle = $("approachingToggle");
+  if (approachingToggle) {
+    approachingToggle.addEventListener("click", () => {
+      const grid = $("structureGrid");
+      if (!grid) return;
+      const hidden = grid.style.display === "none";
+      grid.style.display = hidden ? "" : "none";
+      const n = (lastPayload && (lastPayload.structure || []).length) || 0;
+      approachingToggle.textContent = hidden ? "Hide approaching" : `Show approaching (${n})`;
+    });
+  }
+  
+  // Desk tracker + backtest controls
+  const trackerRefreshBtn = $("trackerRefreshBtn");
+  if (trackerRefreshBtn) trackerRefreshBtn.addEventListener("click", () => loadTracker(true));
+  const backtestRunBtn = $("backtestRunBtn");
+  if (backtestRunBtn) backtestRunBtn.addEventListener("click", runBacktest);
   
   // Initialize tooltips
   initTooltips();
+  
+  // Prime the tracker (no refresh — cheap, just reads the store)
+  loadTracker(false);
   
   // Don't auto-run - let user adjust filters and click Scan manually
   setStatus("Adjust filters above and click \"Scan Universe\" to find Ichimoku continuation setups.");
@@ -525,20 +754,40 @@ if (document.readyState === "loading") {
   // ── Signal cards (Actionable and Structure) ──
   var actionableGrid = $("actionableGrid");
   var structureGrid = $("structureGrid");
+  // Single click model — deconflicts the two popups:
+  //   • "Insight" button   → LLM popup, docked to the RIGHT edge
+  //   • "Watch" button     → desk tracker (no popup)
+  //   • card body          → Position Sizer, near the click (LEFT-ish)
+  // No more double-open: the body no longer also fires the insight popup.
   function onCardClick(ev) {
     var card = ev.target.closest(".signalCard");
     if (!card || !lastPayload) return;
-    if (ev.target.closest("button, a, input")) return;
     var ticker = card.getAttribute("data-ticker");
     var allSignals = [].concat(lastPayload.actionable || [], lastPayload.structure || []);
     var sig = allSignals.find(function(s) { return s.ticker === ticker; });
     if (!sig) return;
+
+    // Dedicated insight affordance → LLM, docked right so it never overlaps the sizer.
+    if (ev.target.closest(".ikInsightBtn")) {
+      ev.stopPropagation();
+      var ix = Math.max(20, window.innerWidth - 470);
+      fetchInsight("ik_signal", sig, "Ichimoku: " + ticker + " (" + (sig.direction || "") + ")", ix, 96);
+      return;
+    }
+    // Desk tracker affordance → mark watching (no popup).
+    if (ev.target.closest(".ikTrackBtn")) {
+      ev.stopPropagation();
+      var act = ev.target.closest(".ikTrackBtn").getAttribute("data-act") || "watching";
+      deskTrack(ticker, act, sig.signalDate);
+      return;
+    }
+    // Any other control inside the card: ignore.
+    if (ev.target.closest("button, a, input, select")) return;
+    // Card body → Position Sizer near the click.
     ev.stopPropagation();
-    // Open Position Calculator alongside the desk insight (same as Red Dog)
     if (window.PositionCalculator) {
       window.PositionCalculator.open(sig, ev);
     }
-    fetchInsight("ik_signal", sig, "Ichimoku: " + ticker + " (" + (sig.direction || "") + ")", ev.clientX, ev.clientY);
   }
   if (actionableGrid) actionableGrid.addEventListener("click", onCardClick);
   if (structureGrid) structureGrid.addEventListener("click", onCardClick);
