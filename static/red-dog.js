@@ -707,10 +707,11 @@ async function runBacktest() {
   const btn = $("backtestRunBtn");
   const body = $("backtestBody");
   const years = $("backtestYears")?.value || "3";
+  const minScore = $("backtestMinScore")?.value ?? "60";
   if (btn) { btn.disabled = true; btn.textContent = "Running…"; }
   if (body) body.innerHTML = `<span class="muted">Replaying ${years}y of history across the universe sample… this can take 20-40s.</span>`;
   try {
-    const resp = await fetch(`/api/engine3-red-dog/backtest?years=${years}&max_tickers=40`);
+    const resp = await fetch(`/api/engine3-red-dog/backtest?years=${years}&min_score=${minScore}&max_tickers=60`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     const o = data.overall || {};
@@ -737,7 +738,7 @@ async function runBacktest() {
         `<th style="padding:4px 8px;">Triggered</th><th style="padding:4px 8px;">Win%</th>` +
         `<th style="padding:4px 8px;">Exp(R)</th><th style="padding:4px 8px;">MAE</th><th style="padding:4px 8px;">MFE</th></tr></thead>` +
         `<tbody>${rows.join("")}</tbody></table>` +
-        `<div class="muted" style="margin-top:6px;">Window: ${win.start || "?"} → ${win.end || "?"} · ${data.params?.tickersTested || 0} names sampled. ` +
+        `<div class="muted" style="margin-top:6px;">Window: ${win.start || "?"} → ${win.end || "?"} · ${data.params?.tickersTested || 0} names sampled · min score ${data.params?.minScore ?? minScore}. ` +
         `Compare grade tiers and (critically) <b>aligned vs counter</b> expectancy.</div></div>`;
     }
   } catch (err) {

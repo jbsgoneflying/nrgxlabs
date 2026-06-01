@@ -841,7 +841,7 @@ InsightPopup.prototype.render = function (data) {
 
 InsightPopup.prototype.fetch = function (cardType, cardData, title, x, y, ctx) {
   var self = this;
-  var cacheKey = cardType + ":" + JSON.stringify(cardData).substring(0, 100);
+  var cacheKey = cardType + ":" + ((cardData && cardData.ticker) || "") + ":" + ((cardData && cardData.status) || "") + ":" + JSON.stringify(cardData).substring(0, 80);
   if (self._cache[cacheKey]) { self.open(title, x, y); self.render(self._cache[cacheKey]); return; }
   self.open(title, x, y);
   var esc = self._esc;

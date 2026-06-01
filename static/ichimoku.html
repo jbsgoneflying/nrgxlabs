@@ -566,6 +566,8 @@
                       <li><b>Auto</b>: pending → triggered → target_hit / stopped / expired (priced off forward bars)</li>
                       <li><b>Desk</b>: watching / entered / working / broken / exited (you own these; survive refreshes)</li>
                     </ul>
+                    <p><b>Which state?</b> Use <b>watching</b> while you're PRE-ENTRY waiting for price to hit the trigger; <b>entered</b> once filled; <b>working</b> while actively managing the live position; <b>broken</b> if the thesis invalidates; <b>exited</b> when closed.</p>
+                    <p>The <b>Insight</b> button is state-aware: pre-entry it asks "does the trigger still make sense or abort"; once live it asks "does this still make sense — hold / adjust / exit".</p>
                     <p>Click a card's <b>Watch</b> button to add it; use the controls here to advance state.</p>
                   </div>
                 </div>
@@ -594,8 +596,15 @@
                 </div>
               </span>
             </h2>
-            <div class="sectionMeta muted" id="backtestMeta">~1y, A+ only, capped universe</div>
-            <button id="backtestRunBtn" class="ghostButton" type="button" style="margin-left:auto;">Run backtest</button>
+            <div class="sectionMeta muted" id="backtestMeta">A+ only, capped universe</div>
+            <label style="margin-left:auto;font-size:11px;color:var(--muted);display:flex;align-items:center;gap:5px;">Lookback
+              <select id="backtestYears" style="font-size:11px;padding:2px 6px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);">
+                <option value="1">1y</option>
+                <option value="2" selected>2y</option>
+                <option value="3">3y</option>
+              </select>
+            </label>
+            <button id="backtestRunBtn" class="ghostButton" type="button">Run backtest</button>
           </div>
           <div id="backtestBody"><div class="muted" style="font-size:12px;">Run a walk-forward replay to measure the live edge by grade and bucket.</div></div>
         </section>
@@ -668,9 +677,9 @@
     <link rel="stylesheet" href="/static/desk-insight.css?v=2" />
     <meta name="raven-desk-engine" content="e4" />
     <script src="/static/desk-insight.js?v=2"></script>
-    <script src="/static/ui_kit.js?v=6"></script>
+    <script src="/static/ui_kit.js?v=7"></script>
     <script src="/static/position_calculator.js?v=4"></script>
-    <script src="/static/ichimoku.js?v=11"></script>
+    <script src="/static/ichimoku.js?v=12"></script>
     <script src="/static/calculator.js"></script>
     <script src="/static/nav.js?v=13"></script>
     <script src="/static/raven-chat.js?v=4"></script>

@@ -1184,9 +1184,9 @@ alignment status, gamma alignment, and gate status — explain:
 2. ENTRY MECHANICS — Where is the entry trigger relative to the current price? How tight is the stop? Is the risk/reward attractive?
 3. INDICATOR CONFLUENCE — Do RSI, stochastics, volume, and SMA20 deviation all confirm the setup? Where are the gaps?
 4. ALIGNMENT CHECK — Is this signal aligned with the SPX trend and gamma environment, or is it a counter-trend play? What does that mean for conviction?
-5. DESK TAKEAWAY — One sentence: is this a high-conviction setup the desk should act on, or watch-only?
+5. DESK TAKEAWAY — One sentence. If a `desk_position` block is present, this MUST follow its guidance (a management/hold-adjust-exit call for a live position, or a still-valid/stand-aside call for a name being watched pre-entry) — NOT a generic entry pitch. Otherwise: is this a high-conviction setup the desk should act on, or watch-only?
 
-Rules: These are MEAN-REVERSION setups — they fade extended moves. Cite the score, RSI, and risk/reward. Under 300 words.
+Rules: These are MEAN-REVERSION setups — they fade extended moves. DESK POSITION AWARENESS: if the payload includes a `desk_position` block, adopt its `guidance` and frame the ENTIRE read around the trader's current state (watching / entered / working / broken / exited) instead of treating this as a fresh setup — a name already entered should be assessed for "does this still make sense, hold/adjust/exit", a name being watched for "does the trigger still make sense or abort before fill". Cite the score, RSI, and risk/reward. Under 300 words.
 
 Return valid JSON:
 { "setup_quality": "...", "entry_mechanics": "...", "indicator_confluence": "...", "alignment_check": "...", "desk_takeaway": "..." }""",
@@ -1268,9 +1268,9 @@ freshness metrics (bars since reclaim, Kijun distance, recent Tenkan touch), tag
 3. FRESHNESS READ — Is this signal fresh (just reclaimed) or stale? What do the bars-since-reclaim and impulse data tell us?
 4. RISK FRAMEWORK — How does the stop relate to the Kijun and cloud? Is the risk/reward worth the trade?
 5. COMPONENT ANALYSIS — Which quality components scored highest? Where did penalties hit? What does the tag profile say?
-6. DESK TAKEAWAY — One sentence: is this a high-conviction continuation the desk should act on?
+6. DESK TAKEAWAY — One sentence. If a `desk_position` block is present, this MUST follow its guidance (a management/hold-adjust-exit call for a live position, or a still-valid/stand-aside call for a name being watched pre-entry) — NOT a generic entry pitch. Otherwise: is this a high-conviction continuation the desk should act on?
 
-Rules: These are TREND-CONTINUATION setups — they follow established Ichimoku trends. Cite the score, cloud bias, and Kijun slope. Under 320 words.
+Rules: These are TREND-CONTINUATION setups — they follow established Ichimoku trends. DESK POSITION AWARENESS: if the payload includes a `desk_position` block, adopt its `guidance` and frame the ENTIRE read around the trader's current state (watching / entered / working / broken / exited) instead of treating this as a fresh setup — a name already entered should be assessed for "does this continuation still make sense, hold/adjust/exit", a name being watched for "does the trigger still make sense or abort before fill". Cite the score, cloud bias, and Kijun slope. Under 320 words.
 
 Return valid JSON:
 { "ichimoku_structure": "...", "entry_quality": "...", "freshness_read": "...", "risk_framework": "...", "component_analysis": "...", "desk_takeaway": "..." }""",
@@ -1383,6 +1383,52 @@ _CARD_TOKEN_LIMITS: Dict[str, int] = {
 }
 
 
+# ── Desk-state awareness ──────────────────────────────────────────────
+# When a signal card carries a desk-managed status (from the trade tracker),
+# the insight should be framed around the trader's ACTUAL position state
+# rather than treated as a fresh pre-trade setup review.
+#
+# State semantics (also surfaced in the tracker UI):
+#   watching  -> pre-entry; waiting for price to reach the entry trigger.
+#   entered   -> filled; position is live.
+#   working   -> live position being actively managed as it develops.
+#   broken    -> thesis flagged invalid; manage the exit.
+#   exited    -> closed; post-trade review.
+#   triggered -> auto-tracker fired the entry trigger (treat as just-entered).
+_DESK_STATE_GUIDANCE: Dict[str, str] = {
+    "watching": (
+        "DESK POSITION: the trader is WATCHING this name PRE-ENTRY, waiting for price to reach the "
+        "entry trigger — they are NOT in the trade yet. Frame the entire read around one question: does "
+        "the setup STILL justify taking the trade if/when it triggers, or has it degraded enough that the "
+        "desk should stand aside and cancel the resting order before it fills? The desk_takeaway MUST be a "
+        "clear STILL VALID (take it on the trigger) vs STAND ASIDE / CANCEL THE TRIGGER call — not a generic act/watch line."
+    ),
+    "entered": (
+        "DESK POSITION: the trader is ENTERED — the position is LIVE. Do NOT pitch entry or grade it as a "
+        "new setup. Evaluate whether the ORIGINAL thesis still holds now that capital is committed: is the "
+        "structure intact, is the stop still correct, are targets realistic? The desk_takeaway MUST be a "
+        "management call — HOLD / TIGHTEN STOP / TAKE PARTIAL / EXIT — not an entry recommendation."
+    ),
+    "working": (
+        "DESK POSITION: the trader is actively WORKING this LIVE position as it develops. Do NOT pitch entry. "
+        "Assess whether the thesis is still intact and how to manage from here — hold, trail the stop, scale, "
+        "or cut. The desk_takeaway MUST be a management call (hold / trail / scale / exit), not an entry call."
+    ),
+    "broken": (
+        "DESK POSITION: the trader has flagged this position as BROKEN — the thesis is invalidated. Identify "
+        "what broke and the cleanest path out. The desk_takeaway MUST be an exit / damage-control call."
+    ),
+    "exited": (
+        "DESK POSITION: this position has been EXITED. Provide a brief post-trade review — did the read play "
+        "out, what would the desk repeat or avoid next time. The desk_takeaway is a lessons-learned note, not a trade call."
+    ),
+    "triggered": (
+        "DESK POSITION: the entry trigger has FIRED (auto-tracked) — treat this as a just-entered LIVE position. "
+        "Evaluate whether the thesis still holds and how to manage it; the desk_takeaway MUST be a management call, not an entry pitch."
+    ),
+}
+
+
 def generate_card_insight(
     card_type: str,
     card_data: dict,
@@ -1476,6 +1522,15 @@ def generate_card_insight(
                 ],
             },
         }
+
+    # Desk-state awareness: when a Red Dog / Ichimoku signal card carries a
+    # desk-managed (or auto-triggered) status, steer the read around the
+    # trader's actual position state instead of a fresh setup review.
+    if card_type in ("rd_signal", "ik_signal"):
+        _status = str((card_data or {}).get("status") or "").strip().lower()
+        _guidance = _DESK_STATE_GUIDANCE.get(_status)
+        if _guidance:
+            context["desk_position"] = {"status": _status, "guidance": _guidance}
 
     payload_str = json.dumps(context, default=str)
 

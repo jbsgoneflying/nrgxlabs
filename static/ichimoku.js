@@ -666,7 +666,12 @@ async function runBacktest() {
   try {
     if (btn) { btn.disabled = true; btn.textContent = "Running…"; }
     if (body) body.innerHTML = '<div class="muted" style="font-size:12px;">Replaying history — this can take a moment…</div>';
-    const resp = await fetch("/api/engine4-ichimoku/backtest?min_score=75&max_tickers=40");
+    const yrsSel = $("backtestYears");
+    const yrs = yrsSel ? parseInt(yrsSel.value, 10) || 2 : 2;
+    const end = new Date();
+    const start = new Date(end.getTime() - yrs * 365 * 24 * 3600 * 1000);
+    const fmt = (d) => d.toISOString().slice(0, 10);
+    const resp = await fetch(`/api/engine4-ichimoku/backtest?min_score=75&max_tickers=60&start=${fmt(start)}&end=${fmt(end)}`);
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
       throw new Error(err.detail || `HTTP ${resp.status}`);

@@ -747,11 +747,17 @@
                 <option value="3" selected>3y</option>
                 <option value="5">5y</option>
               </select>
+              <select id="backtestMinScore" class="controlSelect" style="font-size:11px;padding:3px 6px;width:auto;display:inline-block;margin-left:6px;" title="Minimum grade to include — A-grade is the tradable edge; All shows the full pattern baseline.">
+                <option value="0">All grades</option>
+                <option value="45">B+ (45)</option>
+                <option value="60" selected>A (60)</option>
+                <option value="75">A+ (75)</option>
+              </select>
               <button id="backtestRunBtn" class="secondaryButton" type="button" style="font-size:11px;padding:4px 10px;margin-left:6px;">Run Backtest</button>
             </div>
           </div>
           <div id="backtestSummary" class="statsGrid" style="margin-bottom:10px;"></div>
-          <div id="backtestBody" class="muted" style="font-size:12px;">Run a backtest to measure the edge (samples up to 40 names; ~20-40s).</div>
+          <div id="backtestBody" class="muted" style="font-size:12px;">Run a backtest to measure the edge. Defaults to A-grade (the tradable cohort); switch to <b>All grades</b> to see the full pattern baseline. Samples up to 60 names; ~30-60s.</div>
         </section>
 
         <!-- How to Trade Section -->
@@ -849,9 +855,9 @@
     <link rel="stylesheet" href="/static/desk-insight.css?v=2" />
     <meta name="raven-desk-engine" content="e3" />
     <script src="/static/desk-insight.js?v=2"></script>
-    <script src="/static/ui_kit.js?v=6"></script>
+    <script src="/static/ui_kit.js?v=7"></script>
     <script src="/static/position_calculator.js?v=4"></script>
-    <script src="/static/red-dog.js?v=11"></script>
+    <script src="/static/red-dog.js?v=12"></script>
     <script src="/static/calculator.js"></script>
     <script src="/static/nav.js?v=13"></script>
     <script src="/static/raven-chat.js?v=4"></script>
