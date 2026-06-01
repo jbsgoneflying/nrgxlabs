@@ -722,9 +722,16 @@ def _persist_signals(signal_dicts: List[Dict[str, Any]]) -> None:
                 continue
             key = _signal_key(ticker, sig_date)
 
-            prior = _signal_store.get(key)
-            if store and prior is None:
+            # Redis is the source of truth across gunicorn workers; the
+            # per-worker in-memory store is only a no-Redis fallback. Reading
+            # in-memory first would let a stale worker copy clobber a desk
+            # state another worker just wrote.
+            if store:
                 prior = store.get_json(_REDIS_PREFIX + key)
+                if prior is None:
+                    prior = _signal_store.get(key)
+            else:
+                prior = _signal_store.get(key)
             if prior and prior.get("status") in protected:
                 # Refresh the scored snapshot but keep desk/lifecycle state.
                 merged = dict(d)

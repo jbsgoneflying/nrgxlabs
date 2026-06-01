@@ -840,6 +840,28 @@ class TestDeskTracker:
         res = scr.set_desk_status("ZZTEST", desk_status="bogus")
         assert res["ok"] is False
 
+    def test_redis_prior_wins_over_stale_inmemory(self, monkeypatch):
+        """Multi-worker regression: a stale per-worker in-memory copy must not
+        clobber the desk state another worker wrote to Redis."""
+        from backend import engine4_screener as scr
+        import backend.redis_store as rs
+
+        class FakeStore:
+            def __init__(self): self.kv = {}
+            def get_json(self, k): return self.kv.get(k)
+            def set_json(self, k, v, ttl_s=None): self.kv[k] = v
+
+        fake = FakeStore()
+        monkeypatch.setattr(rs, "get_store_optional", lambda: fake)
+        key = scr._signal_key("ZZAUTH4", "2024-05-05")
+        fake.kv[scr._REDIS_PREFIX + key] = {"ticker": "ZZAUTH4", "signalDate": "2024-05-05",
+                                            "status": "working", "levels": {}}
+        scr._signal_store[key] = {"ticker": "ZZAUTH4", "signalDate": "2024-05-05",
+                                  "status": "pending", "levels": {}}  # stale
+        scr._persist_signals([{"ticker": "ZZAUTH4", "signalDate": "2024-05-05",
+                               "direction": "bullish", "levels": {}, "quality": {}}])
+        assert fake.kv[scr._REDIS_PREFIX + key]["status"] == "working"
+
     def test_persist_accepts_dataclasses(self):
         """Regression: run_universe_scan persists IchimokuSignal objects, not
         dicts — _persist_signals must tolerate dataclasses without crashing."""
