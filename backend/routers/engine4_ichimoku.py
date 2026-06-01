@@ -26,6 +26,7 @@ from backend.engine4_screener import (
     get_all_signals as get_engine4_signals,
     refresh_signal_statuses as refresh_engine4_statuses,
     set_desk_status as set_engine4_desk_status,
+    remove_signal as remove_engine4_signal,
 )
 from backend.gating import (
     gate_scan_results,
@@ -287,6 +288,19 @@ async def engine4_ichimoku_track(request: Request):
     status = str(body.get("status") or "").strip().lower()
     if not ticker or not status:
         raise HTTPException(status_code=400, detail="ticker and status are required.")
+
+    # Untrack: remove a mis-clicked / stale name from the desk book entirely.
+    if status in ("untrack", "remove", "clear"):
+        try:
+            result = remove_engine4_signal(ticker, signal_date=body.get("signalDate"))
+            if not result.get("ok"):
+                raise HTTPException(status_code=400, detail=result.get("error", "Could not remove."))
+            return {"ok": True, "removed": result.get("removed"), "signals": get_engine4_signals()}
+        except HTTPException:
+            raise
+        except Exception as e:
+            LOG.exception("Unhandled failure (engine4-ichimoku/track untrack)")
+            raise HTTPException(status_code=500, detail="Internal error") from e
 
     try:
         result = set_engine4_desk_status(

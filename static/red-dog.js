@@ -596,11 +596,12 @@ async function deskTrack(ticker, status, signalDate, note) {
     }
     const data = await resp.json();
     renderTracker(data.signals);
+    const removed = ["untrack", "remove", "clear"].includes(status);
     try {
       const sel = `.signalCard[data-ticker="${(window.CSS && CSS.escape) ? CSS.escape(ticker) : ticker}"] .rdTrackBtn`;
-      document.querySelectorAll(sel).forEach(b => { b.textContent = status; b.classList.add("isTracked"); });
+      document.querySelectorAll(sel).forEach(b => { b.textContent = removed ? "Watch" : status; b.classList.toggle("isTracked", !removed); });
     } catch (_) { /* best effort */ }
-    setStatus(`${ticker} marked "${status}".`, "ok");
+    setStatus(removed ? `${ticker} removed from desk book.` : `${ticker} marked "${status}".`, "ok");
   } catch (e) {
     setStatus(`Tracker error: ${e.message}`, "error");
   }
@@ -648,6 +649,7 @@ function renderTracker(s) {
           <option value="">advance…</option>
           ${opts}
         </select>
+        <button type="button" class="trkRemove" data-ticker="${t}" data-date="${sd}" title="Remove from desk book" style="border:none;background:none;color:var(--muted);cursor:pointer;font-size:13px;line-height:1;">✕</button>
       </div>`;
   }).join("");
 
@@ -656,6 +658,11 @@ function renderTracker(s) {
       const v = ev.target.value;
       if (!v) return;
       deskTrack(ev.target.getAttribute("data-ticker"), v, ev.target.getAttribute("data-date"));
+    });
+  });
+  body.querySelectorAll(".trkRemove").forEach(b => {
+    b.addEventListener("click", (ev) => {
+      deskTrack(ev.target.getAttribute("data-ticker"), "untrack", ev.target.getAttribute("data-date"));
     });
   });
 }

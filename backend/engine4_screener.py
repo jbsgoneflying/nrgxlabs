@@ -864,6 +864,26 @@ def set_desk_status(
     return {"ok": True, "record": rec}
 
 
+def remove_signal(ticker: str, signal_date: Optional[str] = None) -> Dict[str, Any]:
+    """Remove a tracked signal from the desk book entirely (e.g. a mis-click)."""
+    rec = _find_record(ticker, signal_date)
+    if rec is None:
+        return {"ok": False, "error": f"No tracked signal for {ticker}."}
+    key = _signal_key(rec.get("ticker", ""), rec.get("signalDate", ""))
+
+    with _signal_store_lock:
+        _signal_store.pop(key, None)
+    from backend.redis_store import get_store_optional
+
+    store = get_store_optional()
+    if store:
+        store.delete_key(_REDIS_PREFIX + key)
+        index = set(store.get_json(_REDIS_INDEX) or [])
+        index.discard(key)
+        store.set_json(_REDIS_INDEX, sorted(index), ttl_s=_SIGNAL_TTL_S)
+    return {"ok": True, "removed": key}
+
+
 def refresh_signal_statuses(
     client: OratsClient,
     as_of_date: Optional[str] = None,

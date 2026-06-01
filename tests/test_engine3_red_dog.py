@@ -496,6 +496,16 @@ class TestDeskTracker:
         from backend import engine3_screener as scr
         assert scr.set_desk_status("NOSUCHTICKER", desk_status="entered")["ok"] is False
 
+    def test_remove_signal(self):
+        scr, _ = self._seed(ticker="ZZRDRM", date="2024-03-03")
+        assert any(r["ticker"] == "ZZRDRM" for r in scr.get_all_signals()["pending"])
+        res = scr.remove_signal("ZZRDRM", signal_date="2024-03-03")
+        assert res["ok"] is True
+        all_sigs = scr.get_all_signals()
+        assert not any(r["ticker"] == "ZZRDRM" for bucket in all_sigs.get("counts", {})
+                       for r in all_sigs.get(bucket, []))
+        assert scr.remove_signal("NOPE")["ok"] is False
+
     def test_redis_prior_wins_over_stale_inmemory(self, monkeypatch):
         """Multi-worker regression: a stale per-worker in-memory copy must not
         clobber the desk state another worker wrote to Redis."""
