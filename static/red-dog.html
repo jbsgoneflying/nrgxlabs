@@ -825,6 +825,10 @@
       .rdInsightSource{font-size:10px;color:rgba(255,255,255,.35);text-align:right;margin-top:12px;font-style:italic}
       @keyframes rdDotPulse{0%,100%{opacity:.3}50%{opacity:1}}
       .rdClick{cursor:pointer;transition:box-shadow .15s ease}.rdClick:hover{box-shadow:0 2px 12px rgba(0,0,0,.08)}
+      /* Card action buttons (Insight) — deconflicts sizer vs LLM popup */
+      .signalCardActions{display:flex;gap:6px;margin-top:10px;border-top:1px solid rgba(0,0,0,.06);padding-top:8px}
+      .rdCardBtn{flex:1;font-size:11px;font-weight:700;padding:5px 8px;border-radius:8px;border:1px solid rgba(0,0,0,.1);background:rgba(0,0,0,.02);color:var(--text);cursor:pointer;transition:background .12s ease}
+      .rdCardBtn:hover{background:rgba(0,122,255,.08);border-color:rgba(0,122,255,.25)}
     </style>
     <div class="rdInsightPopup" id="rdInsightPopup">
       <div class="rdInsightHeader" id="rdInsightHeader">
@@ -841,7 +845,7 @@
     <script src="/static/desk-insight.js?v=2"></script>
     <script src="/static/ui_kit.js?v=5"></script>
     <script src="/static/position_calculator.js?v=3"></script>
-    <script src="/static/red-dog.js?v=7"></script>
+    <script src="/static/red-dog.js?v=8"></script>
     <script src="/static/calculator.js"></script>
     <script src="/static/nav.js?v=13"></script>
     <script src="/static/raven-chat.js?v=4"></script>

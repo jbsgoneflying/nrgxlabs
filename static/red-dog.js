@@ -364,6 +364,9 @@ function renderSignalCard(signal, isAPlus = false) {
         </div>
       </div>
       ${chipsHtml}
+      <div class="signalCardActions">
+        <button type="button" class="rdCardBtn rdInsightBtn" data-ticker="${ticker}">Insight</button>
+      </div>
     </div>
   `;
 }
@@ -391,28 +394,9 @@ function renderWatchlist(containerId, signals, metaId, label, isAPlus = false) {
   
   container.innerHTML = signals.map(s => renderSignalCard(s, isAPlus)).join("");
   if (meta) meta.textContent = `${signals.length} setup${signals.length !== 1 ? "s" : ""}`;
-  
-  // Add click handlers for Position Calculator
-  container.querySelectorAll(".signalCard").forEach(card => {
-    card.addEventListener("click", (e) => {
-      const ticker = card.dataset.ticker;
-      if (!ticker || !lastPayload) return;
-      
-      // Find the signal data for this ticker (Engine 3 uses aPlus and standard)
-      const allSignals = [
-        ...(lastPayload.aPlus || []),
-        ...(lastPayload.standard || []),
-      ];
-      
-      const signal = allSignals.find(s => s.ticker === ticker);
-      if (!signal) return;
-      
-      // Open the Position Calculator with this signal's data
-      if (window.PositionCalculator) {
-        window.PositionCalculator.open(signal, e);
-      }
-    });
-  });
+  // Card clicks (Position Sizer + Insight) are handled by the single
+  // delegated onCardClick listener on the grids — see the insight IIFE below.
+  // No per-card listener here, so the two popups never double-open.
 }
 
 function renderGateBanner(payload) {
@@ -717,17 +701,32 @@ document.addEventListener("DOMContentLoaded", init);
   // ── Signal cards (A+ and Standard) ──
   var aplusGrid = $("aplusGrid");
   var standardGrid = $("standardGrid");
+  // Single click model — deconflicts the two popups (same as Ichimoku):
+  //   • "Insight" button → LLM popup, docked to the RIGHT edge
+  //   • card body        → Position Sizer, near the click
+  // No more double-open: the body no longer also fires the insight popup.
   function onCardClick(ev) {
     var card = ev.target.closest(".signalCard");
     if (!card || !lastPayload) return;
-    // Don't trigger on position calculator buttons
-    if (ev.target.closest("button, a, input")) return;
     var ticker = card.getAttribute("data-ticker");
     var allSignals = [].concat(lastPayload.aPlus || [], lastPayload.standard || []);
     var sig = allSignals.find(function(s) { return s.ticker === ticker; });
     if (!sig) return;
+
+    // Dedicated insight affordance → LLM, docked right so it never overlaps the sizer.
+    if (ev.target.closest(".rdInsightBtn")) {
+      ev.stopPropagation();
+      var ix = Math.max(20, window.innerWidth - 470);
+      fetchInsight("rd_signal", sig, "Red Dog: " + ticker + " (" + (sig.direction || "") + ")", ix, 96);
+      return;
+    }
+    // Any other control inside the card: ignore.
+    if (ev.target.closest("button, a, input, select")) return;
+    // Card body → Position Sizer near the click.
     ev.stopPropagation();
-    fetchInsight("rd_signal", sig, "Red Dog: " + ticker + " (" + (sig.direction || "") + ")", ev.clientX, ev.clientY);
+    if (window.PositionCalculator) {
+      window.PositionCalculator.open(sig, ev);
+    }
   }
   if (aplusGrid) aplusGrid.addEventListener("click", onCardClick);
   if (standardGrid) standardGrid.addEventListener("click", onCardClick);
