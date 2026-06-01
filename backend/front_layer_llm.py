@@ -1319,6 +1319,28 @@ Rules: Cite the gate counts and regime label. Under 200 words.
 
 Return valid JSON:
 { "gate_status": "...", "regime_for_continuation": "...", "vol_direction_impact": "...", "desk_takeaway": "..." }""",
+
+    "desk_brain": """You are the head trader of a multi-strategy proprietary desk reviewing the book your
+risk system just built. You are given: the current REGIME, the deterministic TARGET BOOK (positions with
+sleeve, size in risk-%, conviction and measured edge), the SLEEVE allocation (volatility/income,
+directional/growth, overlay/reserve) and the OPPORTUNITY SET your engines surfaced.
+
+Your job is synthesis and a *bounded* nudge — NOT sizing. The math already sized the book.
+
+1. LEAN TODAY — In plain English, what is the book leaning into and is that the right posture for this regime?
+2. CONFLICTS — Call out correlation clusters, crowded names, or sleeves fighting each other. If none, say so.
+3. WHAT WOULD CHANGE MY MIND — The 1-2 things that would make you cut or add risk tomorrow.
+4. SLEEVE TILT — Optional multipliers to nudge sleeve weights. Values MUST be between 0.80 and 1.20
+   (the system hard-clamps anything outside). 1.0 = no change. Only tilt when you have a clear regime/conflict
+   reason; otherwise return 1.0 for all three.
+5. DESK TAKEAWAY — One sentence: the posture call for the desk today.
+
+Rules: Never invent positions or dollar sizes. Never mention raw P&L. Cite sleeve names, the regime label,
+and total heat. Under 220 words.
+
+Return valid JSON:
+{ "lean_today": "...", "conflicts": "...", "what_would_change_my_mind": "...",
+  "sleeve_tilt": { "volatility": 1.0, "directional": 1.0, "overlay": 1.0 }, "desk_takeaway": "..." }""",
 }
 
 _CARD_INSIGHT_KEYS: Dict[str, set] = {
@@ -1375,11 +1397,14 @@ _CARD_INSIGHT_KEYS: Dict[str, set] = {
     "ik_gamma": {"dual_index_read", "continuation_impact", "index_membership", "desk_takeaway"},
     "ik_scan_summary": {"opportunity_read", "actionable_vs_structure", "rejection_rate", "desk_takeaway"},
     "ik_gate": {"gate_status", "regime_for_continuation", "vol_direction_impact", "desk_takeaway"},
+    # Desk Brain (meta-allocator) card type
+    "desk_brain": {"lean_today", "conflicts", "what_would_change_my_mind", "sleeve_tilt", "desk_takeaway"},
 }
 
 _CARD_TOKEN_LIMITS: Dict[str, int] = {
     "e1_decision": 3000,
     "e2_expected_move": 3000,
+    "desk_brain": 2000,
 }
 
 
@@ -1577,6 +1602,92 @@ def generate_card_insight(
         LOG.warning("Card insight (%s) LLM call failed: %s", card_type, reason)
         fallback["_fallback_reason"] = reason
         return fallback
+
+
+# ---------------------------------------------------------------------------
+# Desk Brain (meta-allocator) — desk-head synthesis + bounded sleeve tilt
+# ---------------------------------------------------------------------------
+
+_DESK_BRAIN_SLEEVES = ("volatility", "directional", "overlay")
+
+
+def _desk_brain_fallback(reason: str) -> Dict[str, Any]:
+    """Deterministic, safe fallback when the LLM is unavailable.
+
+    Neutral tilt (1.0 everywhere) so the deterministic book is unchanged.
+    """
+    return {
+        "lean_today": "LLM desk-head narrative unavailable; the deterministic target book stands as sized.",
+        "conflicts": "See the system-computed conflicts list.",
+        "what_would_change_my_mind": "A regime shift or a new high-edge actionable signal.",
+        "sleeve_tilt": {s: 1.0 for s in _DESK_BRAIN_SLEEVES},
+        "desk_takeaway": "Run the book as sized by the deterministic allocator.",
+        "_source": "fallback",
+        "_fallback_reason": reason,
+    }
+
+
+def generate_desk_brain_synthesis(
+    context: Dict[str, Any],
+    *,
+    model: Optional[str] = None,
+) -> Dict[str, Any]:
+    """LLM desk-head read of the Desk Brain target book.
+
+    Returns narrative strings plus a NUMERIC ``sleeve_tilt`` dict (floats).
+    The tilt is soft-clamped here to [0.80, 1.20]; the allocator hard-clamps
+    it again to ``DESK_BRAIN_TILT_MAX_PCT`` before it can touch sizing, so the
+    LLM can never blow up the book. Never raises — degrades to a neutral
+    fallback on any error.
+    """
+    client = _get_openai_client()
+    if client is None:
+        return _desk_brain_fallback("LLM client unavailable")
+
+    if not _rate_limiter.acquire():
+        return _desk_brain_fallback(_rate_limit_msg("Desk Brain"))
+
+    system_prompt = _CARD_INSIGHT_PROMPTS.get("desk_brain", "")
+    required_keys = _CARD_INSIGHT_KEYS.get("desk_brain", set())
+    model = model or os.getenv("DESK_BRAIN_MODEL", "gpt-5.5").strip()
+
+    try:
+        payload_str = json.dumps(context, default=str)
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": payload_str},
+            ],
+            temperature=1,
+            max_completion_tokens=_CARD_TOKEN_LIMITS.get("desk_brain", 2000),
+            timeout=30,
+            response_format={"type": "json_object"},
+        )
+        content = response.choices[0].message.content.strip()
+        result = _parse_llm_json(content)
+        if result is None or not required_keys.issubset(set(result.keys())):
+            return _desk_brain_fallback("LLM returned invalid JSON")
+
+        out: Dict[str, Any] = {}
+        for key in ("lean_today", "conflicts", "what_would_change_my_mind", "desk_takeaway"):
+            out[key] = str(result.get(key, ""))[:800]
+
+        # Parse + soft-clamp the numeric tilt.
+        raw_tilt = result.get("sleeve_tilt") or {}
+        tilt: Dict[str, float] = {}
+        for s in _DESK_BRAIN_SLEEVES:
+            try:
+                mult = float(raw_tilt.get(s, 1.0)) if isinstance(raw_tilt, dict) else 1.0
+            except (TypeError, ValueError):
+                mult = 1.0
+            tilt[s] = round(max(0.80, min(1.20, mult)), 3)
+        out["sleeve_tilt"] = tilt
+        out["_source"] = "llm"
+        return out
+
+    except Exception as e:
+        return _desk_brain_fallback(f"{type(e).__name__}: {e}")
 
 
 # ---------------------------------------------------------------------------

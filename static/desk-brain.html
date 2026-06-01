@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Desk Brain — Meta-Allocator | NRGX Labs</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="NRGX Labs — Desk Brain: an LLM meta-allocator that turns every engine's signals into one risk-budgeted target book." />
+    <meta name="application-name" content="NRGX Labs" />
+    <meta name="apple-mobile-web-app-title" content="NRGX Labs" />
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="/static/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=14" />
+    <style>
+      .dbGrid { display: grid; gap: 14px; margin-top: 14px; }
+      .dbSleeveGrid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+
+      .dbBanner {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 18px;
+        padding: 16px 18px; border-radius: var(--radius-card);
+        border: 1px solid var(--border); background: rgba(255,255,255,0.78);
+        margin-top: 14px;
+      }
+      .dbBannerItem { display: flex; flex-direction: column; gap: 2px; min-width: 110px; }
+      .dbBannerLabel { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: rgba(11,11,15,0.5); }
+      .dbBannerValue { font-size: 20px; font-weight: 800; letter-spacing: -0.3px; }
+      .dbRegimePill {
+        display: inline-block; padding: 4px 12px; border-radius: 999px;
+        font-weight: 800; font-size: 14px;
+      }
+      .dbRegime--riskon   { background: rgba(52,199,89,0.16);  color: #1f7a3d; }
+      .dbRegime--transitional { background: rgba(255,179,64,0.18); color: #8a5a00; }
+      .dbRegime--riskoff  { background: rgba(255,149,0,0.18);  color: #9a4b00; }
+      .dbRegime--stressed { background: rgba(255,59,48,0.16);  color: #b02018; }
+
+      .dbHeatMeter { flex: 1; min-width: 220px; }
+      .dbHeatTrack {
+        position: relative; height: 18px; border-radius: 999px;
+        background: rgba(11,11,15,0.07); overflow: hidden;
+      }
+      .dbHeatFill { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg,#34c759,#ffb340); }
+      .dbHeatCaption { font-size: 11px; color: rgba(11,11,15,0.6); margin-top: 5px; }
+
+      .dbCard {
+        padding: 14px; border-radius: var(--radius-card);
+        border: 1px solid var(--border); background: rgba(255,255,255,0.78);
+      }
+      .dbCardTitle { font-size: 13px; font-weight: 800; margin-bottom: 8px; }
+      .dbSleeveName { font-size: 14px; font-weight: 800; }
+      .dbSleeveKind { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: rgba(11,11,15,0.5); }
+      .dbSleeveBar { height: 8px; border-radius: 999px; background: rgba(11,11,15,0.07); margin: 8px 0 6px; overflow: hidden; }
+      .dbSleeveBarFill { height: 100%; background: #34c759; }
+      .dbSleeveStat { display: flex; justify-content: space-between; font-size: 12px; color: rgba(11,11,15,0.7); }
+
+      .dbTable { width: 100%; border-collapse: collapse; font-size: 13px; }
+      .dbTable th, .dbTable td { text-align: left; padding: 9px 10px; border-bottom: 1px solid rgba(11,11,15,0.07); }
+      .dbTable th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: rgba(11,11,15,0.5); }
+      .dbTable tbody tr:hover { background: rgba(11,11,15,0.025); }
+      .dbNum { text-align: right; font-variant-numeric: tabular-nums; }
+      .dbTag {
+        display: inline-block; padding: 2px 8px; border-radius: 999px;
+        font-size: 11px; font-weight: 700;
+      }
+      .dbTag--vol { background: rgba(0,122,255,0.14); color: #0a52b8; }
+      .dbTag--dir { background: rgba(175,82,222,0.14); color: #7a2bb0; }
+      .dbTag--ovl { background: rgba(142,142,147,0.18); color: #4a4a4f; }
+      .dbStatus { font-size: 11px; color: rgba(11,11,15,0.55); }
+
+      .dbLlm { white-space: normal; }
+      .dbLlmRow { margin-bottom: 10px; }
+      .dbLlmRow b { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: rgba(11,11,15,0.5); margin-bottom: 2px; }
+      .dbLlmRow span { font-size: 13px; line-height: 1.45; }
+      .dbConflict { color: #b02018; font-size: 12px; margin: 2px 0; }
+      .dbMuted { color: rgba(11,11,15,0.5); font-size: 12px; }
+      .dbEmpty { padding: 22px; text-align: center; color: rgba(11,11,15,0.5); }
+      .dbBtn {
+        appearance: none; border: 1px solid var(--border); background: #fff;
+        border-radius: 10px; padding: 9px 16px; font-weight: 700; font-size: 13px;
+        cursor: pointer;
+      }
+      .dbBtn:hover { background: rgba(11,11,15,0.03); }
+      .dbBtn:disabled { opacity: .55; cursor: default; }
+      .dbSourceBadge { font-size: 10.5px; padding: 2px 7px; border-radius: 999px; background: rgba(11,11,15,0.06); color: rgba(11,11,15,0.6); }
+      .dbSectionHead { display:flex; align-items:center; justify-content:space-between; margin-top: 22px; }
+      .dbSectionHead h2 { font-size: 15px; font-weight: 800; margin: 0; }
+    </style>
+  </head>
+  <body>
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/NRGX-Logo.png" alt="NRGX Labs" />
+          <div class="appHeaderText">
+            <div class="appSubtitle">Desk Brain — Meta-Allocator (whole-book risk budget)</div>
+          </div>
+        </div>
+      </header>
+
+      <section class="dbBanner" id="dbBanner" aria-label="Book summary">
+        <div class="dbBannerItem">
+          <span class="dbBannerLabel">Regime</span>
+          <span class="dbBannerValue" id="dbRegime">—</span>
+        </div>
+        <div class="dbBannerItem">
+          <span class="dbBannerLabel">Deployed Heat</span>
+          <span class="dbBannerValue" id="dbDeployed">—</span>
+        </div>
+        <div class="dbBannerItem">
+          <span class="dbBannerLabel">Reserve</span>
+          <span class="dbBannerValue" id="dbReserve">—</span>
+        </div>
+        <div class="dbBannerItem">
+          <span class="dbBannerLabel">Positions</span>
+          <span class="dbBannerValue" id="dbPosCount">—</span>
+        </div>
+        <div class="dbHeatMeter">
+          <div class="dbHeatTrack"><div class="dbHeatFill" id="dbHeatFill" style="width:0%"></div></div>
+          <div class="dbHeatCaption" id="dbHeatCaption">Portfolio heat vs budget</div>
+        </div>
+        <div class="dbBannerItem" style="min-width:auto">
+          <button class="dbBtn" id="dbRefresh" type="button">Refresh book</button>
+        </div>
+      </section>
+
+      <div id="dbStatus" class="dbMuted" style="margin-top:10px"></div>
+
+      <div class="dbSectionHead"><h2>Sleeve allocation</h2></div>
+      <div class="dbGrid dbSleeveGrid" id="dbSleeves"></div>
+
+      <div class="dbSectionHead">
+        <h2>Target book</h2>
+        <span class="dbMuted" id="dbBookSub"></span>
+      </div>
+      <div class="dbCard" style="padding:0;overflow:hidden">
+        <table class="dbTable" id="dbBookTable">
+          <thead>
+            <tr>
+              <th>#</th><th>Ticker</th><th>Engine</th><th>Sleeve</th><th>Dir</th>
+              <th class="dbNum">Conv</th><th class="dbNum">Edge</th>
+              <th class="dbNum">Risk %</th><th class="dbNum">Risk $</th><th>State</th>
+            </tr>
+          </thead>
+          <tbody id="dbBookBody"></tbody>
+        </table>
+        <div class="dbEmpty" id="dbBookEmpty" style="display:none"></div>
+      </div>
+
+      <div class="dbSectionHead"><h2>Desk-head read</h2><span class="dbSourceBadge" id="dbLlmSource"></span></div>
+      <div class="dbCard dbLlm" id="dbLlm"></div>
+
+      <div class="dbSectionHead"><h2>Conflicts &amp; correlation</h2></div>
+      <div class="dbCard" id="dbConflicts"></div>
+
+      <div class="dbSectionHead">
+        <h2>Paper book — blended vs equal-weight</h2>
+        <button class="dbBtn" id="dbPaperRecord" type="button">Log book to paper</button>
+      </div>
+      <div class="dbCard" id="dbPaper"></div>
+
+      <div class="dbSectionHead"><h2>Measured edge by engine</h2></div>
+      <div class="dbCard" style="padding:0;overflow:hidden">
+        <table class="dbTable" id="dbEdgeTable">
+          <thead>
+            <tr><th>Engine</th><th>Sleeve</th><th class="dbNum">Expectancy (R)</th><th class="dbNum">Win %</th><th class="dbNum">Sharpe</th><th class="dbNum">Edge</th><th>Source</th></tr>
+          </thead>
+          <tbody id="dbEdgeBody"></tbody>
+        </table>
+      </div>
+
+      <div class="dbSectionHead"><h2>Opportunity set</h2><span class="dbMuted" id="dbOppSub"></span></div>
+      <div class="dbCard" style="padding:0;overflow:hidden">
+        <table class="dbTable" id="dbOppTable">
+          <thead>
+            <tr><th>Ticker</th><th>Engine</th><th>Sleeve</th><th>Dir</th><th class="dbNum">Conv</th><th>Verdict</th><th>State</th><th>Source</th></tr>
+          </thead>
+          <tbody id="dbOppBody"></tbody>
+        </table>
+        <div class="dbEmpty" id="dbOppEmpty" style="display:none"></div>
+      </div>
+
+      <p class="dbMuted" style="margin-top:18px">
+        The math is deterministic — sleeve budgets are set by regime, positions are sized by measured edge × conviction,
+        and hard caps (total heat, per-sleeve, max concurrent) are enforced last. The LLM only explains the book and nudges
+        sleeve weights within a ±20% clamp.
+      </p>
+    </main>
+
+    <script src="/static/nav.js?v=14"></script>
+    <script src="/static/desk-brain.js?v=1"></script>
+  </body>
+</html>

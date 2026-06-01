@@ -23,6 +23,8 @@ ENGINE_REGISTRY = {
     12: {"name": "VIX Spike Fade",                    "backend": "engine12_vix_fade",   "api": "/api/engine12"},
     13: {"name": "Gap Regime Scanner",                "backend": "engine13_gap_regime", "api": "/api/engine13"},
     14: {"name": "IC Scenario Simulator",             "backend": "engine14_ic_scenario", "api": "/api/ic-scenario"},
+    15: {"name": "Earnings IC Scenario Simulator",    "backend": "engine15_earnings_ic", "api": "/api/earnings-ic"},
+    16: {"name": "Desk Brain (Meta-Allocator)",       "backend": "desk_brain",          "api": "/api/desk-brain"},
 }
 
 
@@ -570,6 +572,23 @@ class FeatureFlags:
     GATE_ICH_VOL_STATE_ALLOW: str = "compressing,stable,NORMAL,FALLING,falling,flat"
     GATE_ICH_MACRO_PROXIMITY_DAYS: int = 1
 
+    # --- Desk Brain: LLM Meta-Allocator (default OFF until verified) ---
+    # Reads every engine's current opportunity set + regime + measured edge
+    # and produces a single risk-budgeted target book for the whole account.
+    # The math is deterministic; the LLM only explains and nudges within a
+    # hard-clamped sleeve tilt (see DESK_BRAIN_TILT_MAX_PCT).
+    # Default ON (UI-controlled, like E3/E4/E7) so the command deck is live;
+    # set ENABLE_DESK_BRAIN=false to silence the engine without redeploying.
+    ENABLE_DESK_BRAIN: bool = True
+    DESK_BRAIN_MODEL: str = "gpt-5.5"
+    DESK_BRAIN_CACHE_TTL_S: int = 15 * 60             # 15 min book cache
+    DESK_BRAIN_ACCOUNT_SIZE: float = 25_000.0         # default account for $ sizing
+    DESK_BRAIN_TOTAL_HEAT_PCT: float = 6.0            # max portfolio heat (account risk %)
+    DESK_BRAIN_PER_TRADE_RISK_PCT: float = 1.0        # baseline risk per position
+    DESK_BRAIN_MAX_CONCURRENT_TOTAL: int = 12         # hard cap on open positions
+    DESK_BRAIN_MAX_CONCURRENT_PER_SLEEVE: int = 5     # per-sleeve concurrency cap
+    DESK_BRAIN_TILT_MAX_PCT: float = 20.0             # clamp on LLM sleeve tilt (+/- %)
+
     # --- LLM Integration ---
     ENABLE_LLM_NARRATIVE: bool = True
     LLM_NARRATIVE_CACHE_TTL_S: int = 1800         # 30 minutes
@@ -1017,6 +1036,16 @@ class FeatureFlags:
             GATE_ICH_REGIME_ALLOW_SHORT=os.getenv("GATE_ICH_REGIME_ALLOW_SHORT", "Risk-Off,Stressed,Transitional"),
             GATE_ICH_VOL_STATE_ALLOW=os.getenv("GATE_ICH_VOL_STATE_ALLOW", "compressing,stable,NORMAL,FALLING,falling,flat"),
             GATE_ICH_MACRO_PROXIMITY_DAYS=_get_int("GATE_ICH_MACRO_PROXIMITY_DAYS", 1),
+
+            ENABLE_DESK_BRAIN=_get_bool("ENABLE_DESK_BRAIN", True),
+            DESK_BRAIN_MODEL=os.getenv("DESK_BRAIN_MODEL", "gpt-5.5"),
+            DESK_BRAIN_CACHE_TTL_S=_get_int("DESK_BRAIN_CACHE_TTL_S", 15 * 60),
+            DESK_BRAIN_ACCOUNT_SIZE=_get_float("DESK_BRAIN_ACCOUNT_SIZE", 25_000.0),
+            DESK_BRAIN_TOTAL_HEAT_PCT=_get_float("DESK_BRAIN_TOTAL_HEAT_PCT", 6.0),
+            DESK_BRAIN_PER_TRADE_RISK_PCT=_get_float("DESK_BRAIN_PER_TRADE_RISK_PCT", 1.0),
+            DESK_BRAIN_MAX_CONCURRENT_TOTAL=_get_int("DESK_BRAIN_MAX_CONCURRENT_TOTAL", 12),
+            DESK_BRAIN_MAX_CONCURRENT_PER_SLEEVE=_get_int("DESK_BRAIN_MAX_CONCURRENT_PER_SLEEVE", 5),
+            DESK_BRAIN_TILT_MAX_PCT=_get_float("DESK_BRAIN_TILT_MAX_PCT", 20.0),
 
             ENABLE_LLM_NARRATIVE=_get_bool("ENABLE_LLM_NARRATIVE", False),
             LLM_NARRATIVE_CACHE_TTL_S=_get_int("LLM_NARRATIVE_CACHE_TTL_S", 1800),
