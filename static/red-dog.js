@@ -244,6 +244,10 @@ function renderSignalCard(signal, isAPlus = false) {
   const rsi = signal.indicators?.rsi;
   const stoch = signal.indicators?.stochastics;
   const volRatio = signal.indicators?.volumeRatio;
+  const dollarAdv = signal.indicators?.dollarAdv;
+  const advTxt = (dollarAdv && Number.isFinite(Number(dollarAdv))) ? `$${(Number(dollarAdv) / 1e6).toFixed(0)}M` : "—";
+  const status = signal.status || "pending";
+  const isTracked = ["watching", "entered", "working", "broken", "exited"].includes(status);
   
   // Trend alignment
   const trendAlign = signal.trendAlignment || {};
@@ -362,10 +366,15 @@ function renderSignalCard(signal, isAPlus = false) {
           <span class="k">Vol Ratio</span>
           <span class="v">${fmt2(volRatio)}x</span>
         </div>
+        <div class="signalCardMetric">
+          <span class="k">$ ADV</span>
+          <span class="v">${advTxt}</span>
+        </div>
       </div>
       ${chipsHtml}
       <div class="signalCardActions">
         <button type="button" class="rdCardBtn rdInsightBtn" data-ticker="${ticker}">Insight</button>
+        <button type="button" class="rdCardBtn rdTrackBtn ${isTracked ? 'isTracked' : ''}" data-ticker="${ticker}" data-act="watching">${isTracked ? escapeHtml(status) : 'Watch'}</button>
       </div>
     </div>
   `;
@@ -529,6 +538,9 @@ async function handleSubmit(ev) {
     } else {
       setStatus(`Scan complete. Found ${count} setup${count !== 1 ? "s" : ""} (${aplusCount} A+).`, "ok");
     }
+
+    // Newly scanned signals are persisted server-side; refresh the tracker view.
+    loadTracker(false);
   } catch (err) {
     console.error("Scan error:", err);
     setStatus(`Error: ${err.message}`, "error");
@@ -552,29 +564,112 @@ function metricCard(label, value, caption) {
     `<div class="metricCaption muted">${caption || ""}</div></div>`;
 }
 
-async function loadTracker() {
-  const btn = $("trackerRefreshBtn");
-  const body = $("trackerBody");
-  if (btn) { btn.disabled = true; btn.textContent = "Evaluating…"; }
+const TRACKER_STATUSES = ["watching", "entered", "working", "broken", "exited"];
+
+function trkPillStyle(status) {
+  const map = {
+    pending: "background:rgba(11,11,15,0.06);color:var(--muted);",
+    triggered: "background:rgba(0,122,255,0.14);color:#0a62c9;",
+    target_hit: "background:rgba(52,199,89,0.16);color:#1b8a3e;",
+    stopped: "background:rgba(255,59,48,0.14);color:#cc2f26;",
+    expired: "background:rgba(11,11,15,0.06);color:var(--muted);",
+    invalidated: "background:rgba(255,59,48,0.10);color:#cc2f26;",
+    watching: "background:rgba(255,149,0,0.16);color:#995c00;",
+    entered: "background:rgba(0,122,255,0.16);color:#0a62c9;",
+    working: "background:rgba(0,122,255,0.10);color:#0a62c9;",
+    broken: "background:rgba(255,59,48,0.16);color:#cc2f26;",
+    exited: "background:rgba(11,11,15,0.08);color:var(--text);",
+  };
+  return map[status] || map.pending;
+}
+
+async function deskTrack(ticker, status, signalDate, note) {
   try {
-    const resp = await fetch("/api/engine3-red-dog/status?refresh=true");
+    const resp = await fetch("/api/engine3-red-dog/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker, status, signalDate, note }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    renderTracker(data.signals);
+    try {
+      const sel = `.signalCard[data-ticker="${(window.CSS && CSS.escape) ? CSS.escape(ticker) : ticker}"] .rdTrackBtn`;
+      document.querySelectorAll(sel).forEach(b => { b.textContent = status; b.classList.add("isTracked"); });
+    } catch (_) { /* best effort */ }
+    setStatus(`${ticker} marked "${status}".`, "ok");
+  } catch (e) {
+    setStatus(`Tracker error: ${e.message}`, "error");
+  }
+}
+
+function renderTracker(s) {
+  const summary = $("trackerSummary");
+  const body = $("trackerBody");
+  if (!s) return;
+  const c = s.counts || {};
+
+  if (summary) {
+    summary.innerHTML = [
+      metricCard("Tracked", fmt0(s.totalSignals || 0), "signals"),
+      metricCard("Desk Book", fmt0(s.deskBookCount || 0), "actively managed"),
+      metricCard("Win Rate", s.winRate != null ? `${s.winRate}%` : "—", `${s.resolvedCount || 0} resolved`),
+      metricCard("Open", fmt0((c.pending || 0) + (c.triggered || 0)), "pending + triggered"),
+    ].join("");
+  }
+
+  if (!body) return;
+
+  // Desk book first (trader-managed), then live auto-tracked lifecycle.
+  const deskBook = [].concat(s.watching || [], s.entered || [], s.working || [], s.broken || [], s.exited || []);
+  const live = [].concat(s.triggered || [], s.pending || []);
+  const rows = deskBook.concat(live).slice(0, 40);
+
+  if (!rows.length) {
+    body.innerHTML = '<span class="muted" style="font-size:12px;">No tracked signals yet. Click <b>Watch</b> on a card to start a desk book.</span>';
+    return;
+  }
+
+  body.innerHTML = rows.map(r => {
+    const t = escapeHtml(r.ticker || "");
+    const sd = escapeHtml(r.signalDate || "");
+    const st = r.status || "pending";
+    const dir = escapeHtml(r.direction || "");
+    const opts = TRACKER_STATUSES.map(x => `<option value="${x}" ${x === st ? "selected" : ""}>${x}</option>`).join("");
+    return `
+      <div class="trkRow" data-ticker="${t}" data-date="${sd}">
+        <span class="trkSym">${t}</span>
+        <span class="muted" style="font-size:11px;">${dir} · ${sd}</span>
+        <span class="trkPill" style="${trkPillStyle(st)}">${st.replace('_', ' ')}</span>
+        <select class="trkSelect" data-ticker="${t}" data-date="${sd}">
+          <option value="">advance…</option>
+          ${opts}
+        </select>
+      </div>`;
+  }).join("");
+
+  body.querySelectorAll(".trkSelect").forEach(sel => {
+    sel.addEventListener("change", (ev) => {
+      const v = ev.target.value;
+      if (!v) return;
+      deskTrack(ev.target.getAttribute("data-ticker"), v, ev.target.getAttribute("data-date"));
+    });
+  });
+}
+
+async function loadTracker(refresh) {
+  const btn = $("trackerRefreshBtn");
+  if (btn && refresh) { btn.disabled = true; btn.textContent = "Evaluating…"; }
+  try {
+    const resp = await fetch(`/api/engine3-red-dog/status${refresh ? "?refresh=true" : ""}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
-    const c = data.counts || {};
-    const summary = $("trackerSummary");
-    if (summary) {
-      summary.innerHTML = [
-        metricCard("Tracked", fmt0(data.totalSignals || 0), "signals"),
-        metricCard("Win Rate", data.winRate != null ? `${data.winRate}%` : "—", `${data.resolvedCount || 0} resolved`),
-        metricCard("Open", fmt0((c.pending || 0) + (c.triggered || 0)), "pending + triggered"),
-        metricCard("Resolved", `${fmt0(c.target_hit || 0)} / ${fmt0(c.stopped || 0)}`, "target / stopped"),
-      ].join("");
-    }
-    if (body) {
-      body.innerHTML = `<span class="muted">As of ${data.asOfDate || "—"} · ` +
-        `${fmt0(c.expired || 0)} expired, ${fmt0(c.pending || 0)} pending, ${fmt0(c.triggered || 0)} triggered.</span>`;
-    }
+    renderTracker(data);
   } catch (err) {
+    const body = $("trackerBody");
     if (body) body.innerHTML = `<span class="muted">Tracker error: ${escapeHtml(err.message)}</span>`;
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "Load / Refresh"; }
@@ -651,9 +746,12 @@ function init() {
   }
 
   const trackerBtn = $("trackerRefreshBtn");
-  if (trackerBtn) trackerBtn.addEventListener("click", loadTracker);
+  if (trackerBtn) trackerBtn.addEventListener("click", () => loadTracker(true));
   const backtestBtn = $("backtestRunBtn");
   if (backtestBtn) backtestBtn.addEventListener("click", runBacktest);
+
+  // Prime the desk tracker (cheap read, no refresh).
+  loadTracker(false);
   
   // Check if Engine 2 should be visible (same logic as other pages)
   // Engine 2 is always visible now, so we just ensure the link is there
@@ -718,6 +816,13 @@ document.addEventListener("DOMContentLoaded", init);
       ev.stopPropagation();
       var ix = Math.max(20, window.innerWidth - 470);
       fetchInsight("rd_signal", sig, "Red Dog: " + ticker + " (" + (sig.direction || "") + ")", ix, 96);
+      return;
+    }
+    // Desk tracker affordance → mark watching (no popup).
+    if (ev.target.closest(".rdTrackBtn")) {
+      ev.stopPropagation();
+      var act = ev.target.closest(".rdTrackBtn").getAttribute("data-act") || "watching";
+      deskTrack(ticker, act, sig.signalDate);
       return;
     }
     // Any other control inside the card: ignore.

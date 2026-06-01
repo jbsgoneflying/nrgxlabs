@@ -24,6 +24,7 @@ from backend.engine3_screener import (
     compute_single_ticker_scan,
     get_all_signals,
     refresh_signal_statuses,
+    set_desk_status as set_engine3_desk_status,
 )
 from backend.gating import (
     gate_scan_results,
@@ -300,6 +301,52 @@ def engine3_red_dog_backtest(
         raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:
         LOG.exception("Unhandled failure (engine3-red-dog/backtest)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@router.post("/api/engine3-red-dog/track")
+async def engine3_red_dog_track(request: Request):
+    """Desk Trade Tracker override for Red Dog.
+
+    Body: {ticker, status, signalDate?, note?, pinned?}
+    `status` is one of watching/entered/working/broken/exited. Desk states
+    survive scan refreshes and are never clobbered by the auto-evaluator, so
+    the desk is never left holding a name the engine stopped surfacing.
+
+    NOTE: declared before /{ticker} so the literal path isn't captured as a ticker.
+    """
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE3_RED_DOG:
+        raise HTTPException(status_code=503, detail="Engine 3 (Red Dog) is disabled.")
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body.")
+
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object.")
+
+    ticker = str(body.get("ticker") or "").strip().upper()
+    status = str(body.get("status") or "").strip().lower()
+    if not ticker or not status:
+        raise HTTPException(status_code=400, detail="ticker and status are required.")
+
+    try:
+        result = set_engine3_desk_status(
+            ticker,
+            desk_status=status,
+            signal_date=body.get("signalDate"),
+            note=body.get("note"),
+            pinned=body.get("pinned"),
+        )
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=result.get("error", "Could not update."))
+        return {"ok": True, "record": result.get("record"), "signals": get_all_signals()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOG.exception("Unhandled failure (engine3-red-dog/track)")
         raise HTTPException(status_code=500, detail="Internal error") from e
 
 

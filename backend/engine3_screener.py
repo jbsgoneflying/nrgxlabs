@@ -64,6 +64,11 @@ _REDIS_PREFIX = "engine3:signal:"
 _REDIS_INDEX = "engine3:signal:index"
 _TERMINAL_STATUSES = {"target_hit", "stopped", "invalidated", "expired"}
 
+# Desk-managed states the trader owns. The auto-evaluator never touches these,
+# and a scan refresh never clobbers them — so a name you've entered stays under
+# desk control even after the engine stops surfacing it.
+DESK_STATUSES = {"watching", "entered", "working", "broken", "exited"}
+
 
 def _signal_key(ticker: str, signal_date: str) -> str:
     return f"{ticker}:{signal_date}"
@@ -79,6 +84,7 @@ def _persist_signals(signal_dicts: List[Dict[str, Any]]) -> None:
     from backend.redis_store import get_store_optional
 
     store = get_store_optional()
+    protected = _TERMINAL_STATUSES | {"triggered"} | DESK_STATUSES
     with _signal_store_lock:
         index_keys = set()
         if store:
@@ -94,8 +100,19 @@ def _persist_signals(signal_dicts: List[Dict[str, Any]]) -> None:
             prior = _signal_store.get(key)
             if store and prior is None:
                 prior = store.get_json(_REDIS_PREFIX + key)
-            if prior and prior.get("status") in (_TERMINAL_STATUSES | {"triggered"}):
-                continue  # don't reset an in-flight / resolved signal
+            if prior and prior.get("status") in protected:
+                # Refresh the scored snapshot but keep desk/lifecycle state so a
+                # name the trader is managing is never reset to "pending".
+                merged = dict(d)
+                for fld in ("status", "deskNotes", "outcome", "statusUpdatedAt",
+                            "trackedAt", "pinned", "invalidationReason"):
+                    if fld in prior:
+                        merged[fld] = prior[fld]
+                _signal_store[key] = merged
+                if store:
+                    store.set_json(_REDIS_PREFIX + key, merged, ttl_s=_SIGNAL_TTL_S)
+                    index_keys.add(key)
+                continue
 
             record = dict(d)
             record.setdefault("status", "pending")
@@ -133,14 +150,32 @@ def _write_record(key: str, record: Dict[str, Any]) -> None:
     store = get_store_optional()
     if store:
         store.set_json(_REDIS_PREFIX + key, record, ttl_s=_SIGNAL_TTL_S)
+        index = set(store.get_json(_REDIS_INDEX) or [])
+        index.add(key)
+        store.set_json(_REDIS_INDEX, sorted(index), ttl_s=_SIGNAL_TTL_S)
+
+
+def _find_record(ticker: str, signal_date: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Locate a tracked record by ticker (+ optional signal date)."""
+    ticker = (ticker or "").upper()
+    candidates = [r for r in _all_records() if (r.get("ticker") or "").upper() == ticker]
+    if not candidates:
+        return None
+    if signal_date:
+        for r in candidates:
+            if str(r.get("signalDate", ""))[:10] == str(signal_date)[:10]:
+                return r
+    candidates.sort(key=lambda r: str(r.get("signalDate", "")), reverse=True)
+    return candidates[0]
 
 
 def get_all_signals() -> Dict[str, Any]:
-    """Group tracked Red Dog signals by lifecycle status."""
+    """Group tracked Red Dog signals by lifecycle + desk-managed status."""
     records = _all_records()
     buckets: Dict[str, List[Dict[str, Any]]] = {
         "pending": [], "triggered": [], "target_hit": [],
         "stopped": [], "invalidated": [], "expired": [],
+        "watching": [], "entered": [], "working": [], "broken": [], "exited": [],
     }
     for rec in records:
         status = rec.get("status", "pending")
@@ -149,14 +184,52 @@ def get_all_signals() -> Dict[str, Any]:
     resolved = buckets["target_hit"] + buckets["stopped"]
     wins = len(buckets["target_hit"])
     win_rate = round(100.0 * wins / len(resolved), 1) if resolved else None
+    desk_book = sum(len(buckets[s]) for s in DESK_STATUSES)
 
     return {
         "totalSignals": len(records),
         "counts": {k: len(v) for k, v in buckets.items()},
         "winRate": win_rate,
         "resolvedCount": len(resolved),
+        "deskBookCount": desk_book,
         **buckets,
     }
+
+
+def set_desk_status(
+    ticker: str,
+    *,
+    desk_status: str,
+    signal_date: Optional[str] = None,
+    note: Optional[str] = None,
+    pinned: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Desk override: mark a name watching/entered/working/broken/exited.
+
+    Returns {ok, record|error}. Desk states survive scan refreshes and are
+    never clobbered by the auto-evaluator — so the desk is never left holding
+    a position the engine has stopped surfacing.
+    """
+    desk_status = (desk_status or "").strip().lower()
+    if desk_status not in DESK_STATUSES:
+        return {"ok": False, "error": f"Invalid desk status '{desk_status}'. Allowed: {sorted(DESK_STATUSES)}"}
+
+    rec = _find_record(ticker, signal_date)
+    if rec is None:
+        return {"ok": False, "error": f"No tracked signal for {ticker}."}
+
+    rec = dict(rec)
+    rec["status"] = desk_status
+    rec["statusUpdatedAt"] = dt.datetime.utcnow().isoformat() + "Z"
+    if pinned is not None:
+        rec["pinned"] = bool(pinned)
+    if note:
+        notes = list(rec.get("deskNotes", []))
+        notes.append({"ts": rec["statusUpdatedAt"], "status": desk_status, "note": note})
+        rec["deskNotes"] = notes
+
+    _write_record(_signal_key(rec.get("ticker", ""), rec.get("signalDate", "")), rec)
+    return {"ok": True, "record": rec}
 
 
 def refresh_signal_statuses(
@@ -178,7 +251,10 @@ def refresh_signal_statuses(
     updated = 0
     changed = 0
     for rec in _all_records():
-        if rec.get("status") in _TERMINAL_STATUSES:
+        status = rec.get("status")
+        # Desk-managed states are the trader's to move; the auto-evaluator
+        # only promotes pending/triggered lifecycle signals.
+        if status in _TERMINAL_STATUSES or status in DESK_STATUSES:
             continue
         ticker = rec.get("ticker", "")
         sig_date = rec.get("signalDate", "")

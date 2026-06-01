@@ -713,6 +713,7 @@
                       <li><b>target_hit / stopped</b>: resolved (counts toward win-rate)</li>
                       <li><b>expired</b>: never triggered in the window</li>
                     </ul>
+                    <p style="margin-top:6px;"><b>Desk book</b> — click <b>Watch</b> on a card, then advance through watching → entered → working → broken/exited. Desk states are yours: they survive scans and the auto-evaluator never touches them, so you're never left holding a name the engine stopped surfacing.</p>
                   </div>
                 </div>
               </span>
@@ -722,7 +723,7 @@
             </div>
           </div>
           <div id="trackerSummary" class="statsGrid" style="margin-bottom:10px;"></div>
-          <div id="trackerBody" class="muted" style="font-size:12px;">Click "Load / Refresh" to evaluate tracked Red Dog signals.</div>
+          <div id="trackerBody" class="muted" style="font-size:12px;">Click <b>Watch</b> on a setup card to start a desk book, or "Load / Refresh" to evaluate tracked Red Dog signals.</div>
         </section>
 
         <!-- Backtest -->
@@ -829,6 +830,11 @@
       .signalCardActions{display:flex;gap:6px;margin-top:10px;border-top:1px solid rgba(0,0,0,.06);padding-top:8px}
       .rdCardBtn{flex:1;font-size:11px;font-weight:700;padding:5px 8px;border-radius:8px;border:1px solid rgba(0,0,0,.1);background:rgba(0,0,0,.02);color:var(--text);cursor:pointer;transition:background .12s ease}
       .rdCardBtn:hover{background:rgba(0,122,255,.08);border-color:rgba(0,122,255,.25)}
+      .rdCardBtn.isTracked{background:rgba(52,199,89,.12);border-color:rgba(52,199,89,.3);color:#1b8a3e}
+      .trkPill{display:inline-block;font-size:10px;font-weight:800;padding:3px 9px;border-radius:20px;text-transform:uppercase;letter-spacing:.03em}
+      .trkRow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid rgba(0,0,0,.05);font-size:12px}
+      .trkRow .trkSym{font-weight:800;min-width:54px}
+      .trkRow select{font-size:11px;padding:3px 6px;border-radius:6px;border:1px solid rgba(0,0,0,.12)}
     </style>
     <div class="rdInsightPopup" id="rdInsightPopup">
       <div class="rdInsightHeader" id="rdInsightHeader">
@@ -845,7 +851,7 @@
     <script src="/static/desk-insight.js?v=2"></script>
     <script src="/static/ui_kit.js?v=5"></script>
     <script src="/static/position_calculator.js?v=3"></script>
-    <script src="/static/red-dog.js?v=8"></script>
+    <script src="/static/red-dog.js?v=9"></script>
     <script src="/static/calculator.js"></script>
     <script src="/static/nav.js?v=13"></script>
     <script src="/static/raven-chat.js?v=4"></script>

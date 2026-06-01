@@ -462,6 +462,41 @@ class TestBacktest:
         assert res["params"]["tickersTested"] == 1
 
 
+class TestDeskTracker:
+    """Desk-managed tracker states (watching/entered/working/broken/exited)."""
+
+    def _seed(self, ticker="ZZRDTEST", date="2024-02-02"):
+        from backend import engine3_screener as scr
+        d = {"ticker": ticker, "signalDate": date, "direction": "bullish",
+             "levels": {"entryTrigger": 10.0, "stopLoss": 9.0, "target1": 12.0, "riskDollars": 1.0},
+             "quality": {"score": 80.0, "grade": "A"},
+             "indicators": {"rsi": 30.0, "dollarAdv": 5e8}}
+        scr._persist_signals([d])
+        return scr, d
+
+    def test_set_desk_status_persists(self):
+        scr, _ = self._seed()
+        res = scr.set_desk_status("ZZRDTEST", desk_status="entered", signal_date="2024-02-02", note="filled")
+        assert res["ok"] is True
+        all_sigs = scr.get_all_signals()
+        assert any(r["ticker"] == "ZZRDTEST" for r in all_sigs["entered"])
+        assert all_sigs["deskBookCount"] >= 1
+
+    def test_desk_state_survives_rescan(self):
+        scr, d = self._seed(ticker="ZZRDKEEP")
+        scr.set_desk_status("ZZRDKEEP", desk_status="working", signal_date="2024-02-02")
+        scr._persist_signals([d])  # a fresh scan must not reset desk state
+        assert any(r["ticker"] == "ZZRDKEEP" for r in scr.get_all_signals()["working"])
+
+    def test_invalid_desk_status_rejected(self):
+        from backend import engine3_screener as scr
+        assert scr.set_desk_status("ZZRDTEST", desk_status="bogus")["ok"] is False
+
+    def test_unknown_ticker_rejected(self):
+        from backend import engine3_screener as scr
+        assert scr.set_desk_status("NOSUCHTICKER", desk_status="entered")["ok"] is False
+
+
 class TestVerdictReconciliation:
     """Single reconciled desk verdict."""
 
