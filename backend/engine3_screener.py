@@ -48,6 +48,182 @@ _scan_cache_lock = threading.Lock()
 _bars_cache: TTLCache = TTLCache(maxsize=500, ttl=6 * 60 * 60)
 _bars_cache_lock = threading.Lock()
 
+# ---------------------------------------------------------------------------
+# Live signal-outcome tracking
+# ---------------------------------------------------------------------------
+# Signals detected by a scan are persisted so we can re-evaluate them against
+# subsequent price action and build a real forward hit-rate. Persists to Redis
+# when available (survives restarts / shared across workers), with an in-process
+# fallback so the feature still works without Redis.
+
+_signal_store: Dict[str, Dict[str, Any]] = {}
+_signal_store_lock = threading.Lock()
+
+_SIGNAL_TTL_S = 21 * 24 * 3600  # keep tracked signals ~3 weeks
+_REDIS_PREFIX = "engine3:signal:"
+_REDIS_INDEX = "engine3:signal:index"
+_TERMINAL_STATUSES = {"target_hit", "stopped", "invalidated", "expired"}
+
+
+def _signal_key(ticker: str, signal_date: str) -> str:
+    return f"{ticker}:{signal_date}"
+
+
+def _persist_signals(signal_dicts: List[Dict[str, Any]]) -> None:
+    """Store freshly scanned signals for later outcome tracking.
+
+    Never downgrades a signal that already has a terminal/triggered status.
+    """
+    if not signal_dicts:
+        return
+    from backend.redis_store import get_store_optional
+
+    store = get_store_optional()
+    with _signal_store_lock:
+        index_keys = set()
+        if store:
+            existing_index = store.get_json(_REDIS_INDEX) or []
+            index_keys = set(existing_index)
+        for d in signal_dicts:
+            ticker = d.get("ticker", "")
+            sig_date = d.get("signalDate", "")
+            if not ticker or not sig_date:
+                continue
+            key = _signal_key(ticker, sig_date)
+
+            prior = _signal_store.get(key)
+            if store and prior is None:
+                prior = store.get_json(_REDIS_PREFIX + key)
+            if prior and prior.get("status") in (_TERMINAL_STATUSES | {"triggered"}):
+                continue  # don't reset an in-flight / resolved signal
+
+            record = dict(d)
+            record.setdefault("status", "pending")
+            record["trackedAt"] = dt.datetime.utcnow().isoformat() + "Z"
+            _signal_store[key] = record
+            if store:
+                store.set_json(_REDIS_PREFIX + key, record, ttl_s=_SIGNAL_TTL_S)
+                index_keys.add(key)
+        if store:
+            store.set_json(_REDIS_INDEX, sorted(index_keys), ttl_s=_SIGNAL_TTL_S)
+
+
+def _all_records() -> List[Dict[str, Any]]:
+    """Return every tracked signal, preferring Redis when present."""
+    from backend.redis_store import get_store_optional
+
+    store = get_store_optional()
+    records: Dict[str, Dict[str, Any]] = {}
+    if store:
+        for key in (store.get_json(_REDIS_INDEX) or []):
+            rec = store.get_json(_REDIS_PREFIX + key)
+            if rec:
+                records[key] = rec
+    with _signal_store_lock:
+        for key, rec in _signal_store.items():
+            records.setdefault(key, rec)
+    return list(records.values())
+
+
+def _write_record(key: str, record: Dict[str, Any]) -> None:
+    with _signal_store_lock:
+        _signal_store[key] = record
+    from backend.redis_store import get_store_optional
+
+    store = get_store_optional()
+    if store:
+        store.set_json(_REDIS_PREFIX + key, record, ttl_s=_SIGNAL_TTL_S)
+
+
+def get_all_signals() -> Dict[str, Any]:
+    """Group tracked Red Dog signals by lifecycle status."""
+    records = _all_records()
+    buckets: Dict[str, List[Dict[str, Any]]] = {
+        "pending": [], "triggered": [], "target_hit": [],
+        "stopped": [], "invalidated": [], "expired": [],
+    }
+    for rec in records:
+        status = rec.get("status", "pending")
+        buckets.setdefault(status, []).append(rec)
+
+    resolved = buckets["target_hit"] + buckets["stopped"]
+    wins = len(buckets["target_hit"])
+    win_rate = round(100.0 * wins / len(resolved), 1) if resolved else None
+
+    return {
+        "totalSignals": len(records),
+        "counts": {k: len(v) for k, v in buckets.items()},
+        "winRate": win_rate,
+        "resolvedCount": len(resolved),
+        **buckets,
+    }
+
+
+def refresh_signal_statuses(
+    client: OratsClient,
+    *,
+    as_of_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Re-evaluate every non-terminal tracked signal against current price action."""
+    from backend.engine3_red_dog import evaluate_outcome
+
+    if as_of_date:
+        try:
+            today = dt.date.fromisoformat(str(as_of_date)[:10])
+        except ValueError:
+            today = dt.date.today()
+    else:
+        today = dt.date.today()
+
+    updated = 0
+    changed = 0
+    for rec in _all_records():
+        if rec.get("status") in _TERMINAL_STATUSES:
+            continue
+        ticker = rec.get("ticker", "")
+        sig_date = rec.get("signalDate", "")
+        levels = rec.get("levels", {}) or {}
+        direction = rec.get("direction", "")
+        if not ticker or not sig_date:
+            continue
+
+        try:
+            sig_day = dt.date.fromisoformat(str(sig_date)[:10])
+        except ValueError:
+            continue
+
+        try:
+            bars = fetch_bars_for_ticker(client, ticker=ticker, as_of_date=today, lookback_days=60)
+        except Exception:
+            continue
+        # Forward bars are those strictly after the signal date.
+        forward = [b for b in bars if str(b.trade_date)[:10] > str(sig_date)[:10]]
+        if not forward:
+            continue
+
+        outcome = evaluate_outcome(
+            direction=direction,
+            entry_trigger=float(levels.get("entryTrigger") or 0.0),
+            stop_loss=float(levels.get("stopLoss") or 0.0),
+            target_1=float(levels.get("target1") or 0.0),
+            forward_bars=forward,
+        )
+        new_status = outcome["status"]
+        updated += 1
+        if new_status != rec.get("status"):
+            rec = dict(rec)
+            rec["status"] = new_status
+            rec["outcome"] = outcome
+            rec["statusUpdatedAt"] = dt.datetime.utcnow().isoformat() + "Z"
+            _write_record(_signal_key(ticker, sig_date), rec)
+            changed += 1
+
+    return {
+        "updated": updated,
+        "changed": changed,
+        "asOfDate": today.isoformat(),
+    }
+
 
 def _cache_key_scan(as_of: str, min_score: int, direction: Optional[str]) -> str:
     """Generate cache key for full scan results."""
@@ -98,10 +274,15 @@ def scan_ticker(
     *,
     ticker: str,
     as_of_date: dt.date,
+    trend_direction: Optional[str] = None,
+    min_dollar_adv: float = 0.0,
 ) -> Optional[RedDogSignal]:
     """
     Scan a single ticker for Red Dog setup.
-    Returns RedDogSignal if found, None otherwise.
+    Returns RedDogSignal if found (and liquid enough), None otherwise.
+
+    `trend_direction` makes the SPX trend read binding on the score; setups
+    below `min_dollar_adv` (20d avg dollar volume) are dropped as untradable.
     """
     try:
         bars = fetch_bars_for_ticker(client, ticker=ticker, as_of_date=as_of_date)
@@ -113,11 +294,17 @@ def scan_ticker(
         
         if not detection.get("bullish") and not detection.get("bearish"):
             return None
+
+        # Liquidity filter: skip thin names where intraday triggers are noise.
+        adv = (detection.get("indicators") or {}).get("dollarAdv")
+        if min_dollar_adv and adv is not None and adv < min_dollar_adv:
+            return None
         
         signal = build_red_dog_signal(
             ticker=ticker,
             detection=detection,
-            near_support_resistance=False,  # TODO: Add S/R detection
+            bars=bars,
+            trend_direction=trend_direction,
         )
         
         return signal
@@ -612,6 +799,11 @@ def compute_engine3_scan(
     # Fetch SPX 21 EMA trend context
     market_trend = fetch_spx_trend_context(client, as_of_date=scan_date)
     LOG.info(f"Engine 3 SPX trend: {market_trend.get('trendDirection', 'unknown')} (EMA21: {market_trend.get('ema21', 'N/A')}) [source: {market_trend.get('dataSource', 'unknown')}]")
+
+    # The trend read is now BINDING on scoring (counter-trend setups penalized).
+    trend_direction = market_trend.get("trendDirection") if market_trend.get("available") else None
+    flags = get_flags()
+    min_dollar_adv = float(getattr(flags, "ENGINE3_MIN_DOLLAR_ADV", 0.0) or 0.0)
     
     # Load universe
     universe = load_universe_sp500_and_nasdaq100()
@@ -623,7 +815,14 @@ def compute_engine3_scan(
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(scan_ticker, client, ticker=ticker, as_of_date=scan_date): ticker
+            executor.submit(
+                scan_ticker,
+                client,
+                ticker=ticker,
+                as_of_date=scan_date,
+                trend_direction=trend_direction,
+                min_dollar_adv=min_dollar_adv,
+            ): ticker
             for ticker in universe
         }
         
@@ -686,6 +885,12 @@ def compute_engine3_scan(
     )
     
     result_dict = result.to_dict()
+
+    # Persist detected setups for live outcome tracking (/status).
+    try:
+        _persist_signals((result_dict.get("aPlus") or []) + (result_dict.get("standard") or []))
+    except Exception as persist_err:
+        LOG.warning(f"Engine 3 signal persistence failed: {persist_err}")
     
     # Cache result
     if use_cache:
@@ -740,10 +945,21 @@ def compute_single_ticker_scan(
             }
         
         detection = detect_red_dog_enhanced(bars, ticker=ticker)
+
+        # Resolve trend direction so single-ticker scoring matches the universe scan.
+        trend_direction = None
+        try:
+            tc = fetch_spx_trend_context(client, as_of_date=scan_date)
+            if tc.get("available"):
+                trend_direction = tc.get("trendDirection")
+        except Exception:
+            pass
+
         signal = build_red_dog_signal(
             ticker=ticker,
             detection=detection,
-            near_support_resistance=False,
+            bars=bars,
+            trend_direction=trend_direction,
         )
         
         return {

@@ -320,95 +320,171 @@ class TestRedDogDetection:
 # Test: A+ Scoring
 # ---------------------------------------------------------------------------
 
-class TestAplusScoring:
-    """Test A+ quality scoring logic."""
-    
+class TestContinuousScoring:
+    """Test the continuous (ramped) A+ scoring model."""
+
     def test_score_perfect_bullish_setup(self):
-        # All criteria met for bullish
-        score, components, grade = score_red_dog_setup(
+        # All factors at their extreme → near the 100 ceiling, A+.
+        score, components, grade, meta = score_red_dog_setup(
             direction="bullish",
-            rsi=25.0,  # Oversold
-            stochastics=15.0,  # Oversold
-            sma20_deviation_pct=-12.0,  # >9% below SMA20
-            volume_ratio=2.0,  # >1.5x volume
-            close_position=0.80,  # Strong close in top 20%
-            near_support_resistance=True,
+            rsi=22.0,
+            stochastics=10.0,
+            sma20_deviation_pct=-12.0,
+            volume_ratio=2.0,
+            close_position=0.90,
+            wick_quality=1.0,
+            sr_confluence=1.0,
+            trend_alignment="aligned",
         )
-        
-        assert score == 100
+        assert score >= 99.0
         assert grade == "A+"
-        assert components["rsi"] == 25
-        assert components["stochastics"] == 15
-        assert components["sma20Deviation"] == 20
-        assert components["volume"] == 15
-        assert components["closePosition"] == 15
-        assert components["srConfluence"] == 10
-    
+        # Every component should be at (or near) its full weight.
+        assert components["rsi"] > 21
+        assert components["srConfluence"] > 14
+        assert components["wick"] > 7
+
     def test_score_minimal_setup(self):
-        # No criteria met
-        score, components, grade = score_red_dog_setup(
+        score, components, grade, meta = score_red_dog_setup(
             direction="bullish",
-            rsi=50.0,  # Neutral
-            stochastics=50.0,  # Neutral
-            sma20_deviation_pct=-2.0,  # Not extreme
-            volume_ratio=1.0,  # Normal volume
-            close_position=0.50,  # Middle close
-            near_support_resistance=False,
+            rsi=50.0, stochastics=50.0, sma20_deviation_pct=-2.0,
+            volume_ratio=1.0, close_position=0.50,
+            wick_quality=0.0, sr_confluence=0.0,
         )
-        
-        assert score == 0
+        assert score == 0.0
         assert grade == "C"
-    
-    def test_score_partial_setup(self):
-        # Some criteria met
-        score, components, grade = score_red_dog_setup(
-            direction="bullish",
-            rsi=28.0,  # Oversold
-            stochastics=50.0,  # Not oversold
-            sma20_deviation_pct=-5.0,  # Not extreme enough
-            volume_ratio=1.8,  # High volume
-            close_position=0.75,  # Strong close
-            near_support_resistance=False,
+
+    def test_partial_credit_is_continuous(self):
+        # A mildly-oversold setup should earn *some* RSI credit, not zero and
+        # not full — the whole point of the rewrite (no hard cliff).
+        score, components, _, _ = score_red_dog_setup(
+            direction="bullish", rsi=35.0, stochastics=50.0,
+            sma20_deviation_pct=-3.0, volume_ratio=1.0, close_position=0.5,
+            wick_quality=0.0, sr_confluence=0.0,
         )
-        
-        # RSI (25) + Volume (15) + Close Position (15) = 55
-        assert score == 55
-        # 55 >= 45, so grade is B
-        assert grade == "B"
-    
-    def test_score_bearish_direction(self):
-        # Bearish setup with overbought indicators
-        score, components, grade = score_red_dog_setup(
-            direction="bearish",
-            rsi=75.0,  # Overbought
-            stochastics=85.0,  # Overbought
-            sma20_deviation_pct=12.0,  # >9% above SMA20
-            volume_ratio=2.0,  # High volume
-            close_position=0.20,  # Strong close near lows
-            near_support_resistance=True,
+        assert 0 < components["rsi"] < 22.0
+
+    def test_score_monotonic_in_rsi(self):
+        def s(rsi):
+            return score_red_dog_setup(
+                direction="bullish", rsi=rsi, stochastics=50.0,
+                sma20_deviation_pct=-1.0, volume_ratio=1.0, close_position=0.5,
+            )[0]
+        # More oversold → higher score.
+        assert s(20) > s(30) > s(40) >= s(50)
+
+    def test_bearish_overbought_scores(self):
+        score, _, grade, _ = score_red_dog_setup(
+            direction="bearish", rsi=78.0, stochastics=88.0,
+            sma20_deviation_pct=12.0, volume_ratio=2.0, close_position=0.10,
+            wick_quality=0.8, sr_confluence=0.7, trend_alignment="aligned",
         )
-        
-        assert score == 100
+        assert score >= 75
         assert grade == "A+"
-    
+
+    def test_counter_trend_is_penalized(self):
+        base = dict(
+            direction="bearish", rsi=78.0, stochastics=88.0,
+            sma20_deviation_pct=12.0, volume_ratio=2.0, close_position=0.10,
+            wick_quality=0.8, sr_confluence=0.7,
+        )
+        neutral = score_red_dog_setup(**base, trend_alignment="neutral")
+        counter = score_red_dog_setup(**base, trend_alignment="counter")
+        assert counter[0] < neutral[0]
+        assert counter[3]["trendPenalty"] > 0
+        # A strongly counter-trend setup should be demoted below A+.
+        assert counter[2] != "A+"
+
     def test_aplus_threshold(self):
         assert APLUS_THRESHOLD == 75
-    
-    def test_grade_boundaries(self):
-        # Test grade boundaries
-        _, _, grade_aplus = score_red_dog_setup(
-            direction="bullish", rsi=25, stochastics=15, 
-            sma20_deviation_pct=-10, volume_ratio=1.6, close_position=0.75,
-        )
-        assert grade_aplus == "A+"  # Should be 90 points
-        
-        # Score of exactly 60 should be A
-        _, _, grade_a = score_red_dog_setup(
-            direction="bullish", rsi=25, stochastics=15,
-            sma20_deviation_pct=-10, volume_ratio=1.0, close_position=0.5,
-        )
-        # RSI(25) + Stoch(15) + SMA20(20) = 60
-        assert grade_a == "A"
+
+
+class TestSRConfluence:
+    """S/R confluence from swing structure (no longer hardcoded False)."""
+
+    def test_confluence_near_prior_swing_low(self):
+        from backend.engine3_red_dog import compute_sr_confluence
+        bars = make_bullish_red_dog_bars()
+        atr = 1.0
+        pivot = bars[-1].low
+        res = compute_sr_confluence(bars, direction="bullish", pivot_price=pivot, atr=atr)
+        assert 0.0 <= res["confluence"] <= 1.0
+        assert "distanceAtr" in res
+
+    def test_confluence_zero_without_atr(self):
+        from backend.engine3_red_dog import compute_sr_confluence
+        bars = make_bullish_red_dog_bars()
+        res = compute_sr_confluence(bars, direction="bullish", pivot_price=100.0, atr=None)
+        assert res["confluence"] == 0.0
+
+
+class TestOutcomeEvaluation:
+    """Deterministic forward outcome evaluation."""
+
+    def _bar(self, d, o, h, l, c):
+        return DailyBar(trade_date=d, open=o, high=h, low=l, close=c, volume=1_000_000, vwap=None)
+
+    def test_target_hit_bullish(self):
+        from backend.engine3_red_dog import evaluate_outcome
+        fwd = [self._bar("2025-02-01", 101, 107, 100.5, 106)]
+        oc = evaluate_outcome(direction="bullish", entry_trigger=102, stop_loss=98,
+                              target_1=106, forward_bars=fwd)
+        assert oc["status"] == "target_hit"
+        assert oc["rMultiple"] == 1.0
+        assert oc["triggered"] is True
+
+    def test_stopped_bullish(self):
+        from backend.engine3_red_dog import evaluate_outcome
+        fwd = [self._bar("2025-02-01", 102, 103, 97, 97.5)]
+        oc = evaluate_outcome(direction="bullish", entry_trigger=102, stop_loss=98,
+                              target_1=110, forward_bars=fwd)
+        assert oc["status"] == "stopped"
+        assert oc["rMultiple"] == -1.0
+
+    def test_expired_when_no_trigger(self):
+        from backend.engine3_red_dog import evaluate_outcome
+        fwd = [self._bar("2025-02-01", 99, 100, 98, 99)]
+        oc = evaluate_outcome(direction="bullish", entry_trigger=105, stop_loss=95,
+                              target_1=115, forward_bars=fwd, trigger_window=1)
+        assert oc["status"] == "expired"
+        assert oc["triggered"] is False
+
+
+class TestBacktest:
+    """Backtest harness aggregation."""
+
+    def test_backtest_from_bars_aggregates(self):
+        from backend.engine3_backtest import backtest_from_bars
+        bars = make_bars(120, start_price=100.0, trend="down")
+        res = backtest_from_bars({"TEST": bars}, min_score=0, warmup=60)
+        assert "overall" in res
+        assert "byGrade" in res
+        assert "byTrendAlignment" in res
+        assert res["params"]["tickersTested"] == 1
+
+
+class TestVerdictReconciliation:
+    """Single reconciled desk verdict."""
+
+    def test_counter_trend_capped_at_watch(self):
+        from backend.gating import reconcile_red_dog_verdict
+        sig = {"quality": {"grade": "A", "confirmed": True, "trendAlignment": "counter", "score": 72.0},
+               "gate": {"status": "TRADABLE"}}
+        v = reconcile_red_dog_verdict(sig, gamma_ctx={"environment": "supportive"})
+        assert v["status"] == "WATCH"
+
+    def test_clean_aplus_is_tradable(self):
+        from backend.gating import reconcile_red_dog_verdict
+        sig = {"quality": {"grade": "A+", "confirmed": True, "trendAlignment": "aligned", "score": 88.0},
+               "gate": {"status": "TRADABLE"}}
+        v = reconcile_red_dog_verdict(sig, gamma_ctx={"environment": "supportive"})
+        assert v["status"] == "TRADABLE"
+
+    def test_suppress_gate_stands_down(self):
+        from backend.gating import reconcile_red_dog_verdict
+        sig = {"quality": {"grade": "A+", "confirmed": True, "trendAlignment": "aligned", "score": 90.0},
+               "gate": {"status": "SUPPRESS"}}
+        v = reconcile_red_dog_verdict(sig, gamma_ctx={"environment": "supportive"})
+        assert v["status"] == "STAND_DOWN"
 
 
 # ---------------------------------------------------------------------------

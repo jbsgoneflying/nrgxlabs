@@ -386,6 +386,15 @@
       </section>
 
       <section class="results hidden" id="results">
+        <!-- Desk Verdict Banner (reconciled: grade + gate + gamma + trend) -->
+        <section class="surface" id="verdictBanner" style="display:none; margin-bottom:12px;">
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <span style="font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);">Desk Verdict</span>
+            <span id="verdictSummary" style="font-size:13px; font-weight:700;"></span>
+          </div>
+          <div id="verdictNote" style="margin-top:6px; font-size:11px; color:var(--muted);">One reconciled call per name — pattern grade, dealer gamma, SPX trend, and the regime gate collapsed into a single verdict.</div>
+        </section>
+
         <!-- Gate Banner (Raven-Tech 2.0) -->
         <section class="surface" id="gateBanner" style="display:none; margin-bottom:12px;">
           <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
@@ -688,6 +697,62 @@
           <div id="standardGrid" class="watchlistGrid"></div>
         </section>
 
+        <!-- Signal Outcome Tracker -->
+        <section class="surface" id="trackerSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">Signal Tracker
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Tracker help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Live signal-outcome tracking</div>
+                  <div class="tipBody">
+                    <p>Every detected setup is persisted and re-evaluated against subsequent price action — building a real <b>forward</b> win-rate instead of a backtested one.</p>
+                    <ul>
+                      <li><b>pending</b>: awaiting entry trigger</li>
+                      <li><b>triggered</b>: entered, still open</li>
+                      <li><b>target_hit / stopped</b>: resolved (counts toward win-rate)</li>
+                      <li><b>expired</b>: never triggered in the window</li>
+                    </ul>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted">
+              <button id="trackerRefreshBtn" class="secondaryButton" type="button" style="font-size:11px;padding:4px 10px;">Load / Refresh</button>
+            </div>
+          </div>
+          <div id="trackerSummary" class="statsGrid" style="margin-bottom:10px;"></div>
+          <div id="trackerBody" class="muted" style="font-size:12px;">Click "Load / Refresh" to evaluate tracked Red Dog signals.</div>
+        </section>
+
+        <!-- Backtest -->
+        <section class="surface" id="backtestSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">Backtest (measured edge)
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Backtest help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Historical expectancy</div>
+                  <div class="tipBody">
+                    <p>Replays the Red Dog pattern over history with the exact production scorer and reports win-rate, average R, expectancy and MAE/MFE — broken out by grade and by trend alignment.</p>
+                    <p>The key institutional question: do counter-trend setups actually pay?</p>
+                  </div>
+                </div>
+              </span>
+            </h2>
+            <div class="sectionMeta muted">
+              <select id="backtestYears" class="controlSelect" style="font-size:11px;padding:3px 6px;width:auto;display:inline-block;">
+                <option value="1">1y</option>
+                <option value="3" selected>3y</option>
+                <option value="5">5y</option>
+              </select>
+              <button id="backtestRunBtn" class="secondaryButton" type="button" style="font-size:11px;padding:4px 10px;margin-left:6px;">Run Backtest</button>
+            </div>
+          </div>
+          <div id="backtestSummary" class="statsGrid" style="margin-bottom:10px;"></div>
+          <div id="backtestBody" class="muted" style="font-size:12px;">Run a backtest to measure the edge (samples up to 40 names; ~20-40s).</div>
+        </section>
+
         <!-- How to Trade Section -->
         <section class="surface" id="howToSection">
           <div class="sectionHeader" data-insight="position_sizing">
@@ -776,7 +841,7 @@
     <script src="/static/desk-insight.js?v=2"></script>
     <script src="/static/ui_kit.js?v=5"></script>
     <script src="/static/position_calculator.js?v=3"></script>
-    <script src="/static/red-dog.js?v=6"></script>
+    <script src="/static/red-dog.js?v=7"></script>
     <script src="/static/calculator.js"></script>
     <script src="/static/nav.js?v=13"></script>
     <script src="/static/raven-chat.js?v=4"></script>

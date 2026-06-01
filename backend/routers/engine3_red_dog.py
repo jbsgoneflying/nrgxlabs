@@ -19,8 +19,18 @@ from backend.deps import (
     engine3_cache,
     engine3_cache_lock,
 )
-from backend.engine3_screener import compute_engine3_scan, compute_single_ticker_scan
-from backend.gating import gate_scan_results, summarize_gates
+from backend.engine3_screener import (
+    compute_engine3_scan,
+    compute_single_ticker_scan,
+    get_all_signals,
+    refresh_signal_statuses,
+)
+from backend.gating import (
+    gate_scan_results,
+    summarize_gates,
+    reconcile_red_dog_verdict,
+    summarize_verdicts,
+)
 from backend.orats_client import OratsError
 
 router = APIRouter()
@@ -141,12 +151,16 @@ def engine3_red_dog_scan(
         if flags.ENABLE_GATING and isinstance(result, dict):
             try:
                 gate_ctx = _get_gate_context(flags)
+                regime_allow = [s.strip() for s in str(getattr(flags, "GATE_RD_REGIME_ALLOW", "")).split(",") if s.strip()] or None
+                vol_allow = [s.strip() for s in str(getattr(flags, "GATE_RD_VOL_STATE_ALLOW", "")).split(",") if s.strip()] or None
                 for key in ("aPlus", "standard", "watchlist"):
                     setups = result.get(key)
                     if isinstance(setups, list):
                         gate_scan_results(
                             scan_results=setups,
                             engine="engine3_red_dog",
+                            regime_allow=regime_allow,
+                            vol_state_allow=vol_allow,
                             **gate_ctx,
                         )
                 gs = summarize_gates(
@@ -154,6 +168,21 @@ def engine3_red_dog_scan(
                 )
                 result["gateSummary"] = gs
                 result["gateContext"] = gate_ctx
+
+                # Reconcile grade + gate + gamma + trend into ONE desk verdict
+                # per signal, then summarize. This is what the UI leads with.
+                gamma_ctx = result.get("marketGamma") or {}
+                regime_label = gate_ctx.get("regime_label", "")
+                for key in ("aPlus", "standard", "watchlist"):
+                    setups = result.get(key)
+                    if isinstance(setups, list):
+                        for s in setups:
+                            s["verdict"] = reconcile_red_dog_verdict(
+                                s, gamma_ctx=gamma_ctx, regime_label=regime_label
+                            )
+                result["verdictSummary"] = summarize_verdicts(
+                    (result.get("aPlus") or []) + (result.get("standard") or [])
+                )
             except Exception as gate_err:
                 LOG.warning(f"Gate injection failed for engine3: {gate_err}")
 
@@ -169,6 +198,108 @@ def engine3_red_dog_scan(
         raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:
         LOG.exception("Unhandled failure (engine3-red-dog)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@router.get("/api/engine3-red-dog/status")
+def engine3_red_dog_status(
+    request: Request,
+    refresh: bool = Query(False, description="Re-evaluate tracked signals against current prices"),
+    date: Optional[str] = Query(None, description="As-of date for refresh (YYYY-MM-DD)"),
+):
+    """
+    Engine 3: Red Dog signal-outcome tracker.
+
+    Returns every tracked signal grouped by lifecycle status
+    (pending / triggered / target_hit / stopped / expired / invalidated) plus a
+    live forward win-rate. With ?refresh=true, walks each open signal forward
+    against current bars and resolves its outcome.
+
+    NOTE: declared before /{ticker} so the literal path isn't captured as a ticker.
+    """
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE3_RED_DOG:
+        raise HTTPException(status_code=503, detail="Engine 3 (Red Dog) is disabled.")
+
+    try:
+        if refresh:
+            client = get_client_optional()
+            if client is None:
+                raise HTTPException(status_code=503, detail="ORATS unavailable for refresh.")
+            refresh_result = refresh_signal_statuses(client, as_of_date=date)
+            return {"refreshed": True, **refresh_result, **get_all_signals()}
+        return {"refreshed": False, **get_all_signals()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOG.exception("Unhandled failure (engine3-red-dog/status)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@router.get("/api/engine3-red-dog/backtest")
+def engine3_red_dog_backtest(
+    request: Request,
+    years: float = Query(3.0, ge=0.25, le=8.0, description="Lookback window in years"),
+    min_score: float = Query(0.0, ge=0.0, le=100.0, description="Minimum score to include"),
+    max_tickers: int = Query(40, ge=1, le=200, description="Universe sample cap"),
+    tickers: Optional[str] = Query(None, description="Comma-separated tickers (defaults to a universe sample)"),
+):
+    """
+    Engine 3: Red Dog backtest.
+
+    Replays the pattern over `years` of history and reports win-rate, avg-R,
+    expectancy and MAE/MFE — broken out by grade and by trend alignment.
+
+    NOTE: declared before /{ticker} so the literal path isn't captured as a ticker.
+    """
+    import datetime as dt
+
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE3_RED_DOG:
+        raise HTTPException(status_code=503, detail="Engine 3 (Red Dog) is disabled.")
+
+    try:
+        client = get_client_optional()
+        if client is None:
+            raise HTTPException(status_code=503, detail="ORATS unavailable (missing ORATS_TOKEN).")
+
+        from backend.engine3_backtest import backtest_red_dog
+        from backend.universe import load_universe_sp500_and_nasdaq100
+
+        if tickers:
+            ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+        else:
+            ticker_list = load_universe_sp500_and_nasdaq100()
+
+        end = dt.date.today()
+        start = end - dt.timedelta(days=int(years * 365))
+
+        cache_key = ("backtest", round(years, 2), round(min_score, 1), max_tickers, tickers or "")
+        with engine3_cache_lock:
+            cached = engine3_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        result = backtest_red_dog(
+            client,
+            tickers=ticker_list,
+            start=start,
+            end=end,
+            min_score=min_score,
+            max_tickers=max_tickers,
+        )
+
+        with engine3_cache_lock:
+            engine3_cache[cache_key] = result
+        return result
+
+    except HTTPException:
+        raise
+    except OratsError as e:
+        LOG.exception("ORATS failure (engine3-red-dog/backtest)")
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        LOG.exception("Unhandled failure (engine3-red-dog/backtest)")
         raise HTTPException(status_code=500, detail="Internal error") from e
 
 

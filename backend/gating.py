@@ -182,14 +182,22 @@ def gate_red_dog(
 ) -> GateDecision:
     """Gate a Red Dog Reversal setup.
 
-    Red Dog thrives when:
-      - Regime is Transitional or Stressed
-      - Vol state is expanding or unstable
-      - Dealer gamma is not strongly hostile
+    Red Dog is a *mean-reversion* system, so it thrives in the SAME conditions
+    the dealer-gamma overlay calls supportive — calm, long-gamma, range-bound
+    tape where dips get bought and rips get sold:
+      - Regime is Risk-On or Transitional (not Stressed/trending-hard)
+      - Vol state is compressing / stable / falling (not expanding)
+      - Dealer gamma is not strongly hostile (negative + high magnitude)
+
+    (This deliberately matches `fetch_spx_gamma_context`'s thesis; the prior
+    "wants Stressed + expanding vol" allow-list contradicted the gamma overlay
+    and is the bug the 2026-06 audit flagged.)
     """
     reasons: List[GateReason] = []
-    allowed_regimes = regime_allow or ["Transitional", "Stressed"]
-    allowed_vol = vol_state_allow or ["expanding", "unstable", "RISING", "rising"]
+    allowed_regimes = regime_allow or ["Risk-On", "Transitional"]
+    allowed_vol = vol_state_allow or [
+        "compressing", "stable", "falling", "NORMAL", "FALLING", "flat", "contango"
+    ]
 
     r = _check_regime(regime_label, allowed_regimes, severity="HARD")
     if r:
@@ -386,10 +394,14 @@ def gate_scan_results(
     vol_direction: str = "",
     gamma_ctx: Optional[dict] = None,
     high_events_within_days: int = 0,
+    regime_allow: Optional[List[str]] = None,
+    vol_state_allow: Optional[List[str]] = None,
 ) -> List[dict]:
     """Apply gating to a list of scan results, adding gate decision to each.
 
     Returns the same list with 'gate' field injected into each result dict.
+    `regime_allow` / `vol_state_allow` let the router pass config-driven
+    allow-lists (so the policy is tunable without a code change).
     """
     gate_fn = gate_red_dog if engine == "engine3_red_dog" else gate_ichimoku
 
@@ -404,10 +416,115 @@ def gate_scan_results(
             vol_direction=vol_direction,
             gamma_ctx=gamma_ctx,
             high_events_within_days=high_events_within_days,
+            regime_allow=regime_allow,
+            vol_state_allow=vol_state_allow,
         )
         result["gate"] = decision.to_dict()
 
     return scan_results
+
+
+# ---------------------------------------------------------------------------
+# Reconciled per-name verdict (Red Dog)
+# ---------------------------------------------------------------------------
+#
+# The audit flagged that the pattern grade, the gamma overlay, the trend filter,
+# and the gate each gave the trader a *different* answer. This collapses them
+# into ONE desk verdict — TRADABLE / WATCH / STAND_DOWN — with explicit drivers,
+# and the UI leads with it.
+
+VERDICT_TRADABLE = "TRADABLE"
+VERDICT_WATCH = "WATCH"
+VERDICT_STAND_DOWN = "STAND_DOWN"
+
+
+def reconcile_red_dog_verdict(
+    signal: dict,
+    *,
+    gamma_ctx: Optional[dict] = None,
+    regime_label: str = "",
+) -> Dict[str, Any]:
+    """Collapse grade + gate + gamma + trend into one verdict for a signal.
+
+    Demotion ladder (a single failure caps the verdict):
+      - Gate SUPPRESS, or grade C            → STAND_DOWN
+      - Counter-trend / unconfirmed / gate
+        WATCH / hostile gamma / grade B      → at most WATCH
+      - Grade A or A+, none of the above     → TRADABLE
+    """
+    quality = signal.get("quality", {}) if isinstance(signal.get("quality"), dict) else {}
+    gate = signal.get("gate", {}) if isinstance(signal.get("gate"), dict) else {}
+
+    grade = str(quality.get("grade") or "C")
+    confirmed = bool(quality.get("confirmed", True))
+    trend_alignment = str(quality.get("trendAlignment") or "unknown")
+    gate_status = str(gate.get("status") or "")
+    score = float(quality.get("score") or 0.0)
+
+    gamma_env = str((gamma_ctx or {}).get("environment") or "").lower()
+
+    drivers: List[str] = []
+    verdict = VERDICT_TRADABLE
+
+    def demote(to: str, reason: str):
+        nonlocal verdict
+        order = {VERDICT_TRADABLE: 2, VERDICT_WATCH: 1, VERDICT_STAND_DOWN: 0}
+        if order[to] < order[verdict]:
+            verdict = to
+        drivers.append(reason)
+
+    # Hard stand-downs
+    if gate_status == "SUPPRESS":
+        demote(VERDICT_STAND_DOWN, "Gate: regime/macro suppression")
+    if grade == "C":
+        demote(VERDICT_STAND_DOWN, "Pattern grade C")
+
+    # Watch-level caps
+    if grade == "B":
+        demote(VERDICT_WATCH, "Pattern grade B")
+    if trend_alignment == "counter":
+        demote(VERDICT_WATCH, "Counter-trend vs SPX")
+    if not confirmed:
+        demote(VERDICT_WATCH, "Unconfirmed reversal (weak tail + light volume)")
+    if gate_status == "WATCH":
+        demote(VERDICT_WATCH, "Gate: marginal regime/vol")
+    if gamma_env == "challenging":
+        demote(VERDICT_WATCH, "Dealer gamma hostile to mean reversion")
+
+    if verdict == VERDICT_TRADABLE:
+        drivers.append(f"Grade {grade}, with-trend, gate clear")
+
+    labels = {
+        VERDICT_TRADABLE: "Tradable",
+        VERDICT_WATCH: "Watch",
+        VERDICT_STAND_DOWN: "Stand down",
+    }
+    return {
+        "status": verdict,
+        "label": labels[verdict],
+        "conviction": round(score, 1),
+        "drivers": drivers[:4],
+        "inputs": {
+            "grade": grade,
+            "trendAlignment": trend_alignment,
+            "gateStatus": gate_status or "n/a",
+            "gammaEnvironment": gamma_env or "n/a",
+            "confirmed": confirmed,
+            "regimeLabel": regime_label or "n/a",
+        },
+    }
+
+
+def summarize_verdicts(scan_results: List[dict]) -> dict:
+    """Count reconciled verdicts across scan results."""
+    counts = {VERDICT_TRADABLE: 0, VERDICT_WATCH: 0, VERDICT_STAND_DOWN: 0, "total": 0}
+    for r in scan_results:
+        v = r.get("verdict") if isinstance(r.get("verdict"), dict) else {}
+        status = str(v.get("status") or "")
+        counts["total"] += 1
+        if status in counts:
+            counts[status] += 1
+    return counts
 
 
 def summarize_gates(scan_results: List[dict]) -> dict:

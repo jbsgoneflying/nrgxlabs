@@ -294,15 +294,35 @@ function renderSignalCard(signal, isAPlus = false) {
   // Card class - A+ gets green border, standard gets amber
   const cardClass = isAPlus ? "signalCard actionableCard" : "signalCard structureCard";
   
-  // Gate pill (Raven-Tech 2.0)
+  // Reconciled desk verdict — LEAD with this (grade + gate + gamma + trend).
+  let verdictPillHtml = "";
+  const verdict = signal.verdict || {};
+  if (verdict.status) {
+    const vCls = verdict.status === "TRADABLE" ? "background:rgba(52,199,89,0.18);color:#1b8a3e;" :
+                 verdict.status === "STAND_DOWN" ? "background:rgba(255,59,48,0.16);color:#cc2f26;" :
+                 "background:rgba(255,149,0,0.16);color:#995c00;";
+    const drivers = (verdict.drivers || []).slice(0, 2).join(" · ");
+    verdictPillHtml = `<div style="margin:2px 0 4px;"><span style="display:inline-block;font-size:10px;font-weight:900;padding:3px 10px;border-radius:12px;text-transform:uppercase;letter-spacing:0.04em;${vCls}">${escapeHtml(verdict.label || verdict.status)}</span>${drivers ? `<span style="font-size:10px;color:var(--muted);margin-left:6px;">${escapeHtml(drivers)}</span>` : ""}</div>`;
+  }
+
+  // Score detail: show base → trend-adjusted when penalized.
+  const baseScore = signal.quality?.baseScore;
+  const penalty = signal.quality?.trendPenalty || 0;
+  const confirmed = signal.quality?.confirmed !== false;
+  let scoreDetailHtml = "";
+  if (penalty > 0.5) {
+    scoreDetailHtml = `<span style="font-size:10px;color:var(--muted);">base ${fmt0(baseScore)} − ${fmt0(penalty)} counter-trend</span>`;
+  } else if (!confirmed) {
+    scoreDetailHtml = `<span style="font-size:10px;color:#995c00;">unconfirmed reversal</span>`;
+  }
+
+  // Gate pill (secondary to verdict now)
   let gatePillHtml = "";
   const gate = signal.gate || {};
   if (gate.status) {
-    const gCls = gate.status === "TRADABLE" ? "background:rgba(52,199,89,0.14);color:#1b8a3e;" :
-                 gate.status === "SUPPRESS" ? "background:rgba(255,59,48,0.14);color:#cc2f26;" :
-                 "background:rgba(255,149,0,0.14);color:#995c00;";
-    const reasons = (gate.reasons || []).map(r => r.label || r.code).slice(0, 3).join(", ");
-    gatePillHtml = `<div style="margin:4px 0 2px;"><span style="display:inline-block;font-size:9px;font-weight:800;padding:2px 8px;border-radius:12px;text-transform:uppercase;${gCls}">${gate.status}</span>${reasons ? `<span style="font-size:10px;color:var(--muted);margin-left:4px;">${escapeHtml(reasons)}</span>` : ""}</div>`;
+    const gCls = gate.status === "TRADABLE" ? "color:#1b8a3e;" :
+                 gate.status === "SUPPRESS" ? "color:#cc2f26;" : "color:#995c00;";
+    gatePillHtml = `<span style="font-size:9px;font-weight:700;${gCls}">gate: ${gate.status.toLowerCase()}</span>`;
   }
 
   return `
@@ -312,9 +332,10 @@ function renderSignalCard(signal, isAPlus = false) {
           <span class="signalCardSymbol">${ticker}</span>
           <span class="signalCardDirection ${dirClass}">${direction}</span>
         </div>
-        <span class="signalCardGrade ${gradeClass}">${grade} (${score})</span>
+        <span class="signalCardGrade ${gradeClass}">${grade} (${fmt0(score)})</span>
       </div>
-      ${gatePillHtml}
+      ${verdictPillHtml}
+      <div style="margin:0 0 4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">${scoreDetailHtml}${gatePillHtml}</div>
       ${freshnessHtml ? `<div class="signalCardFreshness">${freshnessHtml}</div>` : ""}
       <div class="signalCardBody">
         <div class="signalCardMetric">
@@ -431,11 +452,40 @@ function renderGateBanner(payload) {
   }
 }
 
+function renderVerdictBanner(payload) {
+  const banner = $("verdictBanner");
+  if (!banner) return;
+  const vs = payload.verdictSummary;
+  if (!vs) { banner.style.display = "none"; return; }
+  banner.style.display = "block";
+
+  const tradable = vs.TRADABLE || 0;
+  const watch = vs.WATCH || 0;
+  const stand = vs.STAND_DOWN || 0;
+  const total = vs.total || 0;
+
+  const pill = (cls, text) =>
+    `<span style="display:inline-block;font-size:10px;font-weight:800;padding:3px 10px;border-radius:20px;text-transform:uppercase;letter-spacing:0.04em;${cls}">${text}</span>`;
+
+  const el = $("verdictSummary");
+  if (el) {
+    el.innerHTML = [
+      tradable > 0 ? pill("background:rgba(52,199,89,0.16);color:#1b8a3e;", `${tradable} Tradable`) : "",
+      watch > 0 ? pill("background:rgba(255,149,0,0.16);color:#995c00;", `${watch} Watch`) : "",
+      stand > 0 ? pill("background:rgba(255,59,48,0.16);color:#cc2f26;", `${stand} Stand Down`) : "",
+      pill("background:rgba(11,11,15,0.04);color:var(--muted);", `${total} Total`),
+    ].filter(Boolean).join(" ");
+  }
+}
+
 function renderResults(payload) {
   lastPayload = payload;
   
   // Show results section
   $("results").classList.remove("hidden");
+
+  // Render reconciled desk verdict (leads the gate)
+  renderVerdictBanner(payload);
   
   // Render gate banner (Raven-Tech 2.0)
   renderGateBanner(payload);
@@ -508,6 +558,106 @@ async function handleSubmit(ev) {
 // Init
 // -----------------------------------------------------------------------------
 
+// -----------------------------------------------------------------------------
+// Signal Tracker (live outcomes)
+// -----------------------------------------------------------------------------
+
+function metricCard(label, value, caption) {
+  return `<div class="metricCard"><div class="metricLabel">${label}</div>` +
+    `<div class="metricValue mono">${value}</div>` +
+    `<div class="metricCaption muted">${caption || ""}</div></div>`;
+}
+
+async function loadTracker() {
+  const btn = $("trackerRefreshBtn");
+  const body = $("trackerBody");
+  if (btn) { btn.disabled = true; btn.textContent = "Evaluating…"; }
+  try {
+    const resp = await fetch("/api/engine3-red-dog/status?refresh=true");
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const c = data.counts || {};
+    const summary = $("trackerSummary");
+    if (summary) {
+      summary.innerHTML = [
+        metricCard("Tracked", fmt0(data.totalSignals || 0), "signals"),
+        metricCard("Win Rate", data.winRate != null ? `${data.winRate}%` : "—", `${data.resolvedCount || 0} resolved`),
+        metricCard("Open", fmt0((c.pending || 0) + (c.triggered || 0)), "pending + triggered"),
+        metricCard("Resolved", `${fmt0(c.target_hit || 0)} / ${fmt0(c.stopped || 0)}`, "target / stopped"),
+      ].join("");
+    }
+    if (body) {
+      body.innerHTML = `<span class="muted">As of ${data.asOfDate || "—"} · ` +
+        `${fmt0(c.expired || 0)} expired, ${fmt0(c.pending || 0)} pending, ${fmt0(c.triggered || 0)} triggered.</span>`;
+    }
+  } catch (err) {
+    if (body) body.innerHTML = `<span class="muted">Tracker error: ${escapeHtml(err.message)}</span>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Load / Refresh"; }
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Backtest
+// -----------------------------------------------------------------------------
+
+function renderBacktestGroup(title, stats) {
+  if (!stats || !stats.signals) return "";
+  const wr = stats.winRate != null ? `${stats.winRate}%` : "—";
+  const exp = stats.expectancy != null ? `${stats.expectancy}R` : "—";
+  return `<tr><td style="padding:4px 8px;font-weight:700;">${escapeHtml(title)}</td>` +
+    `<td style="padding:4px 8px;text-align:right;">${fmt0(stats.signals)}</td>` +
+    `<td style="padding:4px 8px;text-align:right;">${fmt0(stats.triggered)}</td>` +
+    `<td style="padding:4px 8px;text-align:right;">${wr}</td>` +
+    `<td style="padding:4px 8px;text-align:right;">${exp}</td>` +
+    `<td style="padding:4px 8px;text-align:right;">${stats.avgMae != null ? stats.avgMae : "—"}</td>` +
+    `<td style="padding:4px 8px;text-align:right;">${stats.avgMfe != null ? stats.avgMfe : "—"}</td></tr>`;
+}
+
+async function runBacktest() {
+  const btn = $("backtestRunBtn");
+  const body = $("backtestBody");
+  const years = $("backtestYears")?.value || "3";
+  if (btn) { btn.disabled = true; btn.textContent = "Running…"; }
+  if (body) body.innerHTML = `<span class="muted">Replaying ${years}y of history across the universe sample… this can take 20-40s.</span>`;
+  try {
+    const resp = await fetch(`/api/engine3-red-dog/backtest?years=${years}&max_tickers=40`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const o = data.overall || {};
+    const summary = $("backtestSummary");
+    if (summary) {
+      summary.innerHTML = [
+        metricCard("Signals", fmt0(o.signals || 0), `${o.triggered || 0} triggered`),
+        metricCard("Win Rate", o.winRate != null ? `${o.winRate}%` : "—", "target vs stop"),
+        metricCard("Expectancy", o.expectancy != null ? `${o.expectancy}R` : "—", "per triggered"),
+        metricCard("Avg MFE", o.avgMfe != null ? `${o.avgMfe}R` : "—", `MAE ${o.avgMae != null ? o.avgMae : "—"}R`),
+      ].join("");
+    }
+    if (body) {
+      const rows = [];
+      const bg = data.byGrade || {};
+      ["A+", "A", "B", "C"].forEach(g => { if (bg[g]) rows.push(renderBacktestGroup(`Grade ${g}`, bg[g])); });
+      const ba = data.byTrendAlignment || {};
+      ["aligned", "counter", "neutral", "unknown"].forEach(a => { if (ba[a]) rows.push(renderBacktestGroup(a, ba[a])); });
+      const win = data.window || {};
+      body.innerHTML =
+        `<div style="font-size:11px;overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:11px;">` +
+        `<thead><tr style="color:var(--muted);text-align:right;">` +
+        `<th style="padding:4px 8px;text-align:left;">Bucket</th><th style="padding:4px 8px;">Signals</th>` +
+        `<th style="padding:4px 8px;">Triggered</th><th style="padding:4px 8px;">Win%</th>` +
+        `<th style="padding:4px 8px;">Exp(R)</th><th style="padding:4px 8px;">MAE</th><th style="padding:4px 8px;">MFE</th></tr></thead>` +
+        `<tbody>${rows.join("")}</tbody></table>` +
+        `<div class="muted" style="margin-top:6px;">Window: ${win.start || "?"} → ${win.end || "?"} · ${data.params?.tickersTested || 0} names sampled. ` +
+        `Compare grade tiers and (critically) <b>aligned vs counter</b> expectancy.</div></div>`;
+    }
+  } catch (err) {
+    if (body) body.innerHTML = `<span class="muted">Backtest error: ${escapeHtml(err.message)}</span>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Run Backtest"; }
+  }
+}
+
 function init() {
   initTooltips();
   
@@ -515,6 +665,11 @@ function init() {
   if (form) {
     form.addEventListener("submit", handleSubmit);
   }
+
+  const trackerBtn = $("trackerRefreshBtn");
+  if (trackerBtn) trackerBtn.addEventListener("click", loadTracker);
+  const backtestBtn = $("backtestRunBtn");
+  if (backtestBtn) backtestBtn.addEventListener("click", runBacktest);
   
   // Check if Engine 2 should be visible (same logic as other pages)
   // Engine 2 is always visible now, so we just ensure the link is there

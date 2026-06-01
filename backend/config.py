@@ -555,9 +555,13 @@ class FeatureFlags:
 
     # --- Gating (Engine 3 & 4) ---
     ENABLE_GATING: bool = True
-    GATE_RD_REGIME_ALLOW: str = "Transitional,Stressed"
-    GATE_RD_VOL_STATE_ALLOW: str = "expanding,unstable,RISING,rising"
+    # Red Dog is mean-reversion: favored in calm / long-gamma / range tape,
+    # consistent with the dealer-gamma overlay (not Stressed + expanding vol).
+    GATE_RD_REGIME_ALLOW: str = "Risk-On,Transitional"
+    GATE_RD_VOL_STATE_ALLOW: str = "compressing,stable,falling,NORMAL,FALLING,flat,contango"
     GATE_RD_MACRO_PROXIMITY_DAYS: int = 1
+    # 20-day average dollar volume floor for the Red Dog universe (liquidity).
+    ENGINE3_MIN_DOLLAR_ADV: float = 20_000_000.0
     GATE_ICH_REGIME_ALLOW: str = "Risk-On,Transitional"
     GATE_ICH_VOL_STATE_ALLOW: str = "compressing,stable,NORMAL,FALLING,falling,flat"
     GATE_ICH_MACRO_PROXIMITY_DAYS: int = 1
