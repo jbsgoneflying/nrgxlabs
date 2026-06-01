@@ -652,8 +652,9 @@ def run_universe_scan(
     
     # Persist actionable + structure to the tracker store (Redis-aware,
     # preserves desk overrides). Only fresh actionable names auto-enter as
-    # "pending"; structure stays as a watch surface.
-    _persist_signals(actionable + structure)
+    # "pending"; structure stays as a watch surface. NOTE: _persist_signals
+    # expects API dicts, not IchimokuSignal dataclasses.
+    _persist_signals([signal_to_dict(s) for s in (actionable + structure)])
     
     elapsed_ms = int((time.time() - start_time) * 1000)
     
@@ -700,6 +701,13 @@ def _persist_signals(signal_dicts: List[Dict[str, Any]]) -> None:
     if not signal_dicts:
         return
     from backend.redis_store import get_store_optional
+
+    # Defensive: accept IchimokuSignal dataclasses too, so a caller that
+    # forgets to serialize can't 500 the whole scan.
+    signal_dicts = [
+        d if isinstance(d, dict) else signal_to_dict(d)
+        for d in signal_dicts
+    ]
 
     store = get_store_optional()
     protected = _TERMINAL_STATUSES | {"triggered"} | DESK_STATUSES

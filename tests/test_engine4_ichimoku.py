@@ -811,3 +811,29 @@ class TestDeskTracker:
         from backend import engine4_screener as scr
         res = scr.set_desk_status("ZZTEST", desk_status="bogus")
         assert res["ok"] is False
+
+    def test_persist_accepts_dataclasses(self):
+        """Regression: run_universe_scan persists IchimokuSignal objects, not
+        dicts — _persist_signals must tolerate dataclasses without crashing."""
+        from backend import engine4_screener as scr
+        detection = {
+            "enabled": True, "hasSignal": True,
+            "signal": {
+                "signalDate": "2024-03-03", "direction": "bullish", "tenkan": 100.0,
+                "kijun": 98.0, "chikou": 102.0, "cloudTop": 97.0, "cloudBottom": 95.0,
+                "cloudBias": "bullish", "cloudThickness": 2.0, "close": 102.0,
+                "closePosition": 0.75, "pullbackDepth": 0.02, "cloudPenetrationPct": 0.0,
+                "entry": 103.01, "stop": 96.5, "risk": 6.51, "target1": 110.0,
+                "target2": 116.0, "trail": 98.0, "rsi": 55.0, "volumeRatio": 1.3,
+                "atr": 2.0, "kijunSlope": "positive", "kijunFlatDays": 0,
+                "timeInCloud": 2, "chikouTangled": False,
+            },
+            "notes": [],
+        }
+        sig = build_ichimoku_signal(ticker="ZZDATACLASS", detection=detection, dollar_adv=3e8)
+        # Pass the dataclass directly (mirrors the bug that 500'd the scan).
+        scr._persist_signals([sig])
+        all_sigs = scr.get_all_signals()
+        found = [r for r in all_sigs.get("pending", []) if r.get("ticker") == "ZZDATACLASS"]
+        assert len(found) == 1
+        assert found[0]["indicators"]["dollarAdv"] == 3e8
