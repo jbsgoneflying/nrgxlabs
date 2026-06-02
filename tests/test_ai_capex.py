@@ -9,6 +9,8 @@ directly — the scorer does, from the evidence table.
 """
 from __future__ import annotations
 
+import time
+
 from backend.ai_capex import agent, extract, models, pipeline, score, trades
 from backend.ai_capex.models import CapexEvidence
 from backend.config import get_flags
@@ -260,6 +262,71 @@ def test_extract_keyword_fallback(monkeypatch):
 
 def test_extract_empty_bundle_returns_empty():
     assert extract.extract_evidence("NVDA", "semis", {"transcripts": [], "news": []}) == []
+
+
+def test_rate_limiter_blocks_until_budget_then_acquires(monkeypatch):
+    """Blocking acquire must WAIT for a slot (not fall back) — the bug that
+    silently degraded scans was acquire() giving up the instant the budget hit."""
+    rl = extract._RateLimiter()
+    monkeypatch.setattr(rl, "_max", lambda: 1)
+    assert rl.acquire(block=True) is True          # first slot free
+    assert rl.acquire(block=False) is False         # budget hit, non-blocking gives up
+    # Pretend the first reservation is already ~old so a slot frees almost
+    # immediately; blocking acquire should then succeed rather than fall back.
+    rl._ts = [time.time() - 59.9]
+    assert rl.acquire(block=True, timeout=5.0) is True
+
+
+def test_rate_limiter_block_times_out(monkeypatch):
+    rl = extract._RateLimiter()
+    monkeypatch.setattr(rl, "_max", lambda: 1)
+    assert rl.acquire(block=True) is True
+    # Fresh reservation + tiny timeout -> can't get a slot in time -> False.
+    assert rl.acquire(block=True, timeout=0.2) is False
+
+
+def test_has_llm_grade_distinguishes_fallback_from_llm():
+    fallback = [_ev(models.SIG_DEMAND_PULL, conf=0.35, source=models.SOURCE_NEWS)]
+    fund_only = [_ev(models.SIG_CAPEX_UP, conf=0.9, source=models.SOURCE_FUNDAMENTAL)]
+    llm = [_ev(models.SIG_CAPEX_UP, conf=0.8, source=models.SOURCE_TRANSCRIPT)]
+    assert pipeline._has_llm_grade(fallback) is False
+    assert pipeline._has_llm_grade(fund_only) is False   # fundamentals alone don't count
+    assert pipeline._has_llm_grade(llm) is True
+
+
+def test_build_scan_keeps_prior_llm_evidence_on_fallback_run(monkeypatch):
+    """A fallback-grade run must not clobber a prior rich LLM trail."""
+    from backend.ai_capex import ingest
+
+    class _FakeStore:
+        def __init__(self):
+            self.saved = {}
+            self.prior = {
+                "NVDA": [_ev(models.SIG_CAPEX_UP, conf=0.85, source=models.SOURCE_TRANSCRIPT,
+                             claim="Data-center revenue $75B, +92% YoY")],
+            }
+
+    fake = _FakeStore()
+    monkeypatch.setattr(pipeline.store, "get_evidence",
+                        lambda t, store=None: fake.prior.get(t, []))
+    saved = {}
+    monkeypatch.setattr(pipeline.store, "set_evidence",
+                        lambda t, evid, ttl_s=0, store=None: saved.__setitem__(t, evid))
+    monkeypatch.setattr(pipeline.store, "set_context", lambda *a, **k: None)
+    monkeypatch.setattr(pipeline.store, "set_scan", lambda *a, **k: None)
+    # Only NVDA in the universe; this run yields shallow keyword-fallback evidence.
+    monkeypatch.setattr(pipeline.models, "all_tickers", lambda: ["NVDA"])
+    monkeypatch.setattr(pipeline.models, "ticker_to_category_map", lambda: {"NVDA": "semis"})
+    monkeypatch.setattr(ingest, "gather_ticker_text", lambda *a, **k: {"transcripts": [], "news": [{"title": "x"}]})
+    monkeypatch.setattr(ingest, "fetch_market_context", lambda t: {})
+    monkeypatch.setattr(ingest, "fetch_capex_fundamental_evidence", lambda t, c: None)
+    monkeypatch.setattr(pipeline.extract, "extract_evidence",
+                        lambda t, c, b, model=None: [_ev(models.SIG_DEMAND_PULL, conf=0.3, source=models.SOURCE_NEWS)])
+
+    pipeline.build_scan(flags=FLAGS, with_web_agent=False, store_obj=fake, persist=True)
+    # The prior rich trail must have been kept (not overwritten by the fallback run).
+    assert "NVDA" in saved
+    assert pipeline._has_llm_grade(saved["NVDA"]) is True
 
 
 class _StubFlags:

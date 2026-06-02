@@ -45,14 +45,27 @@ class _RateLimiter:
         except Exception:
             return 20
 
-    def acquire(self) -> bool:
-        with self._lock:
-            now = time.time()
-            self._ts = [t for t in self._ts if now - t < 60.0]
-            if len(self._ts) >= self._max():
+    def acquire(self, *, block: bool = False, timeout: float = 240.0) -> bool:
+        """Reserve one call slot.
+
+        With ``block=True`` we WAIT for budget rather than giving up. A slot
+        always frees within 60s as older reservations age out of the window, so
+        a batch *paces* at the per-minute cap instead of dumping the overflow
+        into the keyword fallback — which is what silently degraded whole scans
+        (only ~20 of 72 tickers got real LLM extraction; the rest fell back).
+        """
+        deadline = time.time() + max(0.0, timeout)
+        while True:
+            with self._lock:
+                now = time.time()
+                self._ts = [t for t in self._ts if now - t < 60.0]
+                if len(self._ts) < self._max():
+                    self._ts.append(now)
+                    return True
+                sleep_for = max(0.05, 60.0 - (now - self._ts[0]))
+            if not block or time.time() + sleep_for > deadline:
                 return False
-            self._ts.append(now)
-            return True
+            time.sleep(min(sleep_for, 5.0))
 
 
 _rate_limiter = _RateLimiter()
@@ -234,7 +247,12 @@ def extract_evidence(
         return []
 
     client = _get_openai_client()
-    if client is None or not _rate_limiter.acquire():
+    if client is None:
+        return _fallback_extract(ticker, category, bundle)
+    # Wait for rate budget instead of falling back just because we're pacing —
+    # a fallback here means shallow, low-confidence evidence for this ticker.
+    if not _rate_limiter.acquire(block=True):
+        LOG.warning("extractor: no LLM budget for %s after waiting; using fallback", ticker)
         return _fallback_extract(ticker, category, bundle)
 
     try:

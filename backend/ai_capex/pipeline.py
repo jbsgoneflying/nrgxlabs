@@ -25,6 +25,19 @@ from backend.ai_capex.models import CapexEvidence, TickerVerdict
 LOG = logging.getLogger("ai_capex.pipeline")
 
 
+def _has_llm_grade(evidence: List[CapexEvidence]) -> bool:
+    """True if the trail has at least one LLM-extracted (non-fallback) item.
+
+    Keyword-fallback evidence caps at confidence 0.35 and the deterministic
+    fundamentals item is its own (always-present) thing, so a real LLM pass is
+    the only thing that yields a non-fundamental item at confidence >= 0.5.
+    """
+    return any(
+        getattr(e, "confidence", 0.0) >= 0.5 and e.source_type != models.SOURCE_FUNDAMENTAL
+        for e in (evidence or [])
+    )
+
+
 def _summarize(verdicts: List[TickerVerdict]) -> Dict[str, Any]:
     by_label: Dict[str, int] = {}
     by_category: Dict[str, int] = {}
@@ -135,6 +148,24 @@ def build_scan(
             web_count = len(web_ev)
         except Exception as exc:  # pragma: no cover - defensive
             LOG.warning("ai_capex: web agent failed: %s", exc)
+
+    # Reconcile with the previously-stored trail: if this run produced only
+    # keyword-fallback evidence for a ticker (e.g. an LLM outage / rate-limit
+    # storm) but we already have a richer LLM extraction on file, keep the prior
+    # trail. This protects both the score and the persisted audit trail from a
+    # degraded run silently overwriting good data.
+    s_read = store_obj or (store._store() if persist else None)
+    if s_read is not None:
+        kept = 0
+        for ticker, new_ev in list(evidence_by_ticker.items()):
+            if _has_llm_grade(new_ev):
+                continue
+            prior = store.get_evidence(ticker, store=s_read) or []
+            if _has_llm_grade(prior):
+                evidence_by_ticker[ticker] = prior
+                kept += 1
+        if kept:
+            LOG.warning("ai_capex: kept prior LLM evidence for %d ticker(s) (this run was fallback-grade)", kept)
 
     # Persist evidence per ticker (audit trail) + the market context snapshot so
     # a between-builds rescore can reproduce positioning/gaps faithfully.
