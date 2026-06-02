@@ -43,6 +43,15 @@
       '<div class="acBar"><div class="acBarFill" style="width:' + pct.toFixed(0) + '%"></div></div></div>';
   }
 
+  // Independent sources corroborating the read: 0 = propagated/second-order,
+  // 1 = single-source (treat with caution), 2+ = corroborated.
+  function srcCell(n) {
+    n = n || 0;
+    if (n <= 0) return '<span class="acMuted" title="No own-evidence sources — second-order/propagated read">—</span>';
+    if (n === 1) return '<span style="color:#8a5a00;font-weight:700" title="Single source — not yet independently corroborated">1</span>';
+    return '<span class="acGap--pos" title="' + n + ' independent sources agree">' + n + "</span>";
+  }
+
   function renderBanner(p) {
     var s = p.summary || {};
     $("acTotal").textContent = s.total != null ? s.total : 0;
@@ -103,14 +112,16 @@
     var ev = (v.topEvidence || []).map(evidenceRow).join("") || '<span class="acMuted">No evidence captured.</span>';
     var ideas = (v.tradeIdeas || []).map(ideaRow).join("") || '<span class="acMuted">No trade expression.</span>';
     var mc = v.marketContext || {};
+    var srcN = v.independentSources || 0;
     var ctx = [
+      "corroboration: " + srcN + " independent source" + (srcN === 1 ? "" : "s"),
       mc.momentum3mPct != null ? "3m mom " + num(mc.momentum3mPct, 0) + "%" : null,
       mc.momentum6mPct != null ? "6m mom " + num(mc.momentum6mPct, 0) + "%" : null,
       mc.pe != null ? "P/E " + num(mc.pe, 0) : null,
       mc.ratingDrift != null ? "rating drift " + (mc.ratingDrift > 0 ? "+" : "") + mc.ratingDrift : null,
       mc.marketPositioning != null ? "positioning " + num(mc.marketPositioning, 0) : null,
     ].filter(Boolean).join(" · ");
-    return '<tr class="acDetail"><td colspan="8">' +
+    return '<tr class="acDetail"><td colspan="9">' +
       '<div class="acRationale">' + esc(v.rationale || "") + (ctx ? '<div class="acEvMeta" style="margin-top:6px">' + esc(ctx) + "</div>" : "") + "</div>" +
       '<div class="acDetailGrid">' +
         "<div><div class=\"acStatLabel\" style=\"margin-bottom:6px\">Evidence (top)</div>" + ev + "</div>" +
@@ -143,7 +154,8 @@
         '<td class="acNum">' + realityCell(v.realityScore) + "</td>" +
         '<td class="acNum">' + gapCell(v.consensusGap) + "</td>" +
         '<td class="acNum">' + num(v.conviction, 0) + "</td>" +
-        '<td class="acNum">' + (v.evidenceCount || 0) + "</td>";
+        '<td class="acNum">' + (v.evidenceCount || 0) + "</td>" +
+        '<td class="acNum">' + srcCell(v.independentSources) + "</td>";
       tr.addEventListener("click", function () { toggle(v.ticker, tr); });
       body.appendChild(tr);
       if (state.open[v.ticker]) {

@@ -200,6 +200,7 @@ class TickerVerdict:
     direction: str = "neutral"     # long | short | neutral
     conviction: float = 0.0        # 0..100 — for Desk Brain sizing
     evidence_count: int = 0
+    corroboration: int = 0         # distinct INDEPENDENT sources behind the positive read
     evidence_ids: List[str] = field(default_factory=list)
     top_evidence: List[dict] = field(default_factory=list)
     trade_ideas: List[dict] = field(default_factory=list)
@@ -226,6 +227,7 @@ class TickerVerdict:
             "direction": self.direction,
             "conviction": round(self.conviction, 1),
             "evidenceCount": self.evidence_count,
+            "independentSources": self.corroboration,
             "evidenceIds": list(self.evidence_ids),
             "topEvidence": list(self.top_evidence),
             "tradeIdeas": list(self.trade_ideas),

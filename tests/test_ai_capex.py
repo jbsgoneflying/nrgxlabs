@@ -25,6 +25,23 @@ def _ev(signal_type, *, mag=0.9, conf=0.9, timing=models.TIMING_NEAR,
     )
 
 
+def _multi_pos(n=6, *, ticker="NVDA", category="semis", mag=0.95, conf=0.9,
+               timing=models.TIMING_NEAR, signal=models.SIG_CAPEX_UP):
+    """Positive evidence spread across INDEPENDENT sources (issuer transcript,
+    distinct news/web domains, fundamentals) so corroboration is satisfied."""
+    srcs = [models.SOURCE_TRANSCRIPT, models.SOURCE_NEWS, models.SOURCE_WEB, models.SOURCE_FUNDAMENTAL]
+    out = []
+    for i in range(n):
+        src = srcs[i % len(srcs)]
+        url = (f"http://src{i}.example.com/a" if src in (models.SOURCE_NEWS, models.SOURCE_WEB) else "")
+        out.append(CapexEvidence(
+            ticker=ticker, category=category, source_type=src, signal_type=signal,
+            claim=f"{signal} {i}", magnitude=mag, confidence=conf,
+            timing=timing, polarity=1, source_url=url,
+        ))
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Models + taxonomy
 # ---------------------------------------------------------------------------
@@ -83,10 +100,10 @@ def test_neutral_when_no_evidence():
 
 
 def test_real_beneficiary_when_priced():
-    evid = [_ev(models.SIG_CAPEX_UP, mag=0.95, conf=0.9) for _ in range(5)]
-    # Mildly negative momentum => positioning ~ low-40s => gap below threshold.
+    evid = _multi_pos(6)  # corroborated across independent sources
     v = score.score_ticker("NVDA", "semis", evid, {"momentum6mPct": -10}, flags=FLAGS)
     assert v.reality_score >= FLAGS.AI_CAPEX_REALITY_REAL_MIN
+    assert v.corroboration >= 2
     assert v.label in (models.LABEL_REAL, models.LABEL_CONSENSUS_NOT_UPDATED)
     assert v.direction == "long"
     assert v.is_actionable
@@ -111,6 +128,24 @@ def test_overhyped_when_hype_and_priced():
     assert v.hype_ratio >= FLAGS.AI_CAPEX_HYPE_RATIO_MAX
 
 
+def test_single_source_is_discounted_vs_corroborated():
+    # Same item count + strength, but one collapses to a single issuer voice
+    # (all transcript) -> lower reality + corroboration than the multi-source one.
+    single = [_ev(models.SIG_CAPEX_UP, mag=0.95, conf=0.9) for _ in range(6)]
+    multi = _multi_pos(6)
+    vs = score.score_ticker("NVDA", "semis", single, {"momentum6mPct": -10}, flags=FLAGS)
+    vm = score.score_ticker("NVDA", "semis", multi, {"momentum6mPct": -10}, flags=FLAGS)
+    assert vs.corroboration == 1
+    assert vm.corroboration >= 2
+    assert vs.reality_score < vm.reality_score
+
+
+def test_corroboration_surfaced_in_dict():
+    v = score.score_ticker("NVDA", "semis", _multi_pos(4), {"momentum6mPct": -30}, flags=FLAGS)
+    d = v.to_dict()
+    assert "independentSources" in d and d["independentSources"] >= 2
+
+
 def test_overhyped_by_positioning_without_hype():
     # Thin-but-real capex (reality < real_min) while the market is positioned
     # euphorically -> overhyped via the positioning>>reality gap, no hype tag.
@@ -125,9 +160,12 @@ def test_overhyped_by_positioning_without_hype():
 
 
 def test_delayed_when_delay_dominates():
-    pos = [_ev(models.SIG_CAPEX_UP, mag=0.9, conf=0.9, timing=models.TIMING_MID) for _ in range(6)]
-    dly = [_ev(models.SIG_DELAY, mag=0.8, conf=0.8, timing=models.TIMING_NEAR,
-               polarity=-1, source=models.SOURCE_NEWS) for _ in range(4)]
+    pos = _multi_pos(10, ticker="VST", category="power_infrastructure",
+                     mag=0.9, conf=0.9, timing=models.TIMING_MID)
+    dly = [CapexEvidence(ticker="VST", category="power_infrastructure", source_type=models.SOURCE_NEWS,
+                         signal_type=models.SIG_DELAY, claim=f"delay {i}", magnitude=0.85, confidence=0.85,
+                         timing=models.TIMING_NEAR, polarity=-1, source_url=f"http://d{i}.example.com")
+           for i in range(6)]
     v = score.score_ticker("VST", "power_infrastructure", pos + dly, {}, flags=FLAGS)
     assert v.label == models.LABEL_DELAYED
     assert v.direction == "neutral"
@@ -148,8 +186,7 @@ def test_scoring_is_deterministic():
 
 def test_second_order_winner_propagation():
     # Strong, corroborated real capex at a DRIVER (cloud) name...
-    driver = [_ev(models.SIG_CAPEX_UP, mag=0.95, conf=0.9, ticker="MSFT", category="cloud_providers")
-              for _ in range(6)]
+    driver = _multi_pos(6, ticker="MSFT", category="cloud_providers")
     evidence_by_ticker = {
         "MSFT": driver,
         "VRT": [],   # second-order name with no own evidence yet

@@ -22,9 +22,15 @@ from __future__ import annotations
 
 import math
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from backend.ai_capex import models
 from backend.ai_capex.models import CapexEvidence, TickerVerdict
+
+# Substrings that mark a web source as the issuer's OWN material (IR decks, SEC
+# filings) rather than an independent third party. These corroborate the call
+# but are the same "voice" as the transcript, so they don't add independence.
+_ISSUER_HOST_HINTS = ("q4cdn", "q4inc", "sec.gov", "edgar")
 
 # Evidence weighting knobs.
 _TIMING_WEIGHT = {models.TIMING_NEAR: 1.0, models.TIMING_MID: 0.6, models.TIMING_FAR: 0.3}
@@ -69,6 +75,34 @@ def _weight(e: CapexEvidence) -> float:
     )
 
 
+def _independence_key(e: CapexEvidence) -> str:
+    """A stable key identifying the *independent voice* behind an evidence item.
+
+    Corroboration should reward independent confirmation, not how much one
+    source said. So all transcripts (and the issuer's own IR decks / SEC
+    filings) collapse to a single ``"issuer"`` voice; the fundamentals feed is
+    its own voice; and each distinct news outlet / third-party web domain
+    (ISO, FERC, county permits, media) counts separately.
+    """
+    st = e.source_type
+    if st == models.SOURCE_TRANSCRIPT:
+        return "issuer"
+    if st == models.SOURCE_FUNDAMENTAL:
+        return "fundamental"
+    url = (e.source_url or "").strip().lower()
+    if url and any(h in url for h in _ISSUER_HOST_HINTS):
+        return "issuer"
+    host = ""
+    if url:
+        try:
+            host = (urlparse(url).netloc or "").lower()
+        except Exception:
+            host = ""
+        if host.startswith("www."):
+            host = host[4:]
+    return (st + ":" + host) if host else st
+
+
 # ---------------------------------------------------------------------------
 # Market positioning (the "what's already priced in" side of the gap)
 # ---------------------------------------------------------------------------
@@ -111,7 +145,7 @@ def market_positioning_score(ctx: Dict[str, Any]) -> float:
 def _evidence_breakdown(evidence: List[CapexEvidence]) -> Dict[str, Any]:
     pos_mass = neg_mass = delay_mass = hype_mass = 0.0
     pos_count = 0
-    pos_sources = set()
+    pos_voices = set()
     near_pos = far_pos = 0.0
     for e in evidence:
         w = _weight(e)
@@ -123,7 +157,7 @@ def _evidence_breakdown(evidence: List[CapexEvidence]) -> Dict[str, Any]:
         elif e.is_hard_positive:
             pos_mass += w
             pos_count += 1
-            pos_sources.add(e.source_type)
+            pos_voices.add(_independence_key(e))
             if e.timing == models.TIMING_NEAR:
                 near_pos += w
             elif e.timing == models.TIMING_FAR:
@@ -136,7 +170,7 @@ def _evidence_breakdown(evidence: List[CapexEvidence]) -> Dict[str, Any]:
     return {
         "pos_mass": pos_mass, "neg_mass": neg_mass, "delay_mass": delay_mass,
         "hype_mass": hype_mass, "pos_count": pos_count,
-        "distinct_pos_sources": len(pos_sources),
+        "independent_pos_sources": len(pos_voices),
         "near_pos": near_pos, "far_pos": far_pos,
     }
 
@@ -171,8 +205,12 @@ def score_ticker(
         verdict.market_context = ctx
         return verdict
 
-    # Corroboration: shrink positive credit until enough independent items exist.
-    corr_factor = _clamp(bd["pos_count"] / max(1, min_corr), 0.30, 1.0)
+    # Corroboration: shrink positive credit until enough INDEPENDENT sources
+    # agree. A single dense earnings call (one "issuer" voice) is discounted no
+    # matter how many claims it makes; full credit needs >= min_corr independent
+    # voices (e.g. the call + a news outlet, or + a FERC/ISO filing).
+    indep = int(bd["independent_pos_sources"])
+    corr_factor = _clamp(0.55 + 0.45 * indep / max(1, min_corr), 0.55, 1.0)
     pos = pos_mass * corr_factor
 
     hype_ratio = hype_mass / (hype_mass + pos + 1e-9)
@@ -193,6 +231,7 @@ def score_ticker(
     verdict.reality_score = round(reality, 1)
     verdict.consensus_gap = gap
     verdict.hype_ratio = round(hype_ratio, 3)
+    verdict.corroboration = indep
     verdict.market_context = {**ctx, "marketPositioning": positioning}
     verdict.top_evidence = [
         e.to_dict() for e in sorted(evidence, key=_weight, reverse=True)[:5]
@@ -206,6 +245,8 @@ def score_ticker(
     verdict.label = label
     verdict.direction = direction
     verdict.conviction = round(conviction, 1)
+    if label != models.LABEL_NEUTRAL:
+        rationale += f" Corroboration: {indep} independent source{'' if indep == 1 else 's'}."
     verdict.rationale = rationale
     return verdict
 

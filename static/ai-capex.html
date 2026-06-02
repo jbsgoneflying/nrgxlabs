@@ -47,7 +47,7 @@
       .acCard { padding: 14px; border-radius: var(--radius-card); border: 1px solid var(--border); background: rgba(255,255,255,0.78); }
       /* Horizontal scroll wrapper so no column is ever clipped on narrow viewports. */
       .acTableWrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-      .acTable { width: 100%; min-width: 860px; border-collapse: collapse; font-size: 13px; }
+      .acTable { width: 100%; min-width: 920px; border-collapse: collapse; font-size: 13px; }
       .acTable th, .acTable td { text-align: left; padding: 9px 10px; border-bottom: 1px solid rgba(11,11,15,0.07); vertical-align: top; }
       .acTable th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: rgba(11,11,15,0.5); }
       .acTable tbody tr.acRow { cursor: pointer; }
@@ -142,7 +142,7 @@
               <tr>
                 <th>Ticker</th><th>Category</th><th>Label</th><th>Dir</th>
                 <th class="acNum">Reality</th><th class="acNum">Consensus gap</th><th class="acNum">Conv</th>
-                <th class="acNum">Evidence</th>
+                <th class="acNum">Evidence</th><th class="acNum" title="Independent sources corroborating the read">Sources</th>
               </tr>
             </thead>
             <tbody id="acBody"></tbody>
@@ -163,6 +163,6 @@
     </main>
 
     <script src="/static/nav.js?v=14"></script>
-    <script src="/static/ai-capex.js?v=2"></script>
+    <script src="/static/ai-capex.js?v=3"></script>
   </body>
 </html>
