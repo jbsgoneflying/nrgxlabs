@@ -212,9 +212,28 @@ def test_extract_empty_bundle_returns_empty():
     assert extract.extract_evidence("NVDA", "semis", {"transcripts": [], "news": []}) == []
 
 
-def test_web_agent_disabled_by_default(monkeypatch):
-    # Default flag is OFF -> returns [] without any network call.
-    monkeypatch.setattr(agent, "_get_openai_client", lambda: (_ for _ in ()).throw(AssertionError("should not be called")))
+class _StubFlags:
+    AI_CAPEX_ENABLE_WEB_AGENT = False
+    AI_CAPEX_WEB_AGENT_MODEL = "gpt-5.5"
+    AI_CAPEX_MAX_WEB_CALLS = 12
+
+
+def test_web_agent_skips_when_flag_off(monkeypatch):
+    # When the flag is OFF it must return [] without touching the network.
+    import backend.config as cfg
+    monkeypatch.setattr(cfg, "get_flags", lambda: _StubFlags())
+    monkeypatch.setattr(agent, "_get_openai_client",
+                        lambda: (_ for _ in ()).throw(AssertionError("client must not be built when flag off")))
+    assert agent.run_web_agent(["NVDA"]) == []
+
+
+def test_web_agent_graceful_when_no_client(monkeypatch):
+    # Flag ON but no usable client/Responses API -> empty, never raises.
+    class _OnFlags(_StubFlags):
+        AI_CAPEX_ENABLE_WEB_AGENT = True
+    import backend.config as cfg
+    monkeypatch.setattr(cfg, "get_flags", lambda: _OnFlags())
+    monkeypatch.setattr(agent, "_get_openai_client", lambda: None)
     assert agent.run_web_agent(["NVDA"]) == []
 
 

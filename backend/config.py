@@ -590,18 +590,19 @@ class FeatureFlags:
     DESK_BRAIN_MAX_CONCURRENT_PER_SLEEVE: int = 5     # per-sleeve concurrency cap
     DESK_BRAIN_TILT_MAX_PCT: float = 20.0             # clamp on LLM sleeve tilt (+/- %)
 
-    # --- Engine 17: AI Capex Reality Engine (default OFF until validated) ---
+    # --- Engine 17: AI Capex Reality Engine ---
     # LLM-evidence pipeline that classifies AI-capex tickers (Real / Delayed /
     # Overhyped / 2nd-order winner-loser / Consensus-not-updated). The LLM only
     # extracts + sources evidence; the Reality Score, Consensus Gap and labels
     # are deterministic, so outputs are reproducible from the evidence table.
-    # Default OFF (new decisioning logic) per the config doc rule above.
-    ENABLE_AI_CAPEX: bool = False
+    # Turned ON at desk request (2026-06): the engine is gated from real sizing
+    # by a thin Desk-Brain edge prior + the paper-trade gate regardless.
+    ENABLE_AI_CAPEX: bool = True
     AI_CAPEX_MODEL: str = "gpt-5.5"                   # extractor + synthesis model
     AI_CAPEX_CACHE_TTL_S: int = 6 * 60 * 60           # 6h serve cache for the scan
     AI_CAPEX_EVIDENCE_TTL_S: int = 14 * 86400         # 14d Redis TTL for evidence
-    AI_CAPEX_TRANSCRIPT_QUARTERS: int = 2             # recent quarters per ticker
-    AI_CAPEX_NEWS_LOOKBACK_DAYS: int = 30             # news window for evidence
+    AI_CAPEX_TRANSCRIPT_QUARTERS: int = 2             # recent quarters per ticker (~6mo guidance)
+    AI_CAPEX_NEWS_LOOKBACK_DAYS: int = 45             # news window — captures the last earnings cycle
     AI_CAPEX_NEWS_PER_TICKER: int = 12                # max headlines fed to extractor
     AI_CAPEX_MAX_WORKERS: int = 6                     # parallel ingest/extract workers
     AI_CAPEX_LLM_MAX_CALLS_PER_MINUTE: int = 20       # extractor rate limit
@@ -611,8 +612,8 @@ class FeatureFlags:
     AI_CAPEX_HYPE_RATIO_MAX: float = 0.45             # hype share above this -> overhyped
     # Tier-2 agentic web sourcing (ISO queues / permits / FERC). New platform
     # capability: OpenAI Responses API + web_search. Batch-only, never on a
-    # request path. Default OFF — costs money + latency.
-    AI_CAPEX_ENABLE_WEB_AGENT: bool = False
+    # request path; hard-capped per run. ON at desk request.
+    AI_CAPEX_ENABLE_WEB_AGENT: bool = True
     AI_CAPEX_WEB_AGENT_MODEL: str = "gpt-5.5"
     AI_CAPEX_MAX_WEB_CALLS: int = 12                  # hard cap on agent calls per run
 
@@ -1074,13 +1075,13 @@ class FeatureFlags:
             DESK_BRAIN_MAX_CONCURRENT_PER_SLEEVE=_get_int("DESK_BRAIN_MAX_CONCURRENT_PER_SLEEVE", 5),
             DESK_BRAIN_TILT_MAX_PCT=_get_float("DESK_BRAIN_TILT_MAX_PCT", 20.0),
 
-            # --- Engine 17: AI Capex Reality Engine ---
-            ENABLE_AI_CAPEX=_get_bool("ENABLE_AI_CAPEX", False),
+            # --- Engine 17: AI Capex Reality Engine (ON at desk request 2026-06) ---
+            ENABLE_AI_CAPEX=_get_bool("ENABLE_AI_CAPEX", True),
             AI_CAPEX_MODEL=os.getenv("AI_CAPEX_MODEL", "gpt-5.5"),
             AI_CAPEX_CACHE_TTL_S=_get_int("AI_CAPEX_CACHE_TTL_S", 6 * 60 * 60),
             AI_CAPEX_EVIDENCE_TTL_S=_get_int("AI_CAPEX_EVIDENCE_TTL_S", 14 * 86400),
             AI_CAPEX_TRANSCRIPT_QUARTERS=_get_int("AI_CAPEX_TRANSCRIPT_QUARTERS", 2),
-            AI_CAPEX_NEWS_LOOKBACK_DAYS=_get_int("AI_CAPEX_NEWS_LOOKBACK_DAYS", 30),
+            AI_CAPEX_NEWS_LOOKBACK_DAYS=_get_int("AI_CAPEX_NEWS_LOOKBACK_DAYS", 45),
             AI_CAPEX_NEWS_PER_TICKER=_get_int("AI_CAPEX_NEWS_PER_TICKER", 12),
             AI_CAPEX_MAX_WORKERS=_get_int("AI_CAPEX_MAX_WORKERS", 6),
             AI_CAPEX_LLM_MAX_CALLS_PER_MINUTE=_get_int("AI_CAPEX_LLM_MAX_CALLS_PER_MINUTE", 20),
@@ -1088,7 +1089,7 @@ class FeatureFlags:
             AI_CAPEX_REALITY_REAL_MIN=_get_float("AI_CAPEX_REALITY_REAL_MIN", 60.0),
             AI_CAPEX_GAP_THRESHOLD=_get_float("AI_CAPEX_GAP_THRESHOLD", 35.0),
             AI_CAPEX_HYPE_RATIO_MAX=_get_float("AI_CAPEX_HYPE_RATIO_MAX", 0.45),
-            AI_CAPEX_ENABLE_WEB_AGENT=_get_bool("AI_CAPEX_ENABLE_WEB_AGENT", False),
+            AI_CAPEX_ENABLE_WEB_AGENT=_get_bool("AI_CAPEX_ENABLE_WEB_AGENT", True),
             AI_CAPEX_WEB_AGENT_MODEL=os.getenv("AI_CAPEX_WEB_AGENT_MODEL", "gpt-5.5"),
             AI_CAPEX_MAX_WEB_CALLS=_get_int("AI_CAPEX_MAX_WEB_CALLS", 12),
 

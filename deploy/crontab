@@ -13,6 +13,9 @@
 # Engine 6 (backend: engine7_pairs): nightly LLM theme review
 45 9 * * 1-5 curl -sf -X POST http://localhost:8000/api/engine7-pairs/nightly-review >> /var/log/cron.log 2>&1
 
+# Engine 17 (backend: ai_capex): AI Capex Reality Engine — full daily scan (Tier-1 ingest + LLM extract + Tier-2 web agent -> Redis). Run as a script (not HTTP) so the ~70-ticker LLM pass isn't bound by the request timeout.
+0 8 * * 1-5 cd /app && python3 scripts/refresh_ai_capex.py >> /var/log/cron.log 2>&1
+
 # Engine 12 (backend: engine12_vix_fade): VIX spike monitor (every 15 min during US market hours, 9am-9pm UTC)
 */15 9-21 * * 1-5 cd /app && python3 scripts/engine12_spike_monitor.py >> /var/log/cron.log 2>&1
 
