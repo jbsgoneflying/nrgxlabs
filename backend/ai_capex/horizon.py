@@ -32,8 +32,8 @@ LOG = logging.getLogger("ai_capex.horizon")
 # closes when consensus updates, or the overhyped name disappoints on guidance.
 _CATALYST_LABELS = {models.LABEL_CONSENSUS_NOT_UPDATED, models.LABEL_OVERHYPED}
 
-# ORATS cores fields we use. Kept to widely-available ones; parsed defensively.
-_CORE_FIELDS = "ticker,nextErn,nextErnTod,iv30d,iv60d,iv90d,ivRank"
+# Term-IV cores fields (for the structural implied move when there's no event).
+_IV_FIELDS = "ticker,iv30d,iv60d,iv90d,ivRank"
 
 
 def _f(v: Any) -> Optional[float]:
@@ -46,33 +46,50 @@ def _f(v: Any) -> Optional[float]:
 
 
 def fetch_orats_timing(ticker: str, orats_client: Any) -> Dict[str, Any]:
-    """Pull next-earnings date + implied-vol term points from ORATS cores.
+    """Pull the next-earnings catalyst + implied moves from ORATS.
+
+    The catalyst date comes via the platform's shared resolver, which tries
+    ORATS ``/cores`` ``nextErn`` and then falls back to scanning
+    ``/hist/earnings`` for the next future date — ``nextErn`` alone is often
+    subscription-gated/stale, so the fallback is what actually lands the date.
+    That resolver also returns ``impErnMv`` (the implied *earnings* move), which
+    is the right event-specific number for the catalyst comparison; term IV
+    (``iv30d`` …) is kept only for the no-event structural fallback.
 
     Returns ``{}`` when ORATS is unavailable or the name isn't covered.
     """
     if orats_client is None:
         return {}
+    out: Dict[str, Any] = {}
+
     try:
-        resp = orats_client.cores(ticker=str(ticker).upper(), fields=_CORE_FIELDS)
-        rows = getattr(resp, "rows", None) or []
-        if not rows or not isinstance(rows[0], dict):
-            return {}
-        r = rows[0]
-        out: Dict[str, Any] = {}
-        nxt = str(r.get("nextErn") or "").strip()[:10]
-        if nxt:
-            out["nextErn"] = nxt
-        tod = str(r.get("nextErnTod") or "").strip()
-        if tod:
-            out["nextErnTod"] = tod
-        for k in ("iv30d", "iv60d", "iv90d", "ivRank"):
-            val = _f(r.get(k))
-            if val is not None:
-                out[k] = val
-        return out
+        from backend.engine8_e1_bridge import resolve_next_earnings
+        ern = resolve_next_earnings(orats_client, str(ticker).upper())
+        if ern:
+            if ern.get("earnings_date"):
+                out["nextErn"] = str(ern["earnings_date"])[:10]
+            if ern.get("days_to_earnings") is not None:
+                out["daysToNextErn"] = int(ern["days_to_earnings"])
+            if ern.get("timing"):
+                out["nextErnTod"] = ern["timing"]
+            if ern.get("expected_move_pct") is not None:
+                out["impErnMvPct"] = float(ern["expected_move_pct"])
     except Exception as exc:  # pragma: no cover - defensive
-        LOG.debug("orats timing fetch failed for %s: %s", ticker, exc)
-        return {}
+        LOG.debug("orats earnings resolve failed for %s: %s", ticker, exc)
+
+    try:
+        resp = orats_client.cores(ticker=str(ticker).upper(), fields=_IV_FIELDS)
+        rows = getattr(resp, "rows", None) or []
+        if rows and isinstance(rows[0], dict):
+            r = rows[0]
+            for k in ("iv30d", "iv60d", "iv90d", "ivRank"):
+                val = _f(r.get(k))
+                if val is not None:
+                    out[k] = val
+    except Exception as exc:  # pragma: no cover - defensive
+        LOG.debug("orats iv fetch failed for %s: %s", ticker, exc)
+
+    return out
 
 
 def _iv_decimal(orats: Dict[str, Any], days: Optional[int]) -> Optional[float]:
@@ -199,10 +216,16 @@ def derive_horizon(
         out["band"] = _structural_band(timing_mix)
         out["basis"] = "structural"
 
-    # Implied move (to the catalyst window or the band's nominal horizon) vs the
-    # thesis target, so the desk sees whether the move is underpriced.
-    nominal_days = days if days is not None else (35 if out["basis"] != "structural" else 63)
-    implied = _implied_move_pct(orats, nominal_days)
+    # Implied move vs thesis target, so the desk sees whether the move is
+    # underpriced. For catalyst-driven names prefer the ORATS *implied earnings
+    # move* (the single-event jump) — the right comparison; otherwise fall back
+    # to a term-IV move over the band's nominal horizon.
+    implied: Optional[float] = None
+    if catalyst_driven and orats.get("impErnMvPct") is not None:
+        implied = round(float(orats["impErnMvPct"]), 1)
+    if implied is None:
+        nominal_days = days if days is not None else (35 if out["basis"] != "structural" else 63)
+        implied = _implied_move_pct(orats, nominal_days)
     thesis = _thesis_move_pct(verdict)
     if implied is not None:
         out["impliedMovePct"] = implied

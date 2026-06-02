@@ -430,17 +430,33 @@ def test_horizon_ignores_stale_earnings_date():
 
 
 def test_fetch_orats_timing_parses_cores():
+    # Far-future date so it's always "next earnings" regardless of wall clock.
     class _Resp:
-        rows = [{"ticker": "NVDA", "nextErn": "2026-08-14", "nextErnTod": "amc", "iv30d": 0.5, "ivRank": 42}]
+        rows = [{"ticker": "NVDA", "nextErn": "2099-08-14", "nextErnTod": "amc",
+                 "impErnMv": 0.085, "iv30d": 0.5, "ivRank": 42}]
 
     class _Client:
         def cores(self, *, ticker, fields):
             return _Resp()
 
+        def hist_earnings(self, ticker):  # pragma: no cover - resolver fallback unused here
+            return _Resp.__class__("R", (), {"rows": []})()
+
     out = _horizon.fetch_orats_timing("NVDA", _Client())
-    assert out["nextErn"] == "2026-08-14"
-    assert out["iv30d"] == 0.5
+    assert out["nextErn"] == "2099-08-14"          # via the shared resolver (cores nextErn)
+    assert out["impErnMvPct"] == 8.5               # implied earnings move surfaced as %
+    assert out["iv30d"] == 0.5                      # term IV still captured for fallback
     assert _horizon.fetch_orats_timing("NVDA", None) == {}
+
+
+def test_horizon_uses_event_implied_move_for_catalyst_labels():
+    today = _dt.date(2026, 6, 1)
+    v = _actionable(models.LABEL_CONSENSUS_NOT_UPDATED, gap=40.0)
+    # Event move (impErnMv) should win over the inflated term-IV move.
+    orats = {"nextErn": "2026-06-15", "impErnMvPct": 6.0, "iv30d": 0.9}
+    h = _horizon.derive_horizon(v, orats, today=today)
+    assert h["impliedMovePct"] == 6.0
+    assert h["thesisMovePct"] == round(min(25.0, max(3.0, 40.0 * 0.22)), 1)
 
 
 # ---------------------------------------------------------------------------
