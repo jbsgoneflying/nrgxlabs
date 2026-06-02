@@ -7,16 +7,16 @@
   // Desk-trimmed nav: only the engines the desk uses daily.
   // Engine 1b (earnings-ic) and Engine 2b (ic-scenario page UX)
   // were retired; their simulator APIs remain active server-side.
+  // Desk Brain and Engine 4 (Red Dog) are hidden from the menu;
+  // their routes and APIs remain active server-side.
   var NAV_ITEMS = [
     { href: "/",                label: "Market Intelligence", desc: "Pre-open roadmap and cross-asset stress" },
-    { href: "/desk-brain",      label: "Desk Brain",  desc: "Meta-allocator: whole-book risk budget" },
-    { href: "/ai-capex",        label: "Engine 17", desc: "AI Capex Reality Engine" },
     { href: "/breach",          label: "Engine 1",  desc: "Earnings IC / IV-crush desktop" },
     { href: "/spx",             label: "Engine 2",  desc: "SPX/SPY iron condor scanner" },
-    { href: "/red-dog",         label: "Engine 4",  desc: "Mean-reversion scanner (Red Dog)" },
     { href: "/ichimoku",        label: "Engine 5",  desc: "Trend-continuation scanner (Ichimoku)" },
     { href: "/post-event",      label: "Engine 7",  desc: "Post-event trade extension evaluator" },
     { href: "/compare",         label: "Engine 10", desc: "Multi-ticker side-by-side" },
+    { href: "/ai-capex",        label: "Engine 17", desc: "AI Capex Reality Engine" },
   ];
 
   /* Which nav item matches the current URL? */
