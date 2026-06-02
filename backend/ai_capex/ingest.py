@@ -19,6 +19,9 @@ import datetime as dt
 import logging
 from typing import Any, Dict, List, Optional
 
+from backend.ai_capex import models
+from backend.ai_capex.models import CapexEvidence
+
 LOG = logging.getLogger("ai_capex.ingest")
 
 
@@ -187,6 +190,105 @@ def gather_ticker_text(
         "transcripts": _transcript_snippets(ticker, quarters=transcript_quarters),
         "news": _news_items(ticker, lookback_days=news_lookback_days, limit=news_limit),
     }
+
+
+# ---------------------------------------------------------------------------
+# Reported-capex evidence (the "is the money actually going out the door" tell)
+# ---------------------------------------------------------------------------
+
+
+def _cash_flow_quarterly(fundamentals: Dict[str, Any]) -> Dict[str, Any]:
+    """Best-effort extraction of EODHD's quarterly cash-flow block.
+
+    EODHD nests it at Financials -> Cash_Flow -> quarterly (a date-keyed dict).
+    Returns ``{}`` for any shape we don't recognise so callers stay defensive.
+    """
+    fin = fundamentals.get("Financials") if isinstance(fundamentals, dict) else None
+    if not isinstance(fin, dict):
+        return {}
+    cf = fin.get("Cash_Flow") if isinstance(fin.get("Cash_Flow"), dict) else {}
+    q = cf.get("quarterly") if isinstance(cf, dict) else {}
+    return q if isinstance(q, dict) else {}
+
+
+def capex_evidence_from_fundamentals(
+    ticker: str, category: str, fundamentals: Dict[str, Any],
+) -> Optional[CapexEvidence]:
+    """Turn the audited cash-flow capex trend into ONE hard, independent evidence item.
+
+    Management can talk up AI capex on the call, but the cash-flow statement
+    shows whether the spend is actually happening. Because the scorer counts the
+    ``fundamental`` feed as its own independent "voice" (distinct from the
+    issuer's earnings narrative), this is what lets a genuinely-real name clear
+    the corroboration bar — and what leaves an all-talk name stuck at one source.
+
+    We compare the latest reported quarter's capex to the same quarter a year
+    ago (4 periods back) to strip seasonality, and only emit a signal when the
+    move is material (>= 8% YoY in either direction). Returns ``None`` when the
+    data is missing, flat, or unparseable.
+    """
+    cf = _cash_flow_quarterly(fundamentals or {})
+    if not cf:
+        return None
+
+    rows: List[tuple] = []
+    for key, row in cf.items():
+        if not isinstance(row, dict):
+            continue
+        capex = _f(row.get("capitalExpenditures"))
+        if capex is None:
+            continue
+        when = str(row.get("date") or key)[:10]
+        rows.append((when, abs(capex)))  # EODHD reports capex as a negative outflow
+    if len(rows) < 5:
+        return None
+    rows.sort(reverse=True)  # newest first by date string
+
+    latest_date, latest = rows[0]
+    _, year_ago = rows[4]
+    if latest <= 0 or year_ago <= 0:
+        return None
+    yoy = latest / year_ago - 1.0
+    if abs(yoy) < 0.08:
+        return None  # roughly flat — no decisive "is it real" signal
+
+    bn = latest / 1e9
+    amount = f"${bn:.1f}B" if bn >= 1.0 else f"${latest/1e6:.0f}M"
+    # Material moves get more magnitude; audited numbers get high confidence.
+    magnitude = max(0.0, min(1.0, 0.45 + min(abs(yoy), 1.0) * 0.5))
+    rising = yoy >= 0.0
+    claim = (
+        f"Reported capex {amount} in the quarter ending {latest_date}, "
+        f"{yoy * 100:+.0f}% YoY (audited cash-flow statement) — "
+        f"{'spend is accelerating' if rising else 'spend is contracting'}."
+    )
+    return CapexEvidence(
+        ticker=ticker,
+        category=category,
+        source_type=models.SOURCE_FUNDAMENTAL,
+        signal_type=models.SIG_CAPEX_UP if rising else models.SIG_CAPEX_DOWN,
+        claim=claim,
+        date=latest_date,
+        source_title="Reported capex (cash-flow statement)",
+        magnitude=magnitude,
+        timing=models.TIMING_NEAR,   # already realised, not guidance
+        polarity=1 if rising else -1,
+        confidence=0.9,
+    )
+
+
+def fetch_capex_fundamental_evidence(ticker: str, category: str) -> Optional[CapexEvidence]:
+    """Fetch EODHD fundamentals and derive the reported-capex evidence item."""
+    ticker = str(ticker or "").upper().strip()
+    eodhd = _eodhd_optional()
+    if eodhd is None:
+        return None
+    try:
+        fund = eodhd.get_fundamentals(_eodhd_symbol(ticker)) or {}
+    except Exception as exc:  # pragma: no cover - defensive
+        LOG.debug("fundamentals capex fetch failed for %s: %s", ticker, exc)
+        return None
+    return capex_evidence_from_fundamentals(ticker, category, fund)
 
 
 # ---------------------------------------------------------------------------

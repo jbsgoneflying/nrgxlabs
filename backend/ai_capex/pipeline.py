@@ -101,7 +101,13 @@ def build_scan(
             ticker, transcript_quarters=quarters,
             news_lookback_days=news_days, news_limit=news_n,
         )
-        evid = extract.extract_evidence(ticker, cat, bundle, model=model)
+        evid = list(extract.extract_evidence(ticker, cat, bundle, model=model) or [])
+        # Hard cross-check: the audited cash-flow capex trend is an independent
+        # "voice" from the earnings narrative, so it's what corroborates (or
+        # exposes) a name whose only other evidence is its own call.
+        fund_ev = ingest.fetch_capex_fundamental_evidence(ticker, cat)
+        if fund_ev is not None:
+            evid.append(fund_ev)
         ctx = ingest.fetch_market_context(ticker)
         return ticker, evid, ctx
 

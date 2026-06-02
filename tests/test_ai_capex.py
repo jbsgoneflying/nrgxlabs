@@ -295,3 +295,88 @@ def test_web_agent_graceful_when_no_client(monkeypatch):
 def test_rescore_from_store_none_when_empty():
     # No Redis configured in tests -> no persisted evidence -> None.
     assert pipeline.rescore_from_store(flags=FLAGS, store_obj=None) is None
+
+
+# ---------------------------------------------------------------------------
+# Reported-capex fundamental evidence (the hard, independent cross-check)
+# ---------------------------------------------------------------------------
+
+
+def _fundamentals_with_capex(series):
+    """Build an EODHD-shaped fundamentals dict from {date: capex} (capex as the
+    raw negative cash outflow EODHD reports)."""
+    quarterly = {
+        d: {"date": d, "capitalExpenditures": str(v)} for d, v in series.items()
+    }
+    return {"Financials": {"Cash_Flow": {"quarterly": quarterly}}}
+
+
+def test_capex_fundamental_evidence_rising():
+    from backend.ai_capex import ingest
+    # 5 quarters, latest (-3.0B) is +50% vs the year-ago quarter (-2.0B).
+    fund = _fundamentals_with_capex({
+        "2026-04-30": -3_000_000_000, "2026-01-31": -2_800_000_000,
+        "2025-10-31": -2_500_000_000, "2025-07-31": -2_200_000_000,
+        "2025-04-30": -2_000_000_000,
+    })
+    ev = ingest.capex_evidence_from_fundamentals("NVDA", "semis", fund)
+    assert ev is not None
+    assert ev.source_type == models.SOURCE_FUNDAMENTAL
+    assert ev.signal_type == models.SIG_CAPEX_UP
+    assert ev.polarity == 1
+    assert ev.timing == models.TIMING_NEAR
+    assert ev.is_hard_positive
+    assert "+50%" in ev.claim and "$3.0B" in ev.claim
+
+
+def test_capex_fundamental_evidence_falling():
+    from backend.ai_capex import ingest
+    fund = _fundamentals_with_capex({
+        "2026-04-30": -1_000_000_000, "2026-01-31": -1_500_000_000,
+        "2025-10-31": -1_800_000_000, "2025-07-31": -1_900_000_000,
+        "2025-04-30": -2_000_000_000,
+    })
+    ev = ingest.capex_evidence_from_fundamentals("DELL", "hardware", fund)
+    assert ev is not None
+    assert ev.signal_type == models.SIG_CAPEX_DOWN
+    assert ev.polarity == -1
+    assert ev.is_hard_negative
+
+
+def test_capex_fundamental_evidence_flat_or_missing_returns_none():
+    from backend.ai_capex import ingest
+    # < 8% YoY move -> no decisive signal.
+    flat = _fundamentals_with_capex({
+        "2026-04-30": -2_050_000_000, "2026-01-31": -2_000_000_000,
+        "2025-10-31": -2_000_000_000, "2025-07-31": -2_000_000_000,
+        "2025-04-30": -2_000_000_000,
+    })
+    assert ingest.capex_evidence_from_fundamentals("X", "semis", flat) is None
+    # Too few periods to compute a YoY comparison.
+    assert ingest.capex_evidence_from_fundamentals("X", "semis", _fundamentals_with_capex(
+        {"2026-04-30": -3_000_000_000, "2026-01-31": -2_000_000_000})) is None
+    # Unrecognised shape -> None, never raises.
+    assert ingest.capex_evidence_from_fundamentals("X", "semis", {}) is None
+    assert ingest.capex_evidence_from_fundamentals("X", "semis", {"Financials": "nope"}) is None
+
+
+def test_fundamental_evidence_adds_independent_corroboration():
+    """A dense single-call read (one issuer voice) is single-source; adding the
+    audited reported-capex item gives it a second INDEPENDENT voice -> corroborated."""
+    from backend.ai_capex import ingest
+    call_only = [
+        _ev(models.SIG_DEMAND_PULL, source=models.SOURCE_TRANSCRIPT, claim=f"demand {i}")
+        for i in range(6)
+    ]
+    v_call = score.score_ticker("NVDA", "semis", call_only, {}, flags=FLAGS)
+    assert v_call.corroboration == 1  # all one "issuer" voice
+
+    fund = _fundamentals_with_capex({
+        "2026-04-30": -3_000_000_000, "2026-01-31": -2_800_000_000,
+        "2025-10-31": -2_500_000_000, "2025-07-31": -2_200_000_000,
+        "2025-04-30": -2_000_000_000,
+    })
+    fund_ev = ingest.capex_evidence_from_fundamentals("NVDA", "semis", fund)
+    v_both = score.score_ticker("NVDA", "semis", call_only + [fund_ev], {}, flags=FLAGS)
+    assert v_both.corroboration == 2
+    assert v_both.reality_score > v_call.reality_score  # corroboration lifts credit

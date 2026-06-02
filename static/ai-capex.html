@@ -47,14 +47,18 @@
       .acCard { padding: 14px; border-radius: var(--radius-card); border: 1px solid var(--border); background: rgba(255,255,255,0.78); }
       /* Horizontal scroll wrapper so no column is ever clipped on narrow viewports. */
       .acTableWrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-      .acTable { width: 100%; min-width: 920px; border-collapse: collapse; font-size: 13px; }
-      .acTable th, .acTable td { text-align: left; padding: 9px 10px; border-bottom: 1px solid rgba(11,11,15,0.07); vertical-align: top; }
+      /* table-layout: fixed + a colgroup pins every column width to the colgroup
+         (not to content), so expanding a row's evidence drill-down can never
+         reflow or widen the columns above it — the long claim text just wraps
+         inside the cell. */
+      .acTable { width: 100%; min-width: 920px; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+      .acTable th, .acTable td { text-align: left; padding: 9px 10px; border-bottom: 1px solid rgba(11,11,15,0.07); vertical-align: top; overflow-wrap: anywhere; }
       .acTable th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: rgba(11,11,15,0.5); }
       .acTable tbody tr.acRow { cursor: pointer; }
       .acTable tbody tr.acRow:hover { background: rgba(11,11,15,0.025); }
       .acNum { text-align: right; font-variant-numeric: tabular-nums; }
 
-      .acLabel { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+      .acLabel { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 800; line-height: 1.25; }
       .acLabel--real_beneficiary        { background: rgba(52,199,89,0.18);  color: #1f7a3d; }
       .acLabel--consensus_not_updated   { background: rgba(0,122,255,0.16);  color: #0a52b8; }
       .acLabel--delayed_beneficiary     { background: rgba(255,179,64,0.20); color: #8a5a00; }
@@ -80,8 +84,8 @@
       .acEv:last-child { border-bottom: none; }
       .acEvTop { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
       .acTag { display:inline-block; padding:1px 7px; border-radius:999px; font-size:10.5px; font-weight:700; background: rgba(11,11,15,0.06); color: rgba(11,11,15,0.6); }
-      .acEvClaim { margin-top: 3px; color: rgba(11,11,15,0.82); }
-      .acEvMeta { font-size: 11px; color: rgba(11,11,15,0.5); margin-top: 2px; }
+      .acEvClaim { margin-top: 3px; color: rgba(11,11,15,0.82); overflow-wrap: anywhere; }
+      .acEvMeta { font-size: 11px; color: rgba(11,11,15,0.5); margin-top: 2px; overflow-wrap: anywhere; }
       .acEvMeta a { color: #0a52b8; }
       .acIdea { font-size: 12.5px; margin: 4px 0; }
       .acRationale { font-size: 12px; color: rgba(11,11,15,0.7); margin-bottom: 10px; line-height: 1.45; }
@@ -138,6 +142,17 @@
       <div class="acCard" style="padding:0">
         <div class="acTableWrap">
           <table class="acTable" id="acTable">
+            <colgroup>
+              <col style="width:7%" />
+              <col style="width:17%" />
+              <col style="width:18%" />
+              <col style="width:6%" />
+              <col style="width:15%" />
+              <col style="width:11%" />
+              <col style="width:7%" />
+              <col style="width:9%" />
+              <col style="width:10%" />
+            </colgroup>
             <thead>
               <tr>
                 <th>Ticker</th><th>Category</th><th>Label</th><th>Dir</th>
@@ -163,6 +178,6 @@
     </main>
 
     <script src="/static/nav.js?v=14"></script>
-    <script src="/static/ai-capex.js?v=3"></script>
+    <script src="/static/ai-capex.js?v=4"></script>
   </body>
 </html>
