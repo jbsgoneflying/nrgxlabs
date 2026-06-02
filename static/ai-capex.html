@@ -45,7 +45,9 @@
       .acSectionHead h2 { font-size: 15px; font-weight: 800; margin: 0; }
 
       .acCard { padding: 14px; border-radius: var(--radius-card); border: 1px solid var(--border); background: rgba(255,255,255,0.78); }
-      .acTable { width: 100%; border-collapse: collapse; font-size: 13px; }
+      /* Horizontal scroll wrapper so no column is ever clipped on narrow viewports. */
+      .acTableWrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .acTable { width: 100%; min-width: 860px; border-collapse: collapse; font-size: 13px; }
       .acTable th, .acTable td { text-align: left; padding: 9px 10px; border-bottom: 1px solid rgba(11,11,15,0.07); vertical-align: top; }
       .acTable th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: rgba(11,11,15,0.5); }
       .acTable tbody tr.acRow { cursor: pointer; }
@@ -72,6 +74,8 @@
 
       .acDetail { background: rgba(11,11,15,0.02); }
       .acDetail td { padding: 12px 16px; }
+      .acDetailGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+      @media (max-width: 760px) { .acDetailGrid { grid-template-columns: 1fr; } }
       .acEv { font-size: 12.5px; padding: 8px 0; border-bottom: 1px dashed rgba(11,11,15,0.08); }
       .acEv:last-child { border-bottom: none; }
       .acEvTop { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -131,17 +135,19 @@
         <h2>Verdicts</h2>
         <span class="acMuted" id="acVerdictSub"></span>
       </div>
-      <div class="acCard" style="padding:0;overflow:hidden">
-        <table class="acTable" id="acTable">
-          <thead>
-            <tr>
-              <th>Ticker</th><th>Category</th><th>Label</th><th>Dir</th>
-              <th class="acNum">Reality</th><th class="acNum">Consensus gap</th><th class="acNum">Conv</th>
-              <th class="acNum">Evidence</th>
-            </tr>
-          </thead>
-          <tbody id="acBody"></tbody>
-        </table>
+      <div class="acCard" style="padding:0">
+        <div class="acTableWrap">
+          <table class="acTable" id="acTable">
+            <thead>
+              <tr>
+                <th>Ticker</th><th>Category</th><th>Label</th><th>Dir</th>
+                <th class="acNum">Reality</th><th class="acNum">Consensus gap</th><th class="acNum">Conv</th>
+                <th class="acNum">Evidence</th>
+              </tr>
+            </thead>
+            <tbody id="acBody"></tbody>
+          </table>
+        </div>
         <div class="acEmpty" id="acEmpty" style="display:none"></div>
       </div>
 
@@ -157,6 +163,6 @@
     </main>
 
     <script src="/static/nav.js?v=14"></script>
-    <script src="/static/ai-capex.js?v=1"></script>
+    <script src="/static/ai-capex.js?v=2"></script>
   </body>
 </html>

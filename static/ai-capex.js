@@ -112,7 +112,7 @@
     ].filter(Boolean).join(" · ");
     return '<tr class="acDetail"><td colspan="8">' +
       '<div class="acRationale">' + esc(v.rationale || "") + (ctx ? '<div class="acEvMeta" style="margin-top:6px">' + esc(ctx) + "</div>" : "") + "</div>" +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">' +
+      '<div class="acDetailGrid">' +
         "<div><div class=\"acStatLabel\" style=\"margin-bottom:6px\">Evidence (top)</div>" + ev + "</div>" +
         "<div><div class=\"acStatLabel\" style=\"margin-bottom:6px\">Trade ideas</div>" + ideas + "</div>" +
       "</div></td></tr>";
@@ -184,13 +184,11 @@
     setStatus(srcTxt + (when ? " · " + when : "") + (p.note ? " · " + p.note : ""));
   }
 
-  function load(forceRefresh) {
+  function load() {
     var btn = $("acRefresh");
     btn.disabled = true;
-    setStatus(forceRefresh ? "Rebuilding scan (ingest + LLM extract)…" : "Loading scan…");
-    var url = forceRefresh ? "/api/ai-capex/refresh" : "/api/ai-capex";
-    var opts = forceRefresh ? { method: "POST" } : { method: "GET" };
-    fetch(url, opts)
+    setStatus("Loading scan…");
+    fetch("/api/ai-capex")
       .then(function (res) {
         if (res.status === 404) throw new Error("AI Capex Reality Engine is disabled on this deployment.");
         if (!res.ok) throw new Error("HTTP " + res.status);
@@ -201,9 +199,53 @@
       .then(function () { btn.disabled = false; });
   }
 
+  // Full rebuild is the heavy ~70-ticker LLM pass — far longer than a request
+  // timeout — so kick it as a detached background job and poll /status instead
+  // of blocking the request (which would hang the button and eventually error).
+  function rebuild() {
+    var btn = $("acRefresh");
+    btn.disabled = true;
+    setStatus("Starting background rebuild (ingest + LLM extract + Tier-2 web)…");
+    fetch("/api/ai-capex/refresh?background=true", { method: "POST" })
+      .then(function (res) {
+        if (res.status === 404) throw new Error("AI Capex Reality Engine is disabled on this deployment.");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then(function () { pollRebuild(0); })
+      .catch(function (err) { setStatus(err.message || "Failed to start rebuild.", true); btn.disabled = false; });
+  }
+
+  function pollRebuild(tries) {
+    if (tries > 260) {  // ~35 min safety cap
+      setStatus("Rebuild is still running in the background — reload in a few minutes to see the fresh scan.");
+      $("acRefresh").disabled = false;
+      return;
+    }
+    fetch("/api/ai-capex/status")
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        var lr = s.lastRun || {};
+        if (s.backgroundRunning || lr.status === "running") {
+          var mins = Math.round((tries * 8 / 60) * 10) / 10;
+          setStatus("Rebuilding scan… ~" + mins + " min elapsed (ingest + LLM extract + Tier-2 web). You can leave this page.");
+          setTimeout(function () { pollRebuild(tries + 1); }, 8000);
+          return;
+        }
+        if (lr.status === "error") {
+          setStatus("Rebuild failed: " + (lr.error || "unknown error"), true);
+          $("acRefresh").disabled = false;
+          return;
+        }
+        setStatus("Rebuild complete — loading fresh scan…");
+        load();
+      })
+      .catch(function () { setTimeout(function () { pollRebuild(tries + 1); }, 8000); });
+  }
+
   function init() {
-    $("acRefresh").addEventListener("click", function () { load(true); });
-    load(false);
+    $("acRefresh").addEventListener("click", rebuild);
+    load();
   }
 
   if (document.readyState === "loading") {
