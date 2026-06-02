@@ -15,8 +15,11 @@ never stampedes the LLM.
 from __future__ import annotations
 
 import logging
+import pathlib
+import subprocess
+import sys
 import threading
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -27,6 +30,7 @@ LOG = logging.getLogger("ai_capex")
 router = APIRouter()
 
 _refresh_lock = threading.Lock()
+_bg_proc: Optional[subprocess.Popen] = None  # detached background rebuild, if any
 
 
 def _require_enabled() -> None:
@@ -88,9 +92,40 @@ def get_scan(refresh: bool = Query(False, description="Force a full rebuild (hea
 @router.post("/api/ai-capex/refresh")
 def refresh_scan(
     web_agent: bool = Query(True, description="Include Tier-2 web sourcing (if enabled in flags)"),
+    background: bool = Query(False, description="Spawn a detached rebuild and return immediately"),
 ):
-    """Force a full rebuild (ingest + LLM extract + score). Serialised."""
+    """Force a full rebuild (ingest + LLM extract + score).
+
+    ``background=true`` spawns ``scripts/refresh_ai_capex.py`` as a detached
+    subprocess and returns at once — the right way to kick the ~70-ticker LLM
+    pass, which far exceeds the request timeout and would otherwise pin a
+    gunicorn worker. Progress/health is then readable via ``GET .../status``.
+    Synchronous mode (default) is only safe for a small ``--tickers`` set.
+    """
     _require_enabled()
+
+    if background:
+        global _bg_proc
+        if _bg_proc is not None and _bg_proc.poll() is None:
+            return {"status": "running", "pid": _bg_proc.pid}
+        prev_rc = _bg_proc.poll() if _bg_proc is not None else None
+        repo_root = pathlib.Path(__file__).resolve().parents[2]
+        script = repo_root / "scripts" / "refresh_ai_capex.py"
+        cmd = [sys.executable, str(script)]
+        if not web_agent:
+            cmd.append("--no-web")
+        try:
+            _bg_proc = subprocess.Popen(
+                cmd, cwd=str(repo_root),
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,  # survive gunicorn worker recycling
+            )
+        except Exception as exc:
+            LOG.exception("ai_capex: background refresh spawn failed")
+            raise HTTPException(status_code=500, detail=f"spawn failed: {exc}")
+        return {"status": "started", "pid": _bg_proc.pid, "webAgent": web_agent,
+                "prevReturncode": prev_rc}
+
     with _refresh_lock:
         try:
             from backend.ai_capex import pipeline
@@ -100,6 +135,22 @@ def refresh_scan(
         except Exception as exc:
             LOG.exception("ai_capex: refresh failed")
             raise HTTPException(status_code=500, detail=f"AI Capex refresh failed: {exc}")
+
+
+@router.get("/api/ai-capex/status")
+def get_status():
+    """Last refresh-run health + whether a background rebuild is in flight."""
+    _require_enabled()
+    from backend.ai_capex import store
+
+    bg_alive = _bg_proc is not None and _bg_proc.poll() is None
+    return {
+        "engine": 17,
+        "lastRun": store.get_last_run(),
+        "backgroundRunning": bg_alive,
+        "backgroundPid": (_bg_proc.pid if bg_alive else None),
+        "backgroundReturncode": (None if bg_alive or _bg_proc is None else _bg_proc.poll()),
+    }
 
 
 @router.get("/api/ai-capex/evidence/{ticker}")

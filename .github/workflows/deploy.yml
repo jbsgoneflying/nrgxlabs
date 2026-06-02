@@ -38,5 +38,5 @@ jobs:
             echo "--- Engine 17: bootstrap AI Capex scan if cache is empty/missing (detached; nightly cron handles steady-state) ---"
             docker compose exec -T app python3 -c "from backend.ai_capex import store; import sys; s=store.get_scan() or {}; sys.exit(0 if (s.get('evidenceTotal') or 0) > 0 else 1)" \
               && echo "AI Capex scan already populated; skipping bootstrap" \
-              || (echo "No populated scan — launching detached populate (runs ~3-6 min in background)"; docker compose exec -d app python3 scripts/refresh_ai_capex.py; true)
+              || (echo "No populated scan — kicking detached populate via API (runs ~3-6 min in background)"; curl -sf -X POST "http://localhost:8000/api/ai-capex/refresh?background=true" || echo "WARN: bootstrap kick returned non-zero (continuing)"; true)
             echo "--- Deploy complete at $(date) ---"

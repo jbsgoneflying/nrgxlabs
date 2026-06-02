@@ -43,16 +43,26 @@ LOG = logging.getLogger("refresh_ai_capex")
 
 
 def main() -> int:
+    import datetime as dt
+    import time as _time
+
     use_web = "--no-web" not in sys.argv
     tickers = None
     for arg in sys.argv:
         if arg.startswith("--tickers="):
             tickers = [t.strip().upper() for t in arg.split("=", 1)[1].split(",") if t.strip()]
 
-    from backend.ai_capex import pipeline
+    from backend.ai_capex import pipeline, store
     from backend.config import get_flags
 
     flags = get_flags()
+    started = dt.datetime.utcnow().isoformat() + "Z"
+    t0 = _time.time()
+    store.set_last_run({
+        "status": "running", "startedAt": started, "webAgent": bool(use_web),
+        "tickers": "all" if not tickers else ",".join(tickers),
+    })
+
     if not getattr(flags, "ENABLE_AI_CAPEX", False):
         LOG.warning("ENABLE_AI_CAPEX is OFF — building the scan anyway so evidence accrues, "
                     "but the /api/ai-capex route will 404 until the flag is enabled.")
@@ -68,19 +78,38 @@ def main() -> int:
              use_web and getattr(flags, "AI_CAPEX_ENABLE_WEB_AGENT", False),
              "all" if not tickers else ",".join(tickers))
 
-    payload = pipeline.build_scan(
-        flags=flags,
-        tickers=tickers,
-        with_web_agent=use_web,
-        orats_client=orats_client,
-        persist=True,
-    )
+    try:
+        payload = pipeline.build_scan(
+            flags=flags,
+            tickers=tickers,
+            with_web_agent=use_web,
+            orats_client=orats_client,
+            persist=True,
+        )
+    except Exception as exc:  # capture for remote observability, then re-raise
+        LOG.exception("AI Capex refresh FAILED")
+        store.set_last_run({
+            "status": "error", "startedAt": started,
+            "finishedAt": dt.datetime.utcnow().isoformat() + "Z",
+            "durationSec": round(_time.time() - t0, 1),
+            "webAgent": bool(use_web), "error": f"{type(exc).__name__}: {exc}",
+        })
+        raise
 
     summary = payload.get("summary", {})
     LOG.info("AI Capex refresh done: %d names scored, %d actionable, %d evidence items (%d web).",
              summary.get("total", 0), summary.get("actionable", 0),
              payload.get("evidenceTotal", 0), payload.get("webEvidence", 0))
     LOG.info("Labels: %s", summary.get("byLabel", {}))
+    store.set_last_run({
+        "status": "ok", "startedAt": started,
+        "finishedAt": dt.datetime.utcnow().isoformat() + "Z",
+        "durationSec": round(_time.time() - t0, 1),
+        "webAgent": bool(use_web),
+        "scored": summary.get("total", 0), "actionable": summary.get("actionable", 0),
+        "evidenceTotal": payload.get("evidenceTotal", 0), "webEvidence": payload.get("webEvidence", 0),
+        "byLabel": summary.get("byLabel", {}),
+    })
     return 0
 
 
