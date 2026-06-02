@@ -365,6 +365,85 @@ def test_rescore_from_store_none_when_empty():
 
 
 # ---------------------------------------------------------------------------
+# Horizon / timeframe
+# ---------------------------------------------------------------------------
+
+import datetime as _dt  # noqa: E402
+from backend.ai_capex import horizon as _horizon  # noqa: E402
+from backend.ai_capex.models import TickerVerdict as _TV  # noqa: E402
+
+
+def _actionable(label, *, direction="long", gap=30.0, conviction=55.0, near=0.6):
+    v = _TV(ticker="NVDA", category="semis", label=label, direction=direction,
+            conviction=conviction, consensus_gap=gap, reality_score=72.0)
+    v.timing_mix = {"near": near, "mid": 1 - near, "far": 0.0}
+    return v
+
+
+def test_horizon_catalyst_anchored_for_consensus_gap():
+    today = _dt.date(2026, 6, 1)
+    v = _actionable(models.LABEL_CONSENSUS_NOT_UPDATED, gap=30.0)
+    orats = {"nextErn": "2026-06-13", "nextErnTod": "amc", "iv30d": 0.45}
+    h = _horizon.derive_horizon(v, orats, today=today)
+    assert h["basis"] == "catalyst"
+    assert h["daysToCatalyst"] == 12
+    assert h["catalystDate"] == "2026-06-13"
+    assert h["impliedMovePct"] > 0 and h["thesisMovePct"] > 0
+    assert h["assessment"] in ("underpriced", "fair", "rich")
+
+
+def test_horizon_underpriced_when_thesis_exceeds_implied():
+    today = _dt.date(2026, 6, 1)
+    v = _actionable(models.LABEL_CONSENSUS_NOT_UPDATED, gap=80.0)  # big mispricing -> big thesis move
+    orats = {"nextErn": "2026-06-08", "iv30d": 0.20}              # low IV -> small implied move
+    h = _horizon.derive_horizon(v, orats, today=today)
+    assert h["assessment"] == "underpriced"
+
+
+def test_horizon_structural_without_orats():
+    v = _actionable(models.LABEL_REAL, near=0.7)
+    h = _horizon.derive_horizon(v, {}, today=_dt.date(2026, 6, 1))
+    assert h["basis"] == "structural"
+    assert "catalystDate" not in h
+    assert h["band"]
+
+
+def test_horizon_delayed_is_date_uncertain():
+    v = _TV(ticker="DUK", category="utilities", label=models.LABEL_DELAYED,
+            direction="neutral", conviction=40.0)
+    h = _horizon.derive_horizon(v, {}, today=_dt.date(2026, 6, 1))
+    assert h["basis"] == "uncertain"
+    assert "quarter" in h["band"].lower()
+
+
+def test_horizon_empty_for_non_actionable():
+    v = _TV(ticker="X", category="semis", label=models.LABEL_NEUTRAL, conviction=0.0)
+    assert _horizon.derive_horizon(v, {}) == {}
+
+
+def test_horizon_ignores_stale_earnings_date():
+    today = _dt.date(2026, 6, 1)
+    v = _actionable(models.LABEL_CONSENSUS_NOT_UPDATED)
+    h = _horizon.derive_horizon(v, {"nextErn": "2026-05-01", "iv30d": 0.4}, today=today)
+    assert "daysToCatalyst" not in h           # past date dropped
+    assert h["basis"] == "structural"          # falls back to structural band
+
+
+def test_fetch_orats_timing_parses_cores():
+    class _Resp:
+        rows = [{"ticker": "NVDA", "nextErn": "2026-08-14", "nextErnTod": "amc", "iv30d": 0.5, "ivRank": 42}]
+
+    class _Client:
+        def cores(self, *, ticker, fields):
+            return _Resp()
+
+    out = _horizon.fetch_orats_timing("NVDA", _Client())
+    assert out["nextErn"] == "2026-08-14"
+    assert out["iv30d"] == 0.5
+    assert _horizon.fetch_orats_timing("NVDA", None) == {}
+
+
+# ---------------------------------------------------------------------------
 # Reported-capex fundamental evidence (the hard, independent cross-check)
 # ---------------------------------------------------------------------------
 

@@ -146,7 +146,7 @@ def _evidence_breakdown(evidence: List[CapexEvidence]) -> Dict[str, Any]:
     pos_mass = neg_mass = delay_mass = hype_mass = 0.0
     pos_count = 0
     pos_voices = set()
-    near_pos = far_pos = 0.0
+    near_pos = mid_pos = far_pos = 0.0
     for e in evidence:
         w = _weight(e)
         if e.is_hype:
@@ -162,6 +162,8 @@ def _evidence_breakdown(evidence: List[CapexEvidence]) -> Dict[str, Any]:
                 near_pos += w
             elif e.timing == models.TIMING_FAR:
                 far_pos += w
+            else:
+                mid_pos += w
         elif e.is_hard_negative:
             neg_mass += w
         else:
@@ -171,8 +173,21 @@ def _evidence_breakdown(evidence: List[CapexEvidence]) -> Dict[str, Any]:
         "pos_mass": pos_mass, "neg_mass": neg_mass, "delay_mass": delay_mass,
         "hype_mass": hype_mass, "pos_count": pos_count,
         "independent_pos_sources": len(pos_voices),
-        "near_pos": near_pos, "far_pos": far_pos,
+        "near_pos": near_pos, "mid_pos": mid_pos, "far_pos": far_pos,
     }
+
+
+def _timing_mix(bd: Dict[str, Any]) -> Dict[str, float]:
+    """Normalised near/mid/far shares of the positive, hard evidence mass.
+
+    The structural horizon signal: a name whose corroborated capex evidence is
+    mostly ``near`` is happening now; mostly ``far`` is aspirational. Defaults to
+    a mid-weighted prior when there's no timed positive mass."""
+    near, mid, far = bd.get("near_pos", 0.0), bd.get("mid_pos", 0.0), bd.get("far_pos", 0.0)
+    total = near + mid + far
+    if total <= 1e-9:
+        return {"near": 0.0, "mid": 1.0, "far": 0.0}
+    return {"near": round(near / total, 3), "mid": round(mid / total, 3), "far": round(far / total, 3)}
 
 
 def score_ticker(
@@ -232,6 +247,7 @@ def score_ticker(
     verdict.consensus_gap = gap
     verdict.hype_ratio = round(hype_ratio, 3)
     verdict.corroboration = indep
+    verdict.timing_mix = _timing_mix(bd)
     verdict.market_context = {**ctx, "marketPositioning": positioning}
     verdict.top_evidence = [
         e.to_dict() for e in sorted(evidence, key=_weight, reverse=True)[:8]

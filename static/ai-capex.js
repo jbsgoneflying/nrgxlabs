@@ -148,6 +148,23 @@
     return chips.join("");
   }
 
+  function horizonRow(v) {
+    var h = v.horizon || {};
+    if (!h.band) return "";
+    var parts = ['<span class="acHorizonLabel">Horizon</span>', '<span class="acHorizonBand">' + esc(h.band) + "</span>"];
+    if (h.catalyst) {
+      var d = (h.daysToCatalyst != null) ? " (" + h.daysToCatalyst + "d)" : "";
+      parts.push('<span class="acHorizonSep">\u00b7</span><span>' + esc(h.catalyst) + d + "</span>");
+    }
+    if (h.impliedMovePct != null && h.thesisMovePct != null) {
+      parts.push('<span class="acHorizonSep">\u00b7</span><span>implied \u00b1' + h.impliedMovePct + "% vs thesis ~" + h.thesisMovePct + "%</span>");
+    }
+    if (h.assessment) {
+      parts.push('<span class="acAssess acAssess--' + esc(h.assessment) + '">' + esc(h.assessment) + "</span>");
+    }
+    return '<div class="acHorizon">' + parts.join("") + "</div>";
+  }
+
   function detailRow(v) {
     var evList = v.topEvidence || [];
     var ev = evList.map(evidenceRow).join("") || '<span class="acMuted">No evidence captured.</span>';
@@ -164,6 +181,7 @@
       "</div>";
     return '<tr class="acDetail"><td colspan="9"><div class="acDetailPanel">' +
       action +
+      horizonRow(v) +
       (v.rationale ? '<div class="acRationale">' + esc(v.rationale) + "</div>" : "") +
       '<div class="acCtxChips">' + ctxChips(v) + "</div>" +
       '<div class="acSection"><div class="acColHead">What to do</div><div class="acIdeas">' + ideas + "</div></div>" +

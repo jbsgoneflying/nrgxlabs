@@ -19,7 +19,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
-from backend.ai_capex import agent, extract, ingest, models, score, store, trades
+from backend.ai_capex import agent, extract, horizon, ingest, models, score, store, trades
 from backend.ai_capex.models import CapexEvidence, TickerVerdict
 
 LOG = logging.getLogger("ai_capex.pipeline")
@@ -96,6 +96,15 @@ def build_scan(
     if flags is None:
         from backend.config import get_flags
         flags = get_flags()
+    if orats_client is None:
+        # Wire ORATS in by default so trade ideas carry IV + a catalyst horizon
+        # (next-earnings date + implied move). Optional: None just degrades to a
+        # structural horizon and "IV rank n/a".
+        try:
+            from backend.deps import get_client_optional
+            orats_client = get_client_optional()
+        except Exception:
+            orats_client = None
     tickers = tickers or models.all_tickers()
     tcat = models.ticker_to_category_map()
     model = str(getattr(flags, "AI_CAPEX_MODEL", "gpt-5.5"))
@@ -107,6 +116,7 @@ def build_scan(
 
     evidence_by_ticker: Dict[str, List[CapexEvidence]] = {t: [] for t in tickers}
     context_by_ticker: Dict[str, Dict[str, Any]] = {}
+    orats_by_ticker: Dict[str, Dict[str, Any]] = {}
 
     def _work(ticker: str):
         cat = tcat.get(ticker, "")
@@ -122,15 +132,17 @@ def build_scan(
         if fund_ev is not None:
             evid.append(fund_ev)
         ctx = ingest.fetch_market_context(ticker)
-        return ticker, evid, ctx
+        orats = horizon.fetch_orats_timing(ticker, orats_client)
+        return ticker, evid, ctx, orats
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futs = {pool.submit(_work, t): t for t in tickers}
         for fut in as_completed(futs):
             try:
-                ticker, evid, ctx = fut.result()
+                ticker, evid, ctx, orats = fut.result()
                 evidence_by_ticker[ticker] = evid or []
                 context_by_ticker[ticker] = ctx or {}
+                orats_by_ticker[ticker] = orats or {}
             except Exception as exc:  # pragma: no cover - defensive
                 LOG.warning("ai_capex: ticker work failed for %s: %s", futs[fut], exc)
 
@@ -178,6 +190,8 @@ def build_scan(
             store.set_context(context_by_ticker, ttl_s=evidence_ttl, store=s)
 
     verdicts = score.score_universe(evidence_by_ticker, context_by_ticker, flags=flags)
+    for v in verdicts:
+        v.horizon = horizon.derive_horizon(v, orats_by_ticker.get(v.ticker))
     baskets = trades.attach_trades(verdicts, orats_client=orats_client)
     evidence_total = sum(len(v) for v in evidence_by_ticker.values())
 
@@ -226,6 +240,8 @@ def rescore_from_store(
                 context_by_ticker[tk] = {k: v for k, v in mc.items() if k != "marketPositioning"}
 
     verdicts = score.score_universe(evidence_by_ticker, context_by_ticker, flags=flags)
+    for v in verdicts:
+        v.horizon = horizon.derive_horizon(v, {})  # structural-only (no network on rescore)
     baskets = trades.attach_trades(verdicts, orats_client=None)
     evidence_total = sum(len(v) for v in evidence_by_ticker.values())
     payload = _assemble(verdicts, baskets, source="rescore", evidence_total=evidence_total)

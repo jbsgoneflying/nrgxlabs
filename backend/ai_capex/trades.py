@@ -88,12 +88,19 @@ def build_trade_ideas(verdict: TickerVerdict, *, orats_client: Any = None) -> Li
     })
 
     opt = _option_structure(verdict.direction, _iv_rank(verdict.ticker, orats_client))
+    # Tie the structure to the horizon: pick an expiry that covers the catalyst.
+    h = verdict.horizon or {}
+    expiry_hint = ""
+    if h.get("catalystDate"):
+        expiry_hint = f" — expiry just after {h['catalystDate']} (covers the print)"
+    elif h.get("band"):
+        expiry_hint = f" — size to a {h['band']} horizon"
     ideas.append({
         "type": "options",
         "ticker": verdict.ticker,
         "direction": verdict.direction,
         "structure": opt["structure"],
-        "expression": f"{verdict.ticker} {opt['structure']} ({opt['thesis']}; {opt['ivNote']}).",
+        "expression": f"{verdict.ticker} {opt['structure']} ({opt['thesis']}; {opt['ivNote']}){expiry_hint}.",
         "ivNote": opt["ivNote"],
     })
     return ideas
