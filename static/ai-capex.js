@@ -166,10 +166,9 @@
       action +
       (v.rationale ? '<div class="acRationale">' + esc(v.rationale) + "</div>" : "") +
       '<div class="acCtxChips">' + ctxChips(v) + "</div>" +
-      '<div class="acDetailCols">' +
-        '<div><div class="acColHead">Evidence trail \u00b7 ' + evList.length + " shown</div>" + ev + "</div>" +
-        '<div><div class="acColHead">What to do</div>' + ideas + "</div>" +
-      "</div></div></td></tr>";
+      '<div class="acSection"><div class="acColHead">What to do</div><div class="acIdeas">' + ideas + "</div></div>" +
+      '<div class="acSection"><div class="acColHead">Evidence trail \u00b7 ' + evList.length + " shown</div>" + ev + "</div>" +
+    "</div></td></tr>";
   }
 
   // The detail panel lives in a colspan cell of a wide, horizontally-scrollable

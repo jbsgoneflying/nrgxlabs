@@ -101,10 +101,12 @@
       .acCtxChip--good { background: rgba(52,199,89,0.16); color: #1f7a3d; }
       .acCtxChip--warn { background: rgba(255,179,64,0.22); color: #8a5a00; }
 
-      .acDetailCols { display: grid; grid-template-columns: minmax(0,1.45fr) minmax(0,1fr); gap: 20px; }
-      @media (max-width: 880px) { .acDetailCols { grid-template-columns: minmax(0,1fr); } }
-      .acDetailCols > div { min-width: 0; }
+      .acSection + .acSection { margin-top: 16px; }
       .acColHead { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: rgba(11,11,15,0.42); font-weight: 800; margin-bottom: 8px; }
+      /* Trade actions: compact cards that flow across the top, so the desk sees
+         the play first; evidence stacks full-width below for verification. */
+      .acIdeas { display: flex; flex-wrap: wrap; gap: 8px; }
+      .acIdeas .acIdea { flex: 1 1 300px; min-width: 0; margin: 0; }
 
       .acEv { position: relative; padding: 9px 11px 9px 15px; border-radius: 10px; background: #fff; border: 1px solid var(--border); margin-bottom: 8px; }
       .acEv::before { content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; border-radius: 0 3px 3px 0; background: rgba(11,11,15,0.2); }
@@ -217,6 +219,6 @@
     </main>
 
     <script src="/static/nav.js?v=14"></script>
-    <script src="/static/ai-capex.js?v=5"></script>
+    <script src="/static/ai-capex.js?v=6"></script>
   </body>
 </html>
