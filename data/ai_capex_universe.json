@@ -1,0 +1,116 @@
+{
+  "_comment": "AI Capex Reality Engine (Engine 17) universe taxonomy. Curated map of the AI-infrastructure trade across 13 categories plus second-order linkage edges. Edits here flow straight into the engine — no code change needed. Tickers are liquid US listings; keep lists tight (the LLM extractor + scorer run per ticker).",
+  "version": 1,
+  "updated": "2026-06-01",
+  "categories": {
+    "semis": {
+      "name": "Semiconductors / AI Accelerators",
+      "role": "primary",
+      "blurb": "GPU/accelerator, foundry, and chip-equipment names that monetize AI compute demand directly.",
+      "tickers": ["NVDA", "AMD", "AVGO", "TSM", "MRVL", "MU", "ASML", "AMAT", "LRCX", "KLAC", "ARM", "SMCI"]
+    },
+    "memory": {
+      "name": "Memory (DRAM / HBM / NAND)",
+      "role": "primary",
+      "blurb": "High-bandwidth memory and storage that gates accelerator shipments; tight supply is a real-capex tell.",
+      "tickers": ["MU", "WDC", "STX"]
+    },
+    "networking": {
+      "name": "Networking / Optical / Fiber",
+      "role": "second_order",
+      "blurb": "Switching, optical transceivers, and fiber that scale with cluster buildouts.",
+      "tickers": ["ANET", "CSCO", "COHR", "CIEN", "LITE", "FN"]
+    },
+    "cloud_providers": {
+      "name": "Cloud / Hyperscalers",
+      "role": "driver",
+      "blurb": "Hyperscaler capex guidance and cloud backlog are the upstream driver for the whole chain.",
+      "tickers": ["MSFT", "AMZN", "GOOGL", "META", "ORCL"]
+    },
+    "data_center_reits": {
+      "name": "Data-Center REITs",
+      "role": "second_order",
+      "blurb": "Colo/wholesale data-center landlords whose leasing + development pipeline reflects real buildout.",
+      "tickers": ["EQIX", "DLR", "IRM"]
+    },
+    "power_infrastructure": {
+      "name": "Power Generation / IPPs",
+      "role": "second_order",
+      "blurb": "Independent power producers and gas/nuclear names benefiting from data-center load growth.",
+      "tickers": ["VST", "CEG", "NRG", "TLN", "GEV"]
+    },
+    "utilities": {
+      "name": "Regulated Utilities",
+      "role": "second_order",
+      "blurb": "Utilities with data-center interconnection demand and rate-base growth from load additions.",
+      "tickers": ["NEE", "SO", "DUK", "AEP", "D", "ETR", "PEG"]
+    },
+    "electrical_equipment": {
+      "name": "Electrical Equipment / Transformers",
+      "role": "second_order",
+      "blurb": "Transformers, switchgear, grid gear, and power management — lead times here are a hard-evidence tell.",
+      "tickers": ["ETN", "PWR", "GEV", "HUBB", "VRT", "POWL", "NVT"]
+    },
+    "cooling": {
+      "name": "Cooling / Thermal Management",
+      "role": "second_order",
+      "blurb": "Liquid cooling, HVAC, and thermal vendors scaling with rack power density.",
+      "tickers": ["VRT", "TT", "JCI", "CARR", "MOD"]
+    },
+    "construction": {
+      "name": "Construction / Engineering",
+      "role": "second_order",
+      "blurb": "E&C and equipment-rental names building the physical data centers and substations.",
+      "tickers": ["PWR", "MTZ", "FIX", "URI", "ACM", "J"]
+    },
+    "industrial_automation": {
+      "name": "Industrial Automation",
+      "role": "second_order",
+      "blurb": "Automation and electrification suppliers with AI-factory and grid exposure.",
+      "tickers": ["ROK", "EMR", "PH", "AME"]
+    },
+    "cybersecurity": {
+      "name": "Cybersecurity",
+      "role": "primary",
+      "blurb": "Security names with genuine AI-product monetization vs AI marketing language.",
+      "tickers": ["PANW", "CRWD", "ZS", "FTNT", "S"]
+    },
+    "ai_software": {
+      "name": "AI Software / Applications",
+      "role": "primary",
+      "blurb": "Software names — separate real AI revenue/monetization from 'AI' positioning with no numbers behind it.",
+      "tickers": ["PLTR", "NOW", "SNOW", "CRM", "ADBE", "DDOG", "MDB", "AI"]
+    }
+  },
+  "second_order_edges": {
+    "_comment": "When a DRIVER category shows real, corroborated capex, these beneficiary categories are the second-order winners. Weight scales how strongly the driver's reality propagates.",
+    "cloud_providers": [
+      {"category": "semis", "weight": 0.9},
+      {"category": "memory", "weight": 0.75},
+      {"category": "networking", "weight": 0.8},
+      {"category": "data_center_reits", "weight": 0.6},
+      {"category": "power_infrastructure", "weight": 0.7},
+      {"category": "utilities", "weight": 0.55},
+      {"category": "electrical_equipment", "weight": 0.8},
+      {"category": "cooling", "weight": 0.75},
+      {"category": "construction", "weight": 0.6},
+      {"category": "industrial_automation", "weight": 0.4}
+    ],
+    "semis": [
+      {"category": "memory", "weight": 0.7},
+      {"category": "networking", "weight": 0.65},
+      {"category": "cooling", "weight": 0.5},
+      {"category": "electrical_equipment", "weight": 0.45}
+    ]
+  },
+  "second_order_losers": {
+    "_comment": "Categories that lose when AI-capex is over-earning / mean-reverts, or that are crowded out (e.g. power scarcity, capital reallocation). Used to flag 2nd-order loser candidates when driver evidence turns to delay/overhype.",
+    "delay_sensitive": ["construction", "electrical_equipment", "cooling"],
+    "crowd_out": ["utilities"]
+  },
+  "hype_keywords": [
+    "ai-powered", "ai powered", "generative ai", "ai-driven", "ai driven",
+    "leveraging ai", "ai capabilities", "ai strategy", "ai journey",
+    "ai transformation", "ai-first", "ai first", "harness ai", "embrace ai"
+  ]
+}

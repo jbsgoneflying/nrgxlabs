@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Capex Reality Engine — Engine 17 | NRGX Labs</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="NRGX Labs — AI Capex Reality Engine: where AI infrastructure capex is real, delayed, or overhyped, and who benefits before consensus updates." />
+    <meta name="application-name" content="NRGX Labs" />
+    <meta name="apple-mobile-web-app-title" content="NRGX Labs" />
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="/static/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=14" />
+    <style>
+      .acBanner {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+        padding: 16px 18px; border-radius: var(--radius-card);
+        border: 1px solid var(--border); background: rgba(255,255,255,0.78);
+        margin-top: 14px;
+      }
+      .acStat { display: flex; flex-direction: column; gap: 2px; min-width: 92px; }
+      .acStatLabel { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: rgba(11,11,15,0.5); }
+      .acStatValue { font-size: 20px; font-weight: 800; letter-spacing: -0.3px; }
+      .acGrow { flex: 1; }
+      .acBtn {
+        appearance: none; border: 1px solid var(--border); background: #fff;
+        border-radius: 10px; padding: 9px 16px; font-weight: 700; font-size: 13px; cursor: pointer;
+      }
+      .acBtn:hover { background: rgba(11,11,15,0.03); }
+      .acBtn:disabled { opacity: .55; cursor: default; }
+
+      .acChips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+      .acChip {
+        display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+        padding: 6px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 700;
+        border: 1px solid var(--border); background: #fff; color: rgba(11,11,15,0.7);
+      }
+      .acChip.active { background: rgba(11,11,15,0.88); color: #fff; border-color: transparent; }
+      .acChip .acCount { font-size: 11px; opacity: .8; }
+
+      .acSectionHead { display:flex; align-items:center; justify-content:space-between; margin-top: 22px; }
+      .acSectionHead h2 { font-size: 15px; font-weight: 800; margin: 0; }
+
+      .acCard { padding: 14px; border-radius: var(--radius-card); border: 1px solid var(--border); background: rgba(255,255,255,0.78); }
+      .acTable { width: 100%; border-collapse: collapse; font-size: 13px; }
+      .acTable th, .acTable td { text-align: left; padding: 9px 10px; border-bottom: 1px solid rgba(11,11,15,0.07); vertical-align: top; }
+      .acTable th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: rgba(11,11,15,0.5); }
+      .acTable tbody tr.acRow { cursor: pointer; }
+      .acTable tbody tr.acRow:hover { background: rgba(11,11,15,0.025); }
+      .acNum { text-align: right; font-variant-numeric: tabular-nums; }
+
+      .acLabel { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+      .acLabel--real_beneficiary        { background: rgba(52,199,89,0.18);  color: #1f7a3d; }
+      .acLabel--consensus_not_updated   { background: rgba(0,122,255,0.16);  color: #0a52b8; }
+      .acLabel--delayed_beneficiary     { background: rgba(255,179,64,0.20); color: #8a5a00; }
+      .acLabel--overhyped_beneficiary   { background: rgba(255,59,48,0.16);  color: #b02018; }
+      .acLabel--second_order_winner     { background: rgba(88,86,214,0.16);  color: #3b39a8; }
+      .acLabel--second_order_loser      { background: rgba(255,99,71,0.16);  color: #a3331f; }
+      .acLabel--neutral                 { background: rgba(142,142,147,0.18); color: #4a4a4f; }
+
+      .acDir--long  { color: #1f7a3d; font-weight: 700; }
+      .acDir--short { color: #b02018; font-weight: 700; }
+      .acDir--neutral { color: rgba(11,11,15,0.5); }
+
+      .acBar { position: relative; height: 7px; border-radius: 999px; background: rgba(11,11,15,0.07); overflow: hidden; min-width: 64px; }
+      .acBarFill { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg,#0a52b8,#34c759); }
+      .acGap--pos { color: #1f7a3d; font-weight: 700; }
+      .acGap--neg { color: #b02018; font-weight: 700; }
+
+      .acDetail { background: rgba(11,11,15,0.02); }
+      .acDetail td { padding: 12px 16px; }
+      .acEv { font-size: 12.5px; padding: 8px 0; border-bottom: 1px dashed rgba(11,11,15,0.08); }
+      .acEv:last-child { border-bottom: none; }
+      .acEvTop { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+      .acTag { display:inline-block; padding:1px 7px; border-radius:999px; font-size:10.5px; font-weight:700; background: rgba(11,11,15,0.06); color: rgba(11,11,15,0.6); }
+      .acEvClaim { margin-top: 3px; color: rgba(11,11,15,0.82); }
+      .acEvMeta { font-size: 11px; color: rgba(11,11,15,0.5); margin-top: 2px; }
+      .acEvMeta a { color: #0a52b8; }
+      .acIdea { font-size: 12.5px; margin: 4px 0; }
+      .acRationale { font-size: 12px; color: rgba(11,11,15,0.7); margin-bottom: 10px; line-height: 1.45; }
+
+      .acMuted { color: rgba(11,11,15,0.5); font-size: 12px; }
+      .acEmpty { padding: 22px; text-align: center; color: rgba(11,11,15,0.5); }
+      .acBasket { padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 8px; background: #fff; }
+      .acBasketHead { font-weight: 800; font-size: 13px; }
+      .acBasketBody { font-size: 12.5px; color: rgba(11,11,15,0.7); margin-top: 3px; }
+    </style>
+  </head>
+  <body>
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/NRGX-Logo.png" alt="NRGX Labs" />
+          <div class="appHeaderText">
+            <div class="appSubtitle">AI Capex Reality Engine — Engine 17</div>
+          </div>
+        </div>
+      </header>
+
+      <section class="acBanner" aria-label="Scan summary">
+        <div class="acStat">
+          <span class="acStatLabel">Names scored</span>
+          <span class="acStatValue" id="acTotal">—</span>
+        </div>
+        <div class="acStat">
+          <span class="acStatLabel">Actionable</span>
+          <span class="acStatValue" id="acActionable">—</span>
+        </div>
+        <div class="acStat">
+          <span class="acStatLabel">Evidence items</span>
+          <span class="acStatValue" id="acEvidence">—</span>
+        </div>
+        <div class="acStat">
+          <span class="acStatLabel">Web-sourced</span>
+          <span class="acStatValue" id="acWeb">—</span>
+        </div>
+        <div class="acGrow"></div>
+        <div class="acStat" style="min-width:auto">
+          <button class="acBtn" id="acRefresh" type="button">Rebuild scan</button>
+        </div>
+      </section>
+
+      <div id="acStatus" class="acMuted" style="margin-top:10px"></div>
+
+      <div class="acChips" id="acChips"></div>
+
+      <div class="acSectionHead">
+        <h2>Verdicts</h2>
+        <span class="acMuted" id="acVerdictSub"></span>
+      </div>
+      <div class="acCard" style="padding:0;overflow:hidden">
+        <table class="acTable" id="acTable">
+          <thead>
+            <tr>
+              <th>Ticker</th><th>Category</th><th>Label</th><th>Dir</th>
+              <th class="acNum">Reality</th><th class="acNum">Consensus gap</th><th class="acNum">Conv</th>
+              <th class="acNum">Evidence</th>
+            </tr>
+          </thead>
+          <tbody id="acBody"></tbody>
+        </table>
+        <div class="acEmpty" id="acEmpty" style="display:none"></div>
+      </div>
+
+      <div class="acSectionHead"><h2>Thematic baskets</h2></div>
+      <div class="acCard" id="acBaskets"></div>
+
+      <p class="acMuted" style="margin-top:18px">
+        The LLM only <b>extracts and sources</b> capex evidence from transcripts, news, and (Tier-2) fragmented public
+        documents. The Reality Score, Consensus Gap, and the six labels are computed by a <b>deterministic scorer</b> over
+        that evidence table — so every label and conviction is reproducible from the evidence drill-down, and Desk Brain
+        only sizes the engine once paper history proves the edge.
+      </p>
+    </main>
+
+    <script src="/static/nav.js?v=14"></script>
+    <script src="/static/ai-capex.js?v=1"></script>
+  </body>
+</html>

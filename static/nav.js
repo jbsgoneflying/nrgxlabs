@@ -10,6 +10,7 @@
   var NAV_ITEMS = [
     { href: "/",                label: "Market Intelligence", desc: "Pre-open roadmap and cross-asset stress" },
     { href: "/desk-brain",      label: "Desk Brain",  desc: "Meta-allocator: whole-book risk budget" },
+    { href: "/ai-capex",        label: "Engine 17", desc: "AI Capex Reality Engine" },
     { href: "/breach",          label: "Engine 1",  desc: "Earnings IC / IV-crush desktop" },
     { href: "/spx",             label: "Engine 2",  desc: "SPX/SPY iron condor scanner" },
     { href: "/red-dog",         label: "Engine 4",  desc: "Mean-reversion scanner (Red Dog)" },

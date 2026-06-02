@@ -36,6 +36,7 @@ from backend.routers import (
     raven_chat,
     desk_insight,
     desk_brain,
+    ai_capex,
 )
 
 try:
@@ -334,6 +335,11 @@ def desk_brain_page():
     return FileResponse(str(STATIC_DIR / "desk-brain.html"))
 
 
+@app.get("/ai-capex")
+def ai_capex_page():
+    return FileResponse(str(STATIC_DIR / "ai-capex.html"))
+
+
 @app.get("/news-risk")
 def news_risk_page():
     return FileResponse(str(STATIC_DIR / "news-risk.html"))
@@ -425,6 +431,7 @@ app.include_router(front_layer.router)
 app.include_router(raven_chat.router)
 app.include_router(desk_insight.router)
 app.include_router(desk_brain.router)
+app.include_router(ai_capex.router)
 
 
 # ── Startup: rebuild trade indexes if they expired while the app was down ──

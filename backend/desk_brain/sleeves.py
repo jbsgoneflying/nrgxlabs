@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional
 
 SLEEVE_VOLATILITY = "volatility"
 SLEEVE_DIRECTIONAL = "directional"
+SLEEVE_THEMATIC = "thematic"
 SLEEVE_OVERLAY = "overlay"
 
 
@@ -49,7 +50,7 @@ SLEEVES: Dict[str, SleeveDef] = {
         name="Volatility / Premium",
         kind="income",
         deployable=True,
-        base_weight=0.40,
+        base_weight=0.35,
         blurb="Short-premium income: earnings IC, SPX IC, VIX fade.",
     ),
     SLEEVE_DIRECTIONAL: SleeveDef(
@@ -57,8 +58,16 @@ SLEEVES: Dict[str, SleeveDef] = {
         name="Directional / Growth",
         kind="growth",
         deployable=True,
-        base_weight=0.40,
+        base_weight=0.35,
         blurb="Trend, mean-reversion, post-event and relative-value bets.",
+    ),
+    SLEEVE_THEMATIC: SleeveDef(
+        sleeve_id=SLEEVE_THEMATIC,
+        name="Thematic / Structural",
+        kind="growth",
+        deployable=True,
+        base_weight=0.10,
+        blurb="Slower-moving structural theses (AI-capex reality); sized small until proven.",
     ),
     SLEEVE_OVERLAY: SleeveDef(
         sleeve_id=SLEEVE_OVERLAY,
@@ -80,6 +89,7 @@ ENGINE_SLEEVE_MAP: Dict[int, str] = {
     5:  SLEEVE_DIRECTIONAL,   # Trend-Continuation (Ichimoku)
     6:  SLEEVE_DIRECTIONAL,   # Thematic Pairs
     7:  SLEEVE_DIRECTIONAL,   # Post-Event Extension
+    17: SLEEVE_THEMATIC,      # AI Capex Reality Engine
     3:  SLEEVE_OVERLAY,       # Global Lead-Lag Regime
     8:  SLEEVE_OVERLAY,       # Credit Stress Drift
     11: SLEEVE_OVERLAY,       # Macro / Headline Risk
@@ -140,6 +150,9 @@ _EDGE_PRIORS: Dict[int, Dict[str, Any]] = {
     5:  {"name": "Trend (Ichimoku)",        "expectancy_r": 0.26, "win_rate": 0.46, "sharpe": 0.85, "sample": 140},
     6:  {"name": "Thematic Pairs",          "expectancy_r": 0.14, "win_rate": 0.55, "sharpe": 0.60, "sample": 80},
     7:  {"name": "Post-Event Extension",    "expectancy_r": 0.11, "win_rate": 0.52, "sharpe": 0.50, "sample": 70},
+    # Thin prior: unproven, so the allocator sizes it tiny until paper history
+    # builds (sample shrinkage drives edge_score toward the floor).
+    17: {"name": "AI Capex Reality Engine", "expectancy_r": 0.08, "win_rate": 0.50, "sharpe": 0.40, "sample": 15},
 }
 
 
@@ -250,10 +263,10 @@ def all_engine_edges(*, store: Any = None) -> Dict[int, EngineEdge]:
 # Sleeve weights by canonical regime label. Each row sums to ~1.0. The
 # overlay weight is the intended cash/hedge reserve.
 _REGIME_WEIGHTS: Dict[str, Dict[str, float]] = {
-    "risk-on":       {SLEEVE_VOLATILITY: 0.45, SLEEVE_DIRECTIONAL: 0.45, SLEEVE_OVERLAY: 0.10},
-    "transitional":  {SLEEVE_VOLATILITY: 0.40, SLEEVE_DIRECTIONAL: 0.35, SLEEVE_OVERLAY: 0.25},
-    "risk-off":      {SLEEVE_VOLATILITY: 0.30, SLEEVE_DIRECTIONAL: 0.30, SLEEVE_OVERLAY: 0.40},
-    "stressed":      {SLEEVE_VOLATILITY: 0.15, SLEEVE_DIRECTIONAL: 0.25, SLEEVE_OVERLAY: 0.60},
+    "risk-on":       {SLEEVE_VOLATILITY: 0.40, SLEEVE_DIRECTIONAL: 0.40, SLEEVE_THEMATIC: 0.12, SLEEVE_OVERLAY: 0.08},
+    "transitional":  {SLEEVE_VOLATILITY: 0.38, SLEEVE_DIRECTIONAL: 0.32, SLEEVE_THEMATIC: 0.08, SLEEVE_OVERLAY: 0.22},
+    "risk-off":      {SLEEVE_VOLATILITY: 0.28, SLEEVE_DIRECTIONAL: 0.28, SLEEVE_THEMATIC: 0.06, SLEEVE_OVERLAY: 0.38},
+    "stressed":      {SLEEVE_VOLATILITY: 0.15, SLEEVE_DIRECTIONAL: 0.22, SLEEVE_THEMATIC: 0.03, SLEEVE_OVERLAY: 0.60},
 }
 
 

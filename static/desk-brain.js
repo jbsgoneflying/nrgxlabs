@@ -5,8 +5,8 @@
 (function () {
   "use strict";
 
-  var SLEEVE_TAG = { volatility: "dbTag--vol", directional: "dbTag--dir", overlay: "dbTag--ovl" };
-  var SLEEVE_SHORT = { volatility: "Vol/Income", directional: "Directional", overlay: "Overlay/Reserve" };
+  var SLEEVE_TAG = { volatility: "dbTag--vol", directional: "dbTag--dir", thematic: "dbTag--thm", overlay: "dbTag--ovl" };
+  var SLEEVE_SHORT = { volatility: "Vol/Income", directional: "Directional", thematic: "Thematic", overlay: "Overlay/Reserve" };
 
   function $(id) { return document.getElementById(id); }
   function pct(v) { return (v == null ? "—" : (Math.round(v * 100) / 100).toFixed(2) + "%"); }
@@ -121,7 +121,7 @@
     if (llm.sleeve_tilt) {
       var t = llm.sleeve_tilt;
       html += '<div class="dbLlmRow"><b>Sleeve tilt (clamped ±20%)</b><span>' +
-        ["volatility", "directional", "overlay"].map(function (s) {
+        ["volatility", "directional", "thematic", "overlay"].map(function (s) {
           return SLEEVE_SHORT[s] + " ×" + num(t[s], 2);
         }).join(" · ") + "</span></div>";
     }

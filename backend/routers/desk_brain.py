@@ -128,6 +128,22 @@ def _vix_alert(store: Any) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _ai_capex_scan(store: Any) -> Optional[Dict[str, Any]]:
+    """Cheap AI Capex (UI E17) scan read from Redis (written by its nightly job).
+
+    Enabled-gated and read-only — never triggers the heavy ingest/LLM rebuild,
+    so a thin/empty engine never perturbs or slows the book build.
+    """
+    if not getattr(get_flags(), "ENABLE_AI_CAPEX", False):
+        return None
+    try:
+        from backend.ai_capex import store as ai_store
+        return ai_store.get_scan(store=store)
+    except Exception as exc:  # pragma: no cover - defensive
+        LOG.warning("desk_brain: ai-capex scan read failed: %s", exc)
+        return None
+
+
 def _consensus(regime: Dict[str, Any]) -> Any:
     """Build the cross-engine consensus from the regime read (cheap)."""
     try:
@@ -224,6 +240,7 @@ def _build_book(*, force_refresh: bool, with_llm: bool = True) -> Dict[str, Any]
     consensus = _consensus(regime)
     earnings = _earnings_radar(store=store, with_llm=with_llm, force_refresh=force_refresh)
     vix_alert = _vix_alert(store)
+    ai_capex = _ai_capex_scan(store)
 
     opportunities = aggregator.build_opportunity_set(
         reddog_tracker=reddog,
@@ -231,6 +248,7 @@ def _build_book(*, force_refresh: bool, with_llm: bool = True) -> Dict[str, Any]
         consensus=consensus,
         earnings_radar=earnings,
         vix_alert=vix_alert,
+        ai_capex=ai_capex,
         extra=_regime_income_lean(regime),
     )
     opp_summary = aggregator.summarize_opportunities(opportunities)

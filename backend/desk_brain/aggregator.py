@@ -304,6 +304,55 @@ def from_vix_alert(alert: Optional[Dict[str, Any]]) -> List[Opportunity]:
     ]
 
 
+def from_ai_capex(scan: Optional[Dict[str, Any]]) -> List[Opportunity]:
+    """Normalise an AI Capex Reality Engine (UI E17) scan into opportunities.
+
+    Only *actionable, directional* verdicts (the real / pre-consensus longs and
+    overhyped / second-order-loser shorts) become tradable candidates; delayed
+    and neutral names are watch-only and skipped. Conviction is the engine's own
+    deterministic read. Sized into the thematic sleeve, where the thin edge prior
+    keeps it tiny until paper history proves it (same pattern as every engine).
+    """
+    out: List[Opportunity] = []
+    if not isinstance(scan, dict):
+        return out
+    edge = sleeves.get_engine_edge(17)
+    for v in (scan.get("verdicts") or []):
+        if not isinstance(v, dict):
+            continue
+        ticker = str(v.get("ticker") or "").upper()
+        direction = str(v.get("direction") or "").lower()
+        if not ticker or direction not in ("long", "short"):
+            continue
+        conviction = _f(v.get("conviction")) or 0.0
+        if conviction <= 0:
+            continue
+        label = str(v.get("label") or "")
+        out.append(
+            Opportunity(
+                engine_id=17,
+                engine_name=edge.engine_name or "AI Capex Reality Engine",
+                sleeve=sleeves.SLEEVE_THEMATIC,
+                ticker=ticker,
+                direction=direction,
+                structure="ai_capex_thematic",
+                conviction=max(0.0, min(100.0, conviction)),
+                verdict=_VERDICT_TRADABLE,
+                desk_status="",
+                summary=f"{v.get('labelDisplay') or label} · reality {int(round(_f(v.get('realityScore')) or 0))}"
+                        f" · gap {int(round(_f(v.get('consensusGap')) or 0)):+d}",
+                source="ai_capex",
+                raw={
+                    "label": label,
+                    "realityScore": v.get("realityScore"),
+                    "consensusGap": v.get("consensusGap"),
+                    "category": v.get("category"),
+                },
+            )
+        )
+    return out
+
+
 def from_consensus(consensus: Any) -> List[Opportunity]:
     """Normalise a consensus_engine.ConsensusResult's income-sleeve signals.
 
@@ -362,6 +411,7 @@ def build_opportunity_set(
     consensus: Any = None,
     earnings_radar: Optional[Dict[str, Any]] = None,
     vix_alert: Optional[Dict[str, Any]] = None,
+    ai_capex: Optional[Dict[str, Any]] = None,
     extra: Optional[List[Opportunity]] = None,
 ) -> List[Opportunity]:
     """Assemble the normalised opportunity set from all wired sources."""
@@ -370,6 +420,7 @@ def build_opportunity_set(
     opps.extend(from_ichimoku_tracker(ichimoku_tracker))
     opps.extend(from_earnings_radar(earnings_radar))
     opps.extend(from_vix_alert(vix_alert))
+    opps.extend(from_ai_capex(ai_capex))
     if consensus is not None:
         opps.extend(from_consensus(consensus))
     if extra:
