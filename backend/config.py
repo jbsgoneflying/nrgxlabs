@@ -608,8 +608,8 @@ class FeatureFlags:
     AI_CAPEX_LLM_MAX_CALLS_PER_MINUTE: int = 20       # extractor rate limit
     AI_CAPEX_MIN_CORROBORATION: int = 2               # sources for full reality credit
     AI_CAPEX_REALITY_REAL_MIN: float = 60.0           # >= -> Real beneficiary candidate
-    AI_CAPEX_GAP_THRESHOLD: float = 35.0              # |gap| >= -> consensus-not-updated
-    AI_CAPEX_HYPE_RATIO_MAX: float = 0.45             # hype share above this -> overhyped
+    AI_CAPEX_GAP_THRESHOLD: float = 20.0              # |reality - positioning| >= -> consensus-not-updated (long) / overhyped (short). Tuned to the live gap distribution (median ~1, tail ~±25-44).
+    AI_CAPEX_HYPE_RATIO_MAX: float = 0.30             # hype-language share above this is an overhyped trigger (secondary to the positioning>>reality gap)
     # Tier-2 agentic web sourcing (ISO queues / permits / FERC). New platform
     # capability: OpenAI Responses API + web_search. Batch-only, never on a
     # request path; hard-capped per run. ON at desk request.
@@ -1087,8 +1087,8 @@ class FeatureFlags:
             AI_CAPEX_LLM_MAX_CALLS_PER_MINUTE=_get_int("AI_CAPEX_LLM_MAX_CALLS_PER_MINUTE", 20),
             AI_CAPEX_MIN_CORROBORATION=_get_int("AI_CAPEX_MIN_CORROBORATION", 2),
             AI_CAPEX_REALITY_REAL_MIN=_get_float("AI_CAPEX_REALITY_REAL_MIN", 60.0),
-            AI_CAPEX_GAP_THRESHOLD=_get_float("AI_CAPEX_GAP_THRESHOLD", 35.0),
-            AI_CAPEX_HYPE_RATIO_MAX=_get_float("AI_CAPEX_HYPE_RATIO_MAX", 0.45),
+            AI_CAPEX_GAP_THRESHOLD=_get_float("AI_CAPEX_GAP_THRESHOLD", 20.0),
+            AI_CAPEX_HYPE_RATIO_MAX=_get_float("AI_CAPEX_HYPE_RATIO_MAX", 0.30),
             AI_CAPEX_ENABLE_WEB_AGENT=_get_bool("AI_CAPEX_ENABLE_WEB_AGENT", True),
             AI_CAPEX_WEB_AGENT_MODEL=os.getenv("AI_CAPEX_WEB_AGENT_MODEL", "gpt-5.5"),
             AI_CAPEX_MAX_WEB_CALLS=_get_int("AI_CAPEX_MAX_WEB_CALLS", 12),

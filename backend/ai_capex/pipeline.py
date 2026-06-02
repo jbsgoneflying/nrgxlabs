@@ -130,13 +130,15 @@ def build_scan(
         except Exception as exc:  # pragma: no cover - defensive
             LOG.warning("ai_capex: web agent failed: %s", exc)
 
-    # Persist evidence per ticker (audit trail).
+    # Persist evidence per ticker (audit trail) + the market context snapshot so
+    # a between-builds rescore can reproduce positioning/gaps faithfully.
     if persist:
         s = store_obj or store._store()
         if s is not None:
             for ticker, evid in evidence_by_ticker.items():
                 if evid:
                     store.set_evidence(ticker, evid, ttl_s=evidence_ttl, store=s)
+            store.set_context(context_by_ticker, ttl_s=evidence_ttl, store=s)
 
     verdicts = score.score_universe(evidence_by_ticker, context_by_ticker, flags=flags)
     baskets = trades.attach_trades(verdicts, orats_client=orats_client)
@@ -151,10 +153,15 @@ def build_scan(
     return payload
 
 
-def rescore_from_store(*, flags: Any = None, store_obj: Any = None) -> Optional[Dict[str, Any]]:
-    """Cheap rebuild from persisted evidence (no LLM/network).
+def rescore_from_store(
+    *, flags: Any = None, store_obj: Any = None, persist: bool = True,
+) -> Optional[Dict[str, Any]]:
+    """Cheap rebuild from persisted evidence + context (no LLM/network).
 
-    Returns None if no persisted evidence exists for any universe ticker.
+    Re-applies the current scoring rules/thresholds to already-stored evidence,
+    using the persisted market-context snapshot so positioning and gaps match a
+    full build. The fast path for threshold tuning and the between-builds API
+    fallback. Returns None if no persisted evidence exists.
     """
     if flags is None:
         from backend.config import get_flags
@@ -170,7 +177,13 @@ def rescore_from_store(*, flags: Any = None, store_obj: Any = None) -> Optional[
     if not evidence_by_ticker:
         return None
 
-    verdicts = score.score_universe(evidence_by_ticker, {}, flags=flags)
+    context_by_ticker = store.get_context(store=s) or {}
+    verdicts = score.score_universe(evidence_by_ticker, context_by_ticker, flags=flags)
     baskets = trades.attach_trades(verdicts, orats_client=None)
     evidence_total = sum(len(v) for v in evidence_by_ticker.values())
-    return _assemble(verdicts, baskets, source="rescore", evidence_total=evidence_total)
+    payload = _assemble(verdicts, baskets, source="rescore", evidence_total=evidence_total)
+
+    if persist:
+        store.set_scan(payload, ttl_s=int(getattr(flags, "AI_CAPEX_CACHE_TTL_S", 6 * 60 * 60)),
+                       store=s)
+    return payload

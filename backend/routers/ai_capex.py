@@ -93,16 +93,26 @@ def get_scan(refresh: bool = Query(False, description="Force a full rebuild (hea
 def refresh_scan(
     web_agent: bool = Query(True, description="Include Tier-2 web sourcing (if enabled in flags)"),
     background: bool = Query(False, description="Spawn a detached rebuild and return immediately"),
+    rescore: bool = Query(False, description="Cheap: re-apply scoring to stored evidence (no LLM/network)"),
 ):
-    """Force a full rebuild (ingest + LLM extract + score).
+    """Force a rebuild of the scan.
 
-    ``background=true`` spawns ``scripts/refresh_ai_capex.py`` as a detached
-    subprocess and returns at once — the right way to kick the ~70-ticker LLM
-    pass, which far exceeds the request timeout and would otherwise pin a
-    gunicorn worker. Progress/health is then readable via ``GET .../status``.
-    Synchronous mode (default) is only safe for a small ``--tickers`` set.
+    - ``rescore=true``: re-score already-stored evidence + context with the
+      current thresholds (instant, no LLM) — use after tuning scoring knobs.
+    - ``background=true``: spawn ``scripts/refresh_ai_capex.py`` as a detached
+      subprocess and return at once — the right way to kick the ~70-ticker LLM
+      pass, which far exceeds the request timeout and would otherwise pin a
+      gunicorn worker. Progress/health is readable via ``GET .../status``.
+    - default (synchronous full rebuild): only safe for a small ``--tickers`` set.
     """
     _require_enabled()
+
+    if rescore:
+        from backend.ai_capex import pipeline
+        out = pipeline.rescore_from_store()
+        if out is None:
+            raise HTTPException(status_code=409, detail="No stored evidence to rescore yet — run a full refresh first.")
+        return out
 
     if background:
         global _bg_proc

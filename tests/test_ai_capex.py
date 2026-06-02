@@ -111,6 +111,19 @@ def test_overhyped_when_hype_and_priced():
     assert v.hype_ratio >= FLAGS.AI_CAPEX_HYPE_RATIO_MAX
 
 
+def test_overhyped_by_positioning_without_hype():
+    # Thin-but-real capex (reality < real_min) while the market is positioned
+    # euphorically -> overhyped via the positioning>>reality gap, no hype tag.
+    evid = [_ev(models.SIG_CAPEX_UP, mag=0.8, conf=0.7, timing=models.TIMING_NEAR) for _ in range(3)]
+    ctx = {"momentum6mPct": 90, "pe": 120, "ratingDrift": 5, "ratingCount": 8}
+    v = score.score_ticker("ARM", "semis", evid, ctx, flags=FLAGS)
+    assert v.reality_score < FLAGS.AI_CAPEX_REALITY_REAL_MIN
+    assert v.consensus_gap <= -FLAGS.AI_CAPEX_GAP_THRESHOLD
+    assert v.label == models.LABEL_OVERHYPED
+    assert v.direction == "short"
+    assert v.hype_ratio < FLAGS.AI_CAPEX_HYPE_RATIO_MAX  # fired without any hype language
+
+
 def test_delayed_when_delay_dominates():
     pos = [_ev(models.SIG_CAPEX_UP, mag=0.9, conf=0.9, timing=models.TIMING_MID) for _ in range(6)]
     dly = [_ev(models.SIG_DELAY, mag=0.8, conf=0.8, timing=models.TIMING_NEAR,

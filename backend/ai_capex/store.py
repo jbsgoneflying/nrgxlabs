@@ -16,6 +16,7 @@ from backend.ai_capex.models import CapexEvidence
 _SCAN_KEY = "ai_capex:scan:latest"
 _EVIDENCE_PREFIX = "ai_capex:evidence:"
 _LAST_RUN_KEY = "ai_capex:last_run"
+_CONTEXT_KEY = "ai_capex:context:all"
 
 
 def _store():
@@ -63,6 +64,34 @@ def set_evidence(ticker: str, evidence: List[CapexEvidence], *, ttl_s: int, stor
         return bool(store.set_json(evidence_key(ticker), rows, ttl_s=int(ttl_s)))
     except Exception:
         return False
+
+
+def set_context(ctx_by_ticker: Dict[str, Dict[str, Any]], *, ttl_s: int, store: Any = None) -> bool:
+    """Persist the per-ticker market context (momentum / valuation / rating drift).
+
+    Without this a ``rescore_from_store`` between nightly builds would score with
+    no positioning input — every Consensus Gap would collapse to reality-vs-50
+    and positioning-driven labels (overhyped) couldn't fire. Small numeric dict,
+    cheap to cache.
+    """
+    store = store or _store()
+    if store is None:
+        return False
+    try:
+        return bool(store.set_json(_CONTEXT_KEY, ctx_by_ticker, ttl_s=int(ttl_s)))
+    except Exception:
+        return False
+
+
+def get_context(*, store: Any = None) -> Dict[str, Dict[str, Any]]:
+    store = store or _store()
+    if store is None:
+        return {}
+    try:
+        ctx = store.get_json(_CONTEXT_KEY)
+        return ctx if isinstance(ctx, dict) else {}
+    except Exception:
+        return {}
 
 
 def set_last_run(record: Dict[str, Any], *, ttl_s: int = 7 * 86400, store: Any = None) -> bool:

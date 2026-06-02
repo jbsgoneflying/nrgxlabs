@@ -37,6 +37,11 @@ _SOURCE_WEIGHT = {
 # Saturation constant: evidence "mass" of this size maps to a 50/100 score.
 _SAT = 2.5
 
+# Overhyped (positioning-driven): the market must be genuinely bid for the name
+# before a low reality reads as "priced ahead of evidence" rather than just
+# "no evidence". Positioning is 0..100 (50 = neutral); >= this = clearly bullish.
+_OVERHYPED_POS_MIN = 65.0
+
 
 def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
@@ -211,14 +216,27 @@ def _classify(
     real_min: float, gap_thr: float, hype_max: float,
 ) -> tuple:
     """Fixed-rule label/direction/conviction. Order encodes priority."""
-    # Overhyped: lots of bare AI language, weak real spend, and the market is
-    # already positioned bullishly (negative gap = priced ahead of evidence).
-    if hype_ratio >= hype_max and reality < real_min and gap <= -gap_thr * 0.4:
-        conviction = _clamp(35.0 + 50.0 * hype_ratio + 0.3 * abs(gap), 0.0, 100.0)
+    # Overhyped: the market is positioned for a winner the evidence doesn't
+    # support. Two independent triggers (the LLM rarely tags literal hype, so we
+    # lead with the positioning>>reality divergence, not the hype-word ratio):
+    #   (a) positioning-driven — clearly bullish positioning, sub-par reality,
+    #       and a strongly negative gap (priced well ahead of corroborated capex);
+    #   (b) hype-language-driven — the extractor flagged mostly bare AI language.
+    # hype_ratio scales conviction in both cases.
+    overhyped_by_position = (
+        reality < real_min and positioning >= _OVERHYPED_POS_MIN and gap <= -gap_thr
+    )
+    overhyped_by_hype = (
+        hype_ratio >= hype_max and reality < real_min and gap <= -gap_thr * 0.4
+    )
+    if overhyped_by_position or overhyped_by_hype:
+        conviction = _clamp(35.0 + 40.0 * hype_ratio + 0.45 * abs(gap), 0.0, 100.0)
+        why = ("hype-heavy language without substance"
+               if (overhyped_by_hype and not overhyped_by_position)
+               else "market positioned well ahead of corroborated capex")
         return (models.LABEL_OVERHYPED, "short", conviction,
-                f"Hype-heavy ({hype_ratio*100:.0f}% of evidence is AI language without "
-                f"substance), thin real capex (reality {reality:.0f}), and the market is "
-                f"already positioned (positioning {positioning:.0f}).")
+                f"Overhyped ({why}): reality {reality:.0f} vs market positioning "
+                f"{positioning:.0f} (gap {gap:+.0f}), hype share {hype_ratio*100:.0f}%.")
 
     # Net-negative capex reality (cuts dominate) — bearish for the chain.
     if neg_mass > pos and reality < real_min * 0.6:
