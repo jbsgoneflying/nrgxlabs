@@ -78,8 +78,12 @@
 
       .acDetail { background: rgba(11,11,15,0.02); }
       .acDetail td { padding: 12px 16px; }
-      .acDetailGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-      @media (max-width: 760px) { .acDetailGrid { grid-template-columns: 1fr; } }
+      /* minmax(0,1fr) lets the tracks shrink below their content's min-content
+         width, so long evidence lines wrap instead of forcing the grid (and the
+         row) wider than the table. */
+      .acDetailGrid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 18px; }
+      @media (max-width: 760px) { .acDetailGrid { grid-template-columns: minmax(0,1fr); } }
+      .acDetailGrid > div { min-width: 0; }
       .acEv { font-size: 12.5px; padding: 8px 0; border-bottom: 1px dashed rgba(11,11,15,0.08); }
       .acEv:last-child { border-bottom: none; }
       .acEvTop { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

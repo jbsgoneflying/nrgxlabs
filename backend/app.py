@@ -337,7 +337,13 @@ def desk_brain_page():
 
 @app.get("/ai-capex")
 def ai_capex_page():
-    return FileResponse(str(STATIC_DIR / "ai-capex.html"))
+    # no-cache (not no-store): the browser still caches but must revalidate via
+    # ETag on each load, so inline-CSS/markup changes ship immediately (cheap
+    # 304 when unchanged) instead of being pinned to a heuristically-cached copy.
+    return FileResponse(
+        str(STATIC_DIR / "ai-capex.html"),
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @app.get("/news-risk")
