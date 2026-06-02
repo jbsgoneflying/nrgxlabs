@@ -147,6 +147,49 @@
       .acBasket { padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 8px; background: #fff; }
       .acBasketHead { font-weight: 800; font-size: 13px; }
       .acBasketBody { font-size: 12.5px; color: rgba(11,11,15,0.7); margin-top: 3px; }
+
+      /* ── Mobile polish (≤640px / iPhone-class) ──────────────────────────
+         This page does not load the shared mobile.css, so its phone rules
+         live here. Two problems to solve:
+           1. The expanded drill-down text ran past the right edge. The detail
+              panel is pinned (position: sticky, left:0) and JS sizes it to the
+              container's visible width, so on phones it stays exactly as wide
+              as the screen and every claim wraps instead of being clipped.
+              We only tighten its inner padding / flex gaps here.
+           2. The 9-column verdict table forced a wide horizontal scroll and
+              clipped columns. We let the table size to content (no 920px
+              floor) and hide the three secondary numeric columns (Conv,
+              Evidence, Sources) — all of which are still shown in the
+              drill-down — so the headline columns fit the screen. */
+      @media (max-width: 640px) {
+        .container { padding-left: 14px; padding-right: 14px; }
+
+        .acBanner { padding: 12px 14px; gap: 10px 14px; }
+        .acStat { min-width: 76px; }
+        .acStatValue { font-size: 18px; }
+        .acBtn { padding: 9px 14px; }
+
+        /* Verdict table: fit to content, drop secondary columns. */
+        .acTableWrap { overflow-x: auto; }
+        .acTable { min-width: 0; width: 100%; table-layout: auto; font-size: 12px; }
+        .acTable th, .acTable td { padding: 7px 7px; }
+        .acTable col:nth-child(7), .acTable col:nth-child(8), .acTable col:nth-child(9) { width: 0; }
+        .acTable th:nth-child(7), .acTable td:nth-child(7),
+        .acTable th:nth-child(8), .acTable td:nth-child(8),
+        .acTable th:nth-child(9), .acTable td:nth-child(9) { display: none; }
+        .acTable th:nth-child(2), .acTable td:nth-child(2) { padding-right: 8px; }
+        .acLabel { font-size: 10px; padding: 2px 7px; }
+        .acBar { min-width: 40px; }
+
+        /* Drill-down: tighten chrome; width is pinned by JS (sizePanels). */
+        .acDetailPanel { padding: 12px 14px 14px; }
+        .acActionBar { padding: 8px 10px; gap: 7px; }
+        .acActionMeta { margin-left: 0; flex-basis: 100%; }
+        .acHorizon { gap: 6px 7px; padding: 8px 10px; }
+        .acEvHead { gap: 5px 6px; }
+        .acEvSrc { margin-left: 0; }
+        .acIdeas .acIdea { flex: 1 1 100%; }
+      }
     </style>
   </head>
   <body>
@@ -230,6 +273,6 @@
     </main>
 
     <script src="/static/nav.js?v=14"></script>
-    <script src="/static/ai-capex.js?v=7"></script>
+    <script src="/static/ai-capex.js?v=8"></script>
   </body>
 </html>

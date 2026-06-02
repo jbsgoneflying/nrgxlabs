@@ -191,13 +191,28 @@
 
   // The detail panel lives in a colspan cell of a wide, horizontally-scrollable
   // table, so left unconstrained it inherits the table's (min 920px) width and
-  // clips. Pin each open panel to the *visible* wrapper width instead.
+  // clips. Pin each open panel (position: sticky, left:0) to the *visible*
+  // content width instead.
+  //
+  // The wrapper's overflow-x:auto means its clientWidth is the *visible* width
+  // and is immune to the (min 920px) table inside it — the table scrolls, the
+  // wrapper box doesn't grow. We fall back to the container's inner width if the
+  // wrapper isn't measurable yet. Both width and max-width are set, inside rAF
+  // (after the freshly-inserted rows are laid out), so the panel can never
+  // exceed the viewport even on browsers slow to honor an explicit width on a
+  // sticky table-cell child.
   function sizePanels() {
+    var panels = document.querySelectorAll(".acDetailPanel");
+    if (!panels.length) return;
     var wrap = document.querySelector(".acTableWrap");
-    if (!wrap) return;
-    var w = wrap.clientWidth;
-    Array.prototype.forEach.call(document.querySelectorAll(".acDetailPanel"), function (p) {
-      p.style.width = w + "px";
+    var container = document.querySelector(".container");
+    requestAnimationFrame(function () {
+      var w = (wrap && wrap.clientWidth) || (container && container.clientWidth) || 0;
+      if (!w) return;
+      Array.prototype.forEach.call(panels, function (p) {
+        p.style.width = w + "px";
+        p.style.maxWidth = w + "px";
+      });
     });
   }
 
