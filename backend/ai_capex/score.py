@@ -234,7 +234,7 @@ def score_ticker(
     verdict.corroboration = indep
     verdict.market_context = {**ctx, "marketPositioning": positioning}
     verdict.top_evidence = [
-        e.to_dict() for e in sorted(evidence, key=_weight, reverse=True)[:5]
+        e.to_dict() for e in sorted(evidence, key=_weight, reverse=True)[:8]
     ]
 
     label, direction, conviction, rationale = _classify(

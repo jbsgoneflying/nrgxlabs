@@ -86,47 +86,102 @@
       esc(label) + ' <span class="acCount">' + count + "</span></span>";
   }
 
+  // Human-readable signal label + accent class (the colored left rail). Lets a
+  // desk agent scan the *kind* of evidence at a glance instead of parsing enum
+  // strings.
+  var SIG_META = {
+    capex_up:          { label: "Capex \u2191",   cls: "pos" },
+    capex_down:        { label: "Capex \u2193",   cls: "neg" },
+    supply_constraint: { label: "Supply tight",   cls: "pos" },
+    demand_pull:       { label: "Demand pull",    cls: "pos" },
+    delay:             { label: "Delay",          cls: "delay" },
+    hype_language:     { label: "Hype language",  cls: "hype" },
+    second_order_link: { label: "Linkage",        cls: "link" },
+  };
+  var IDEA_LABEL = { directional: "Directional", options: "Options", watch: "Watch", basket: "Basket" };
+
   function evidenceRow(ev) {
-    var pol = ev.polarity > 0 ? "+" : (ev.polarity < 0 ? "−" : "0");
-    var src = ev.sourceUrl
-      ? '<a href="' + esc(ev.sourceUrl) + '" target="_blank" rel="noopener">' + esc(ev.sourceTitle || ev.sourceType) + "</a>"
-      : esc(ev.sourceTitle || ev.sourceType);
-    return '<div class="acEv">' +
-      '<div class="acEvTop">' +
-        '<span class="acTag">' + esc(ev.signalType) + "</span>" +
-        '<span class="acTag">' + esc(ev.timing) + "</span>" +
-        '<span class="acTag">mag ' + num(ev.magnitude, 2) + "</span>" +
-        '<span class="acTag">conf ' + num(ev.confidence, 2) + "</span>" +
-        '<span class="acTag">pol ' + pol + "</span>" +
+    var meta = SIG_META[ev.signalType] || { label: ev.signalType, cls: "" };
+    var cls = meta.cls;
+    if ((ev.polarity || 0) < 0 && cls === "pos") cls = "neg";  // hard-positive signal but bearish reading
+    var s = (ev.magnitude || 0) * (ev.confidence || 0);
+    var st = s >= 0.6 ? ["hi", "strong"] : (s >= 0.35 ? ["md", "medium"] : ["lo", "light"]);
+    var srcLine = esc(ev.sourceType || "") + (ev.date ? " \u00b7 " + esc(ev.date) : "");
+    var link = ev.sourceUrl
+      ? '<div class="acEvLink"><a href="' + esc(ev.sourceUrl) + '" target="_blank" rel="noopener">' + esc(ev.sourceTitle || ev.sourceUrl) + "</a></div>"
+      : (ev.sourceTitle ? '<div class="acEvLink acMuted">' + esc(ev.sourceTitle) + "</div>" : "");
+    return '<div class="acEv acEv--' + cls + '">' +
+      '<div class="acEvHead">' +
+        '<span class="acEvSig">' + esc(meta.label) + "</span>" +
+        '<span class="acEvChip">' + esc(ev.timing) + "</span>" +
+        '<span class="acEvStrength acEvStrength--' + st[0] + '" title="magnitude ' + num(ev.magnitude, 2) + " \u00d7 confidence " + num(ev.confidence, 2) + '">' + st[1] + "</span>" +
+        '<span class="acEvSrc">' + srcLine + "</span>" +
       "</div>" +
-      '<div class="acEvClaim">' + esc(ev.claim) + "</div>" +
-      '<div class="acEvMeta">' + esc(ev.sourceType) + (ev.date ? " · " + esc(ev.date) : "") + " · " + src + "</div>" +
+      '<div class="acEvClaim">' + esc(ev.claim) + "</div>" + link +
     "</div>";
   }
 
   function ideaRow(idea) {
-    return '<div class="acIdea">• ' + esc(idea.expression) + "</div>";
+    var t = IDEA_LABEL[idea.type] || (idea.type || "Idea");
+    var dir = idea.direction;
+    var dirCls = dir === "long" ? "acDir--long" : (dir === "short" ? "acDir--short" : "acDir--neutral");
+    var dirEl = (dir && dir !== "neutral") ? '<span class="' + dirCls + '" style="font-size:11px;font-weight:800;text-transform:uppercase">' + esc(dir) + "</span>" : "";
+    var structEl = idea.structure ? '<span class="acMuted" style="font-weight:600">' + esc(idea.structure) + "</span>" : "";
+    return '<div class="acIdea">' +
+      '<div class="acIdeaHead"><span class="acEvChip">' + esc(t) + "</span>" + dirEl + structEl + "</div>" +
+      '<div class="acIdeaBody">' + esc(idea.expression || "") + "</div>" +
+    "</div>";
+  }
+
+  function ctxChips(v) {
+    var mc = v.marketContext || {};
+    var n = v.independentSources || 0;
+    var chips = [];
+    var corrCls = n >= 2 ? "acCtxChip--good" : (n === 1 ? "acCtxChip--warn" : "");
+    var corrTxt = n === 0 ? "propagated / second-order read" : ("<b>" + n + "</b> independent source" + (n === 1 ? " (verify)" : "s"));
+    chips.push('<span class="acCtxChip ' + corrCls + '">' + corrTxt + "</span>");
+    if (mc.marketPositioning != null) chips.push('<span class="acCtxChip">positioning <b>' + num(mc.marketPositioning, 0) + "</b></span>");
+    if (mc.momentum3mPct != null) chips.push('<span class="acCtxChip">3m mom <b>' + num(mc.momentum3mPct, 0) + "%</b></span>");
+    if (mc.momentum6mPct != null) chips.push('<span class="acCtxChip">6m mom <b>' + num(mc.momentum6mPct, 0) + "%</b></span>");
+    if (mc.pe != null) chips.push('<span class="acCtxChip">P/E <b>' + num(mc.pe, 0) + "</b></span>");
+    if (mc.ratingDrift != null && mc.ratingDrift !== 0) chips.push('<span class="acCtxChip">rating drift <b>' + (mc.ratingDrift > 0 ? "+" : "") + mc.ratingDrift + "</b></span>");
+    return chips.join("");
   }
 
   function detailRow(v) {
-    var ev = (v.topEvidence || []).map(evidenceRow).join("") || '<span class="acMuted">No evidence captured.</span>';
-    var ideas = (v.tradeIdeas || []).map(ideaRow).join("") || '<span class="acMuted">No trade expression.</span>';
-    var mc = v.marketContext || {};
-    var srcN = v.independentSources || 0;
-    var ctx = [
-      "corroboration: " + srcN + " independent source" + (srcN === 1 ? "" : "s"),
-      mc.momentum3mPct != null ? "3m mom " + num(mc.momentum3mPct, 0) + "%" : null,
-      mc.momentum6mPct != null ? "6m mom " + num(mc.momentum6mPct, 0) + "%" : null,
-      mc.pe != null ? "P/E " + num(mc.pe, 0) : null,
-      mc.ratingDrift != null ? "rating drift " + (mc.ratingDrift > 0 ? "+" : "") + mc.ratingDrift : null,
-      mc.marketPositioning != null ? "positioning " + num(mc.marketPositioning, 0) : null,
-    ].filter(Boolean).join(" · ");
-    return '<tr class="acDetail"><td colspan="9">' +
-      '<div class="acRationale">' + esc(v.rationale || "") + (ctx ? '<div class="acEvMeta" style="margin-top:6px">' + esc(ctx) + "</div>" : "") + "</div>" +
-      '<div class="acDetailGrid">' +
-        "<div><div class=\"acStatLabel\" style=\"margin-bottom:6px\">Evidence (top)</div>" + ev + "</div>" +
-        "<div><div class=\"acStatLabel\" style=\"margin-bottom:6px\">Trade ideas</div>" + ideas + "</div>" +
-      "</div></td></tr>";
+    var evList = v.topEvidence || [];
+    var ev = evList.map(evidenceRow).join("") || '<span class="acMuted">No evidence captured.</span>';
+    var ideas = (v.tradeIdeas || []).map(ideaRow).join("") || '<span class="acMuted">No trade expression yet — not actionable.</span>';
+    var dirCls = v.direction === "long" ? "acDir--long" : (v.direction === "short" ? "acDir--short" : "acDir--neutral");
+    var gap = v.consensusGap;
+    var action =
+      '<div class="acActionBar">' +
+        '<span class="acActionTicker">' + esc(v.ticker) + "</span>" +
+        labelChip(v.label, v.labelDisplay) +
+        '<span class="acActionDir ' + dirCls + '">' + esc(v.direction) + "</span>" +
+        '<span class="acActionMeta">conviction <b>' + num(v.conviction, 0) + "</b> \u00b7 reality <b>" + num(v.realityScore, 0) +
+          "</b> \u00b7 gap <b>" + (gap > 0 ? "+" : "") + num(gap, 0) + "</b></span>" +
+      "</div>";
+    return '<tr class="acDetail"><td colspan="9"><div class="acDetailPanel">' +
+      action +
+      (v.rationale ? '<div class="acRationale">' + esc(v.rationale) + "</div>" : "") +
+      '<div class="acCtxChips">' + ctxChips(v) + "</div>" +
+      '<div class="acDetailCols">' +
+        '<div><div class="acColHead">Evidence trail \u00b7 ' + evList.length + " shown</div>" + ev + "</div>" +
+        '<div><div class="acColHead">What to do</div>' + ideas + "</div>" +
+      "</div></div></td></tr>";
+  }
+
+  // The detail panel lives in a colspan cell of a wide, horizontally-scrollable
+  // table, so left unconstrained it inherits the table's (min 920px) width and
+  // clips. Pin each open panel to the *visible* wrapper width instead.
+  function sizePanels() {
+    var wrap = document.querySelector(".acTableWrap");
+    if (!wrap) return;
+    var w = wrap.clientWidth;
+    Array.prototype.forEach.call(document.querySelectorAll(".acDetailPanel"), function (p) {
+      p.style.width = w + "px";
+    });
   }
 
   function renderTable(p) {
@@ -162,6 +217,7 @@
         body.insertAdjacentHTML("beforeend", detailRow(v));
       }
     });
+    sizePanels();
   }
 
   function toggle(ticker, tr) {
@@ -257,6 +313,7 @@
 
   function init() {
     $("acRefresh").addEventListener("click", rebuild);
+    window.addEventListener("resize", sizePanels);
     load();
   }
 
