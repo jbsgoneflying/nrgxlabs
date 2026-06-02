@@ -178,6 +178,16 @@ def rescore_from_store(
         return None
 
     context_by_ticker = store.get_context(store=s) or {}
+    if not context_by_ticker:
+        # Backfill from the last scan's per-verdict context (scans built before
+        # the standalone context snapshot existed still carry the raw inputs).
+        last = store.get_scan(store=s) or {}
+        for vd in last.get("verdicts", []):
+            mc = vd.get("marketContext") or {}
+            tk = vd.get("ticker")
+            if mc and tk:
+                context_by_ticker[tk] = {k: v for k, v in mc.items() if k != "marketPositioning"}
+
     verdicts = score.score_universe(evidence_by_ticker, context_by_ticker, flags=flags)
     baskets = trades.attach_trades(verdicts, orats_client=None)
     evidence_total = sum(len(v) for v in evidence_by_ticker.values())
