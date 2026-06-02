@@ -110,7 +110,10 @@ def _compute_ichimoku_breadth(orats_client) -> str:
     """Run Engine 4 universe scan and classify A+ breadth."""
     from backend.engine4_screener import run_universe_scan
 
-    result = run_universe_scan(orats_client, use_cache=False)
+    # persist=False: this is a breadth measurement only — it must not seed the
+    # desk tracker with names nobody looked at (that was a source of stale
+    # "pending" cards lingering for weeks).
+    result = run_universe_scan(orats_client, use_cache=False, persist=False)
     scanned = result.get("scannedCount", 0)
     aplus = result.get("totalAPlus", 0)
     ratio = aplus / max(1, scanned)

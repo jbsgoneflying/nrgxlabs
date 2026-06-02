@@ -86,9 +86,11 @@ function initTooltips() {
 // API
 // -----------------------------------------------------------------------------
 
-async function fetchScan(direction) {
+async function fetchScan(direction, force) {
   const params = new URLSearchParams();
   if (direction) params.set("direction", direction);
+  // A force=true bypasses the structure-scan cache for a fully fresh pull.
+  if (force) params.set("force", "true");
   // Always A+ only - no min_score parameter needed
   
   const url = `/api/engine4-ichimoku?${params.toString()}`;
@@ -175,6 +177,45 @@ function renderGammaContext(payload) {
   setText("ndxGammaNote", ndxNote);
   
   setText("gammaMeta", spxAvailable || ndxAvailable ? "Dealer positioning by index" : "Gamma data unavailable for today");
+}
+
+function fmtAsOfTime(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  } catch (_) { return ""; }
+}
+
+// Live re-pricing strip: shows where price is RIGHT NOW relative to the
+// (fixed) entry trigger, so a name that already ran reads "triggered" instead
+// of a stale "0.29 to go".
+function renderLiveStrip(live) {
+  if (!live || live.available === false) return "";
+  const state = live.state || "pending";
+  const stateMap = {
+    triggered:   { label: "Triggered", cls: "background:rgba(0,122,255,0.16);color:#0a62c9;" },
+    target1:     { label: "Target 1 hit", cls: "background:rgba(52,199,89,0.18);color:#1b8a3e;" },
+    stopped:     { label: "Stopped", cls: "background:rgba(255,59,48,0.16);color:#cc2f26;" },
+    invalidated: { label: "Invalidated", cls: "background:rgba(255,59,48,0.12);color:#cc2f26;" },
+    pending:     { label: "Pending", cls: "background:rgba(11,11,15,0.06);color:var(--muted);" },
+  };
+  const meta = stateMap[state] || stateMap.pending;
+  const price = (live.price != null) ? fmtMoney(live.price) : "—";
+
+  let distTxt = "";
+  if (state === "pending" && live.toTrigger != null) {
+    const atr = (live.toTriggerAtr != null) ? ` · ${fmt2(live.toTriggerAtr)} ATR` : "";
+    distTxt = `<span class="liveDist">${fmtMoney(Math.abs(live.toTrigger))} to trigger${atr}</span>`;
+  }
+  const stamp = live.asOf ? `<span class="liveStamp">${live.marketOpen ? "live" : "last"} ${escapeHtml(fmtAsOfTime(live.asOf))}</span>` : "";
+
+  return `<div class="signalCardLive">
+    <span class="livePill" style="${meta.cls}">${meta.label}</span>
+    <span class="livePrice">${price}</span>
+    ${distTxt}
+    ${stamp}
+  </div>`;
 }
 
 function renderSignalCard(signal, isStructure = false) {
@@ -277,6 +318,7 @@ function renderSignalCard(signal, isStructure = false) {
         <span class="signalCardGrade ${gradeClass}">${grade} (${score})</span>
       </div>
       ${gatePillHtml}
+      ${renderLiveStrip(signal.live)}
       ${freshnessHtml ? `<div class="signalCardFreshness">${freshnessHtml}</div>` : ""}
       <div class="signalCardBody">
         <div class="signalCardMetric">
@@ -460,13 +502,16 @@ function render(payload) {
 // Event Handlers
 // -----------------------------------------------------------------------------
 
-async function handleScan(e) {
+async function handleScan(e, opts) {
   if (e) e.preventDefault();
-  
+  // Explicit "Scan Universe" clicks force a fully fresh pull; the auto-load on
+  // page open uses the short structure cache (still live-repriced server-side).
+  const force = !(opts && opts.force === false);
+
   const direction = $("direction")?.value || "";
   
   setLoading(true, "Scanning SP500 + Nasdaq100...");
-  setStatus("Scanning universe for A+ setups...");
+  setStatus(force ? "Scanning universe for A+ setups (fresh pull)..." : "Loading latest scan...");
   
   // Progress updates
   if (window.RavenLoading) {
@@ -474,7 +519,7 @@ async function handleScan(e) {
   }
   
   try {
-    const payload = await fetchScan(direction);
+    const payload = await fetchScan(direction, force);
     
     if (window.RavenLoading) {
       window.RavenLoading.setProgress(75, "Classifying setups...");
@@ -497,8 +542,9 @@ async function handleScan(e) {
     if (rejected > 0) statusMsg += ` · ${rejected} rejected (impulse bars)`;
     setStatus(statusMsg);
     
-    // Newly scanned signals are persisted server-side; refresh the tracker view.
-    loadTracker(false);
+    // Newly scanned signals are persisted server-side; refresh the tracker
+    // view AND re-evaluate open names against live price.
+    loadTracker(true);
   } catch (err) {
     console.error("Scan failed:", err);
     setStatus(`Error: ${err.message}`, "error");
@@ -738,11 +784,12 @@ function init() {
   // Initialize tooltips
   initTooltips();
   
-  // Prime the tracker (no refresh — cheap, just reads the store)
-  loadTracker(false);
-  
-  // Don't auto-run - let user adjust filters and click Scan manually
-  setStatus("Adjust filters above and click \"Scan Universe\" to find Ichimoku continuation setups.");
+  // Auto-load on open: re-evaluate the desk book against live price, then pull
+  // the latest scan (short-cached structure, live-repriced server-side) so the
+  // desk immediately sees current plays + an up-to-date playbook. Reloading the
+  // page any time during the day re-prices everything.
+  loadTracker(true);
+  handleScan(null, { force: false });
 }
 
 // Run on DOM ready

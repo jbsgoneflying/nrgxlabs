@@ -27,6 +27,7 @@ from backend.engine4_screener import (
     refresh_signal_statuses as refresh_engine4_statuses,
     set_desk_status as set_engine4_desk_status,
     remove_signal as remove_engine4_signal,
+    apply_live_price_overlay as apply_engine4_live_overlay,
 )
 from backend.gating import (
     gate_scan_results,
@@ -102,6 +103,7 @@ def engine4_ichimoku_scan(
     date: Optional[str] = Query(None, description="Scan date (YYYY-MM-DD), defaults to today"),
     min_score: int = Query(50, ge=0, le=100, description="Minimum score to include"),
     direction: Optional[str] = Query(None, description="Filter by direction: bullish, bearish, or both"),
+    force: bool = Query(False, description="Bypass the structure-scan cache and pull a fresh universe scan"),
 ):
     """
     Engine 4: Ichimoku Cloud Continuation Scanner
@@ -141,68 +143,39 @@ def engine4_ichimoku_scan(
             elif d in ("bearish", "bear", "short"):
                 dir_filter = "bearish"
 
+        use_cache = not force
         cache_key = (date, min_score, dir_filter)
-        with engine4_cache_lock:
-            cached = engine4_cache.get(cache_key)
-        if cached is not None:
-            return cached
+        result = None
+        if use_cache:
+            with engine4_cache_lock:
+                result = engine4_cache.get(cache_key)
 
-        benzinga_client = get_benzinga_client_optional()
+        if result is None:
+            benzinga_client = get_benzinga_client_optional()
 
-        result = compute_engine4_scan(
-            client,
-            as_of_date=date,
-            min_score=min_score,
-            direction=dir_filter,
-            benzinga_client=benzinga_client,
-            max_workers=flags.ENGINE4_MAX_WORKERS,
-        )
+            result = compute_engine4_scan(
+                client,
+                as_of_date=date,
+                min_score=min_score,
+                direction=dir_filter,
+                benzinga_client=benzinga_client,
+                max_workers=flags.ENGINE4_MAX_WORKERS,
+                use_cache=use_cache,
+            )
 
-        if flags.ENABLE_GATING and isinstance(result, dict):
+            result = _gate_engine4_result(result, flags)
+
+            with engine4_cache_lock:
+                engine4_cache[cache_key] = result
+
+        # Live re-pricing overlay — applied on EVERY request (even a cache
+        # hit) so the "distance to trigger" reflects the current market, not
+        # the scan-time close. Cheap: one quote per surfaced name.
+        if getattr(flags, "ENGINE4_LIVE_REPRICE", True) and isinstance(result, dict):
             try:
-                gate_ctx = _get_gate_context(flags)
-                regime_allow = [s.strip() for s in str(flags.GATE_ICH_REGIME_ALLOW).split(",") if s.strip()]
-                regime_allow_short = [s.strip() for s in str(flags.GATE_ICH_REGIME_ALLOW_SHORT).split(",") if s.strip()]
-                vol_state_allow = [s.strip() for s in str(flags.GATE_ICH_VOL_STATE_ALLOW).split(",") if s.strip()]
-                for key in ("actionable", "structure", "watchlist"):
-                    setups = result.get(key)
-                    if isinstance(setups, list):
-                        gate_scan_results(
-                            scan_results=setups,
-                            engine="engine4_ichimoku",
-                            regime_allow=regime_allow,
-                            regime_allow_short=regime_allow_short,
-                            vol_state_allow=vol_state_allow,
-                            **gate_ctx,
-                        )
-                gs = summarize_gates(
-                    (result.get("actionable") or []) + (result.get("structure") or [])
-                )
-                result["gateSummary"] = gs
-                result["gateContext"] = gate_ctx
-
-                # Reconcile grade + freshness + gate + gamma into one
-                # continuation verdict per name, and lead the card with it.
-                market_gamma = result.get("marketGamma", {}) if isinstance(result.get("marketGamma"), dict) else {}
-                regime_label = gate_ctx.get("regime_label", "")
-                for key in ("actionable", "structure", "watchlist"):
-                    setups = result.get(key)
-                    if not isinstance(setups, list):
-                        continue
-                    for sig in setups:
-                        membership = str(sig.get("indexMembership") or "sp500")
-                        gctx = market_gamma.get("ndx") if membership == "nasdaq100" else market_gamma.get("spx")
-                        sig["verdict"] = reconcile_ichimoku_verdict(
-                            sig, gamma_ctx=gctx, regime_label=regime_label
-                        )
-                result["verdictSummary"] = summarize_verdicts(
-                    (result.get("actionable") or []) + (result.get("structure") or [])
-                )
-            except Exception as gate_err:
-                LOG.warning(f"Gate injection failed for engine4: {gate_err}")
-
-        with engine4_cache_lock:
-            engine4_cache[cache_key] = result
+                apply_engine4_live_overlay(result, client, max_workers=flags.ENGINE4_MAX_WORKERS)
+            except Exception as live_err:
+                LOG.warning(f"Live re-pricing overlay failed for engine4: {live_err}")
 
         return result
 
@@ -214,6 +187,59 @@ def engine4_ichimoku_scan(
     except Exception as e:
         LOG.exception("Unhandled failure (engine4-ichimoku)")
         raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+def _gate_engine4_result(result, flags):
+    """Apply gating + verdict reconciliation to a fresh scan result.
+
+    Pulled out of the request handler so the result can be gated once on a
+    cache miss, then served from cache with only the (cheap) live overlay
+    re-applied per request.
+    """
+    if flags.ENABLE_GATING and isinstance(result, dict):
+        try:
+            gate_ctx = _get_gate_context(flags)
+            regime_allow = [s.strip() for s in str(flags.GATE_ICH_REGIME_ALLOW).split(",") if s.strip()]
+            regime_allow_short = [s.strip() for s in str(flags.GATE_ICH_REGIME_ALLOW_SHORT).split(",") if s.strip()]
+            vol_state_allow = [s.strip() for s in str(flags.GATE_ICH_VOL_STATE_ALLOW).split(",") if s.strip()]
+            for key in ("actionable", "structure", "watchlist"):
+                setups = result.get(key)
+                if isinstance(setups, list):
+                    gate_scan_results(
+                        scan_results=setups,
+                        engine="engine4_ichimoku",
+                        regime_allow=regime_allow,
+                        regime_allow_short=regime_allow_short,
+                        vol_state_allow=vol_state_allow,
+                        **gate_ctx,
+                    )
+            gs = summarize_gates(
+                (result.get("actionable") or []) + (result.get("structure") or [])
+            )
+            result["gateSummary"] = gs
+            result["gateContext"] = gate_ctx
+
+            # Reconcile grade + freshness + gate + gamma into one
+            # continuation verdict per name, and lead the card with it.
+            market_gamma = result.get("marketGamma", {}) if isinstance(result.get("marketGamma"), dict) else {}
+            regime_label = gate_ctx.get("regime_label", "")
+            for key in ("actionable", "structure", "watchlist"):
+                setups = result.get(key)
+                if not isinstance(setups, list):
+                    continue
+                for sig in setups:
+                    membership = str(sig.get("indexMembership") or "sp500")
+                    gctx = market_gamma.get("ndx") if membership == "nasdaq100" else market_gamma.get("spx")
+                    sig["verdict"] = reconcile_ichimoku_verdict(
+                        sig, gamma_ctx=gctx, regime_label=regime_label
+                    )
+            result["verdictSummary"] = summarize_verdicts(
+                (result.get("actionable") or []) + (result.get("structure") or [])
+            )
+        except Exception as gate_err:
+            LOG.warning(f"Gate injection failed for engine4: {gate_err}")
+
+    return result
 
 
 @router.get("/api/engine4-ichimoku/status")
@@ -240,21 +266,40 @@ def engine4_ichimoku_status(
         )
 
     try:
+        client = get_client_optional()
+        live_reprice = getattr(flags, "ENGINE4_LIVE_REPRICE", True)
+
         if refresh:
-            client = get_client_optional()
             if client is None:
                 raise HTTPException(status_code=503, detail="ORATS unavailable for refresh.")
 
             refresh_result = refresh_engine4_statuses(client, as_of_date=date)
+            signals = get_engine4_signals()
+            if live_reprice and client is not None:
+                try:
+                    from backend.engine4_screener import overlay_tracker_signals
+                    overlay_tracker_signals(signals, client, max_workers=flags.ENGINE4_MAX_WORKERS)
+                except Exception as live_err:
+                    LOG.warning(f"Tracker live overlay failed for engine4: {live_err}")
             return {
                 "refreshed": True,
                 **refresh_result,
-                "signals": get_engine4_signals(),
+                "signals": signals,
             }
 
+        signals = get_engine4_signals()
+        # Even on a plain load, re-price the desk book against the live market
+        # so a name that already blew through its trigger doesn't keep reading
+        # its scan-time distance.
+        if live_reprice and client is not None:
+            try:
+                from backend.engine4_screener import overlay_tracker_signals
+                overlay_tracker_signals(signals, client, max_workers=flags.ENGINE4_MAX_WORKERS)
+            except Exception as live_err:
+                LOG.warning(f"Tracker live overlay failed for engine4: {live_err}")
         return {
             "refreshed": False,
-            "signals": get_engine4_signals(),
+            "signals": signals,
         }
 
     except HTTPException:

@@ -29,7 +29,11 @@ from backend.engine4_ichimoku import (
     signal_to_dict,
 )
 from backend.orats_client import OratsClient
-from backend.technicals import DailyBar, fetch_daily_bars_range
+from backend.technicals import (
+    DailyBar,
+    fetch_daily_bars_range,
+    fetch_live_price_context_optional,
+)
 from backend.universe import load_universe_sp500_and_nasdaq100
 
 
@@ -87,12 +91,22 @@ def load_index_memberships(repo_root: Optional[Path] = None) -> Dict[str, str]:
 # Cache Configuration
 # ---------------------------------------------------------------------------
 
-# Full scan cache (30 minutes)
-_scan_cache: TTLCache = TTLCache(maxsize=10, ttl=30 * 60)
+# Full scan cache (structure only; live pricing is overlaid per-request).
+# TTL kept short so reloads through the day surface new setups quickly.
+try:
+    _SCAN_TTL_S = int(get_flags().ENGINE4_CACHE_TTL_SCAN)
+except Exception:
+    _SCAN_TTL_S = 5 * 60
+try:
+    _BARS_TTL_S = int(get_flags().ENGINE4_CACHE_TTL_BARS)
+except Exception:
+    _BARS_TTL_S = 6 * 60 * 60
+
+_scan_cache: TTLCache = TTLCache(maxsize=10, ttl=_SCAN_TTL_S)
 _scan_cache_lock = threading.Lock()
 
-# Per-ticker bars cache (6 hours)
-_bars_cache: TTLCache = TTLCache(maxsize=600, ttl=6 * 60 * 60)
+# Per-ticker bars cache.
+_bars_cache: TTLCache = TTLCache(maxsize=600, ttl=_BARS_TTL_S)
 _bars_cache_lock = threading.Lock()
 
 # Signal persistence store (Redis-aware, in-memory fallback). Mirrors the
@@ -137,19 +151,25 @@ def fetch_bars_for_ticker(
     ticker: str,
     as_of_date: dt.date,
     lookback_days: int = 150,
+    use_cache: bool = True,
 ) -> List[DailyBar]:
     """
     Fetch daily bars for a ticker with caching.
     Ichimoku needs 52+ bars for Span B, plus 26 bars for cloud projection alignment,
     so we request 150 calendar days to ensure ~100 trading days.
+
+    Set ``use_cache=False`` to force a fresh pull (e.g. the desk hitting "Scan"
+    for a current read), bypassing the 6-hour bars cache on read but still
+    refreshing it on write.
     """
     as_of_str = as_of_date.isoformat()
     cache_key = _cache_key_bars(ticker, as_of_str)
     
-    with _bars_cache_lock:
-        cached = _bars_cache.get(cache_key)
-        if cached is not None:
-            return cached
+    if use_cache:
+        with _bars_cache_lock:
+            cached = _bars_cache.get(cache_key)
+            if cached is not None:
+                return cached
     
     start = as_of_date - dt.timedelta(days=lookback_days)
     bars = fetch_daily_bars_range(client, ticker=ticker, start=start, end=as_of_date)
@@ -378,13 +398,14 @@ def scan_ticker(
     gamma_context: Optional[Dict[str, Any]] = None,
     benzinga_client: Any = None,
     min_dollar_adv: float = 0.0,
+    use_cache: bool = True,
 ) -> Optional[IchimokuSignal]:
     """
     Scan a single ticker for Ichimoku continuation setup.
     Returns IchimokuSignal if found, None otherwise.
     """
     try:
-        bars = fetch_bars_for_ticker(client, ticker=ticker, as_of_date=as_of_date)
+        bars = fetch_bars_for_ticker(client, ticker=ticker, as_of_date=as_of_date, use_cache=use_cache)
         
         if not bars or len(bars) < 60:
             return None
@@ -534,6 +555,8 @@ def run_universe_scan(
     direction: Optional[str] = None,
     benzinga_client: Any = None,
     max_workers: int = 10,
+    use_cache: bool = True,
+    persist: bool = True,
 ) -> Dict[str, Any]:
     """
     Scan the full SP500 + Nasdaq100 universe for Ichimoku setups.
@@ -545,6 +568,11 @@ def run_universe_scan(
         direction: Filter by direction ("bullish", "bearish", or None for both)
         benzinga_client: Optional Benzinga client for earnings check
         max_workers: Number of parallel workers
+        use_cache: When False, bypass the scan + bars caches and pull fresh
+            (used by the "Scan" button and the cron breadth job).
+        persist: When False, do not seed the desk tracker store with scanned
+            names (used by the breadth job so it can't pollute the tracker with
+            names the desk never looked at).
     
     Returns:
         Dict with scan results, stats, and gamma context
@@ -564,12 +592,14 @@ def run_universe_scan(
     min_dollar_adv = float(getattr(flags, "ENGINE4_MIN_DOLLAR_ADV", 0.0) or 0.0)
     structure_max = int(getattr(flags, "ENGINE4_STRUCTURE_MAX", 8) or 8)
     
-    # Check cache
+    # Check cache (structure scan only; live pricing is overlaid per-request
+    # by the router so a cache hit still reflects the current market).
     cache_key = _cache_key_scan(as_of_str, min_score, direction)
-    with _scan_cache_lock:
-        cached = _scan_cache.get(cache_key)
-        if cached is not None:
-            return cached
+    if use_cache:
+        with _scan_cache_lock:
+            cached = _scan_cache.get(cache_key)
+            if cached is not None:
+                return cached
     
     # Load universe and memberships
     universe = load_universe_sp500_and_nasdaq100()
@@ -600,6 +630,7 @@ def run_universe_scan(
             gamma_context=gamma,
             benzinga_client=benzinga_client,
             min_dollar_adv=min_dollar_adv,
+            use_cache=use_cache,
         )
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -654,7 +685,10 @@ def run_universe_scan(
     # preserves desk overrides). Only fresh actionable names auto-enter as
     # "pending"; structure stays as a watch surface. NOTE: _persist_signals
     # expects API dicts, not IchimokuSignal dataclasses.
-    _persist_signals([signal_to_dict(s) for s in (actionable + structure)])
+    # The cron breadth job passes persist=False so it can't seed the desk
+    # tracker with names nobody looked at.
+    if persist:
+        _persist_signals([signal_to_dict(s) for s in (actionable + structure)])
     
     elapsed_ms = int((time.time() - start_time) * 1000)
     
@@ -686,6 +720,183 @@ def run_universe_scan(
         _scan_cache[cache_key] = result
     
     return result
+
+
+# ---------------------------------------------------------------------------
+# Live Re-Pricing Overlay
+# ---------------------------------------------------------------------------
+
+def compute_live_state(
+    *,
+    direction: str,
+    price: float,
+    entry_trigger: Optional[float],
+    stop_loss: Optional[float],
+    target_1: Optional[float],
+    atr: Optional[float],
+) -> Dict[str, Any]:
+    """Re-evaluate a setup's *entry trigger* against the current price.
+
+    The Ichimoku structure (Tenkan/Kijun/cloud, and therefore the trigger and
+    stop levels) is fixed for the day once the prior bar closes. What moves
+    intraday is price relative to those fixed levels — which is exactly what
+    tells the desk "is this still 0.29 away, or did it already trigger?".
+
+    ``toTrigger`` is the signed distance the price must still travel to reach
+    the entry trigger (positive = not yet triggered). ``state`` is one of:
+    pending | triggered | stopped | target1.
+    """
+    is_bull = direction == "bullish"
+    out: Dict[str, Any] = {
+        "price": round(float(price), 4),
+        "toTrigger": None,
+        "toTriggerPct": None,
+        "toTriggerAtr": None,
+        "state": "pending",
+    }
+
+    if entry_trigger is not None and price > 0:
+        # Distance the price must still move to hit the trigger.
+        to_trigger = (entry_trigger - price) if is_bull else (price - entry_trigger)
+        out["toTrigger"] = round(to_trigger, 4)
+        out["toTriggerPct"] = round((to_trigger / price) * 100.0, 3)
+        if atr and atr > 0:
+            out["toTriggerAtr"] = round(to_trigger / atr, 2)
+
+    # A continuation entry is a stop order beyond the trigger level, so the
+    # stop/target only mean anything *after* the trigger fires. Before it
+    # fires, an adverse move through the stop level means the setup broke down
+    # before triggering → "invalidated" (not "stopped").
+    triggered = False
+    if entry_trigger is not None:
+        triggered = (price >= entry_trigger) if is_bull else (price <= entry_trigger)
+
+    state = "pending"
+    if triggered:
+        state = "triggered"
+        if target_1 is not None and ((price >= target_1) if is_bull else (price <= target_1)):
+            state = "target1"
+        elif stop_loss is not None and ((price <= stop_loss) if is_bull else (price >= stop_loss)):
+            state = "stopped"
+    else:
+        # Not yet triggered: flag a pre-trigger breakdown through the stop.
+        if stop_loss is not None and ((price <= stop_loss) if is_bull else (price >= stop_loss)):
+            state = "invalidated"
+    out["state"] = state
+    return out
+
+
+def overlay_signal_list(
+    sigs: List[Dict[str, Any]],
+    client: OratsClient,
+    *,
+    max_workers: int = 10,
+) -> int:
+    """Annotate a flat list of signal dicts with a fresh ``live`` block.
+
+    Each signal must carry ``ticker``, ``direction``, ``levels`` and
+    ``indicators``. One live quote per distinct ticker. Returns the number of
+    signals annotated.
+    """
+    sigs = [s for s in (sigs or []) if isinstance(s, dict)]
+    if not sigs:
+        return 0
+
+    # De-dup tickers so a name in multiple buckets is only quoted once.
+    by_ticker: Dict[str, List[Dict[str, Any]]] = {}
+    for s in sigs:
+        t = str(s.get("ticker") or "").upper()
+        if t:
+            by_ticker.setdefault(t, []).append(s)
+
+    def _quote(ticker: str) -> Optional[Dict[str, Any]]:
+        try:
+            return fetch_live_price_context_optional(client, ticker=ticker)
+        except Exception:
+            return None
+
+    contexts: Dict[str, Optional[Dict[str, Any]]] = {}
+    if by_ticker:
+        workers = max(1, min(max_workers, len(by_ticker)))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = {ex.submit(_quote, t): t for t in by_ticker}
+            for fut in as_completed(futs):
+                t = futs[fut]
+                try:
+                    contexts[t] = fut.result()
+                except Exception:
+                    contexts[t] = None
+
+    annotated = 0
+    now_iso = dt.datetime.utcnow().isoformat() + "Z"
+    for ticker, members in by_ticker.items():
+        ctx = contexts.get(ticker) or {}
+        price = ctx.get("price")
+        if price is None or float(price) <= 0:
+            for s in members:
+                s["live"] = {"available": False, "asOf": now_iso}
+            continue
+        for s in members:
+            levels = s.get("levels", {}) or {}
+            indicators = s.get("indicators", {}) or {}
+            state = compute_live_state(
+                direction=s.get("direction", "bullish"),
+                price=float(price),
+                entry_trigger=levels.get("entryTrigger"),
+                stop_loss=levels.get("stopLoss"),
+                target_1=levels.get("target1"),
+                atr=indicators.get("atr"),
+            )
+            state["available"] = True
+            state["asOf"] = now_iso
+            state["marketOpen"] = bool(ctx.get("marketOpen"))
+            state["source"] = ctx.get("source")
+            s["live"] = state
+            annotated += 1
+
+    return annotated
+
+
+def apply_live_price_overlay(
+    result: Dict[str, Any],
+    client: OratsClient,
+    *,
+    max_workers: int = 10,
+) -> int:
+    """Annotate the surfaced scan signals (actionable + structure) in-place
+    with a fresh ``live`` block.
+
+    Runs on every request (even a structure-cache hit), so reloading the page
+    through the day always re-prices the displayed names against the current
+    market without re-running the expensive universe scan.
+    """
+    if not isinstance(result, dict):
+        return 0
+    sigs: List[Dict[str, Any]] = []
+    for key in ("actionable", "structure"):
+        block = result.get(key)
+        if isinstance(block, list):
+            sigs.extend([s for s in block if isinstance(s, dict)])
+    return overlay_signal_list(sigs, client, max_workers=max_workers)
+
+
+def overlay_tracker_signals(
+    signals: Dict[str, Any],
+    client: OratsClient,
+    *,
+    max_workers: int = 10,
+) -> int:
+    """Annotate every tracked record (across all lifecycle buckets) with a
+    fresh ``live`` block, so the desk book reflects current pricing even on a
+    plain (non-refresh) load.
+    """
+    if not isinstance(signals, dict):
+        return 0
+    flat: List[Dict[str, Any]] = []
+    for v in signals.values():
+        if isinstance(v, list):
+            flat.extend([s for s in v if isinstance(s, dict)])
+    return overlay_signal_list(flat, client, max_workers=max_workers)
 
 
 # ---------------------------------------------------------------------------
@@ -916,10 +1127,30 @@ def refresh_signal_statuses(
             continue
 
         try:
-            bars = fetch_bars_for_ticker(client, ticker=ticker, as_of_date=today)
+            bars = fetch_bars_for_ticker(client, ticker=ticker, as_of_date=today, use_cache=False)
         except Exception:
             continue
         forward = [b for b in bars if str(b.trade_date)[:10] > str(sig_date)[:10]]
+
+        # Fold in the live price as a synthetic current-day bar so an intraday
+        # trigger/stop is caught immediately instead of waiting for the daily
+        # bar to close. Without this, a name can read "pending" all session
+        # even though price already blew through the entry.
+        try:
+            ctx = fetch_live_price_context_optional(client, ticker=ticker)
+            live_px = ctx.get("price") if isinstance(ctx, dict) else None
+        except Exception:
+            live_px = None
+        if live_px is not None and float(live_px) > 0:
+            today_str = today.isoformat()
+            has_today = any(str(b.trade_date)[:10] == today_str for b in forward)
+            if not has_today and today_str > str(sig_date)[:10]:
+                px = float(live_px)
+                forward.append(DailyBar(
+                    trade_date=today_str, open=px, high=px, low=px,
+                    close=px, volume=None, vwap=None,
+                ))
+
         if not forward:
             continue
 

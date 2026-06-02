@@ -3736,6 +3736,47 @@ tr.row--near { background: rgba(255, 159, 10, 0.08); }
   color: #FF9500;
 }
 
+/* Live re-pricing strip */
+.signalCardLive {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(11, 11, 15, 0.03);
+}
+
+.signalCardLive .livePill {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.signalCardLive .livePrice {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.signalCardLive .liveDist {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.signalCardLive .liveStamp {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
 /* Card Body (Metrics Grid) */
 .signalCardBody {
   display: grid;

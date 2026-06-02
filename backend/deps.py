@@ -139,7 +139,11 @@ macro_stats_cache_lock = threading.Lock()
 engine3_cache = TTLCache(maxsize=20, ttl=30 * 60)
 engine3_cache_lock = threading.Lock()
 
-engine4_cache = TTLCache(maxsize=20, ttl=30 * 60)
+try:
+    _engine4_scan_ttl = int(get_flags().ENGINE4_CACHE_TTL_SCAN)
+except Exception:
+    _engine4_scan_ttl = 5 * 60
+engine4_cache = TTLCache(maxsize=20, ttl=_engine4_scan_ttl)
 engine4_cache_lock = threading.Lock()
 
 engine7_cache = TTLCache(maxsize=20, ttl=30 * 60)

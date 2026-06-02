@@ -150,12 +150,18 @@ class FeatureFlags:
     # --- Engine 4: Ichimoku Cloud Continuation Scanner (default ON - UI controlled) ---
     ENABLE_ENGINE4_ICHIMOKU: bool = True
     ENGINE4_CACHE_TTL_BARS: int = 6 * 3600       # 6 hours for daily bars
-    ENGINE4_CACHE_TTL_SCAN: int = 30 * 60        # 30 minutes for full scan
+    # Structure-scan cache. Kept short: Ichimoku structure only changes once a
+    # day, and live pricing is overlaid per-request, so this just de-dups rapid
+    # reloads while still surfacing new setups within minutes.
+    ENGINE4_CACHE_TTL_SCAN: int = 5 * 60         # 5 minutes for full scan
     ENGINE4_MAX_WORKERS: int = 10                # Parallel workers for scanning
     ENGINE4_MIN_SCORE_DEFAULT: int = 50          # Default minimum score filter
     ENGINE4_APLUS_THRESHOLD: int = 75            # A+ grade threshold
     ENGINE4_MIN_DOLLAR_ADV: float = 20_000_000.0  # 20d avg $ volume liquidity floor
     ENGINE4_STRUCTURE_MAX: int = 8               # Cap the "Approaching" structure list
+    # Re-price surfaced names against the live market on every request so the
+    # "distance to trigger" the desk sees is current, not the scan-time close.
+    ENGINE4_LIVE_REPRICE: bool = True
 
     # Engine 2 policy knobs (risk-only; env-driven; safe defaults)
     # NOTE (v2): these three flags are retained for backwards compatibility
@@ -736,12 +742,13 @@ class FeatureFlags:
 
             ENABLE_ENGINE4_ICHIMOKU=_get_bool("ENABLE_ENGINE4_ICHIMOKU", True),
             ENGINE4_CACHE_TTL_BARS=_get_int("ENGINE4_CACHE_TTL_BARS", 6 * 3600),
-            ENGINE4_CACHE_TTL_SCAN=_get_int("ENGINE4_CACHE_TTL_SCAN", 30 * 60),
+            ENGINE4_CACHE_TTL_SCAN=_get_int("ENGINE4_CACHE_TTL_SCAN", 5 * 60),
             ENGINE4_MAX_WORKERS=_get_int("ENGINE4_MAX_WORKERS", 10),
             ENGINE4_MIN_SCORE_DEFAULT=_get_int("ENGINE4_MIN_SCORE_DEFAULT", 50),
             ENGINE4_APLUS_THRESHOLD=_get_int("ENGINE4_APLUS_THRESHOLD", 75),
             ENGINE4_MIN_DOLLAR_ADV=_get_float("ENGINE4_MIN_DOLLAR_ADV", 20_000_000.0),
             ENGINE4_STRUCTURE_MAX=_get_int("ENGINE4_STRUCTURE_MAX", 8),
+            ENGINE4_LIVE_REPRICE=_get_bool("ENGINE4_LIVE_REPRICE", True),
 
             ENGINE2_ENTRY_DAYS=os.getenv("ENGINE2_ENTRY_DAYS", "mon,tue,wed"),
             ENGINE2_EM_MULTS=os.getenv("ENGINE2_EM_MULTS", "0.7,0.8,0.9,1.0,1.1,1.2"),

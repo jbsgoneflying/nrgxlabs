@@ -887,3 +887,79 @@ class TestDeskTracker:
         found = [r for r in all_sigs.get("pending", []) if r.get("ticker") == "ZZDATACLASS"]
         assert len(found) == 1
         assert found[0]["indicators"]["dollarAdv"] == 3e8
+
+
+class TestLiveRepricing:
+    """Live re-pricing overlay: distance-to-trigger reflects the current price,
+    so a name that already ran reads 'triggered' instead of a stale distance."""
+
+    def test_bullish_state_transitions(self):
+        from backend.engine4_screener import compute_live_state
+        kw = dict(direction="bullish", entry_trigger=100.0, stop_loss=95.0,
+                  target_1=110.0, atr=2.0)
+        # Below trigger → pending, positive distance to go.
+        pending = compute_live_state(price=99.0, **kw)
+        assert pending["state"] == "pending"
+        assert pending["toTrigger"] == pytest.approx(1.0)
+        assert pending["toTriggerAtr"] == pytest.approx(0.5)
+        # At/above trigger → triggered (the "0.29 to go but it already ran" fix).
+        assert compute_live_state(price=100.5, **kw)["state"] == "triggered"
+        # Triggered then through target → target1.
+        assert compute_live_state(price=111.0, **kw)["state"] == "target1"
+        # Collapsed through the stop WITHOUT ever triggering → invalidated
+        # (a buy-stop setup can't be "stopped" before it fires).
+        assert compute_live_state(price=94.0, **kw)["state"] == "invalidated"
+
+    def test_bearish_state_transitions(self):
+        from backend.engine4_screener import compute_live_state
+        kw = dict(direction="bearish", entry_trigger=100.0, stop_loss=105.0,
+                  target_1=90.0, atr=2.0)
+        pending = compute_live_state(price=101.0, **kw)
+        assert pending["state"] == "pending"
+        assert pending["toTrigger"] == pytest.approx(1.0)  # price must fall to 100
+        assert compute_live_state(price=99.5, **kw)["state"] == "triggered"
+        assert compute_live_state(price=89.0, **kw)["state"] == "target1"
+        # Ripped up through the stop without triggering down → invalidated.
+        assert compute_live_state(price=106.0, **kw)["state"] == "invalidated"
+
+    def test_overlay_annotates_surfaced_signals(self, monkeypatch):
+        from backend import engine4_screener as scr
+
+        prices = {"AAA": 100.5, "BBB": 49.0}
+
+        def fake_ctx(client, *, ticker):
+            return {"price": prices.get(ticker), "marketOpen": True, "source": "test"}
+
+        monkeypatch.setattr(scr, "fetch_live_price_context_optional", fake_ctx)
+
+        result = {
+            "actionable": [{
+                "ticker": "AAA", "direction": "bullish",
+                "levels": {"entryTrigger": 100.0, "stopLoss": 95.0, "target1": 110.0},
+                "indicators": {"atr": 2.0},
+            }],
+            "structure": [{
+                "ticker": "BBB", "direction": "bullish",
+                "levels": {"entryTrigger": 50.0, "stopLoss": 47.0, "target1": 56.0},
+                "indicators": {"atr": 1.0},
+            }],
+        }
+        n = scr.apply_live_price_overlay(result, client=object(), max_workers=2)
+        assert n == 2
+        assert result["actionable"][0]["live"]["state"] == "triggered"
+        assert result["actionable"][0]["live"]["available"] is True
+        # BBB at 49 is still 1.0 below its 50 trigger → pending.
+        assert result["structure"][0]["live"]["state"] == "pending"
+        assert result["structure"][0]["live"]["toTrigger"] == pytest.approx(1.0)
+
+    def test_overlay_handles_missing_quote(self, monkeypatch):
+        from backend import engine4_screener as scr
+        monkeypatch.setattr(scr, "fetch_live_price_context_optional",
+                            lambda client, *, ticker: {"price": None})
+        result = {"actionable": [{
+            "ticker": "AAA", "direction": "bullish",
+            "levels": {"entryTrigger": 100.0, "stopLoss": 95.0, "target1": 110.0},
+            "indicators": {"atr": 2.0},
+        }], "structure": []}
+        scr.apply_live_price_overlay(result, client=object(), max_workers=1)
+        assert result["actionable"][0]["live"]["available"] is False
