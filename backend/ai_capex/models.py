@@ -243,8 +243,11 @@ def _universe_path() -> Path:
     override = os.getenv("AI_CAPEX_UNIVERSE_PATH")
     if override:
         return Path(override)
-    # repo_root/data/ai_capex_universe.json  (this file is backend/ai_capex/models.py)
-    return Path(__file__).resolve().parents[2] / "data" / "ai_capex_universe.json"
+    # Lives in the package dir (NOT data/) on purpose: the prod `data/` is a
+    # persisted Docker volume that shadows image contents, so a taxonomy file
+    # placed there would never appear in the container. This is code/config,
+    # so it ships with the package at backend/ai_capex/universe.json.
+    return Path(__file__).resolve().parent / "universe.json"
 
 
 @lru_cache(maxsize=1)

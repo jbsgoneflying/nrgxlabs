@@ -35,8 +35,8 @@ jobs:
             curl -sf http://localhost:8000/api/health && echo "v1 health PASSED" || echo "v1 health FAILED (app may still be starting)"
             echo "--- v2 health ---"
             curl -sf http://localhost:8001/api/v2/health && echo "v2 health PASSED" || echo "v2 health FAILED (app-v2 may still be starting)"
-            echo "--- Engine 17: bootstrap AI Capex scan if none cached (detached; nightly cron handles steady-state) ---"
-            docker compose exec -T app python3 -c "from backend.ai_capex import store; import sys; sys.exit(0 if store.get_scan() else 1)" \
-              && echo "AI Capex scan already present; skipping bootstrap" \
-              || (echo "No scan cached — launching detached populate (runs ~3-6 min in background)"; docker compose exec -d app python3 scripts/refresh_ai_capex.py; true)
+            echo "--- Engine 17: bootstrap AI Capex scan if cache is empty/missing (detached; nightly cron handles steady-state) ---"
+            docker compose exec -T app python3 -c "from backend.ai_capex import store; import sys; s=store.get_scan() or {}; sys.exit(0 if (s.get('evidenceTotal') or 0) > 0 else 1)" \
+              && echo "AI Capex scan already populated; skipping bootstrap" \
+              || (echo "No populated scan — launching detached populate (runs ~3-6 min in background)"; docker compose exec -d app python3 scripts/refresh_ai_capex.py; true)
             echo "--- Deploy complete at $(date) ---"
