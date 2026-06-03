@@ -590,7 +590,8 @@ def run_universe_scan(
     
     flags = get_flags()
     min_dollar_adv = float(getattr(flags, "ENGINE4_MIN_DOLLAR_ADV", 0.0) or 0.0)
-    structure_max = int(getattr(flags, "ENGINE4_STRUCTURE_MAX", 8) or 8)
+    structure_max = int(getattr(flags, "ENGINE4_STRUCTURE_MAX", 16) or 16)
+    min_rr = float(getattr(flags, "ENGINE4_MIN_RR", 1.0) or 0.0)
     
     # Check cache (structure scan only; live pricing is overlaid per-request
     # by the router so a cache hit still reflects the current market).
@@ -647,11 +648,22 @@ def run_universe_scan(
     
     # Filter to A+ only (score >= 75) and by direction if specified
     aplus_signals = []
+    sub_rr_count = 0
     for s in signals:
         if s.score < APLUS_THRESHOLD:
             continue
         if direction and s.direction != direction:
             continue
+        # Risk:reward floor. reward_1r / risk_dollars must clear min_rr (default
+        # 1:1). A setup can be technically perfect yet have Target 1 nearer than
+        # the stop, which makes for a losing-expectancy trade the desk shouldn't
+        # see. Guard against a zero/None risk so we never divide by zero.
+        if min_rr > 0:
+            risk = s.risk_dollars or 0.0
+            reward = s.reward_1r or 0.0
+            if risk <= 0 or (reward / risk) < min_rr:
+                sub_rr_count += 1
+                continue
         aplus_signals.append(s)
     
     # Sort by score descending
@@ -711,6 +723,8 @@ def run_universe_scan(
             "direction": direction,
             "minDollarAdv": min_dollar_adv,
             "structureMax": structure_max,
+            "minRR": min_rr,
+            "subRRRejected": sub_rr_count,
             "errors": errors[:10] if errors else [],
         },
     }

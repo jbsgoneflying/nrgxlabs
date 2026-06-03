@@ -158,7 +158,12 @@ class FeatureFlags:
     ENGINE4_MIN_SCORE_DEFAULT: int = 50          # Default minimum score filter
     ENGINE4_APLUS_THRESHOLD: int = 75            # A+ grade threshold
     ENGINE4_MIN_DOLLAR_ADV: float = 20_000_000.0  # 20d avg $ volume liquidity floor
-    ENGINE4_STRUCTURE_MAX: int = 8               # Cap the "Approaching" structure list
+    ENGINE4_STRUCTURE_MAX: int = 16              # Cap the "Approaching" structure list
+    # Risk:reward floor. A setup can be technically pristine yet have Target 1
+    # sitting closer than the stop (e.g. a nearby swing high), producing sub-1:1
+    # trades. The desk should never see those, so drop any setup whose 1R reward
+    # is less than its dollar risk before it surfaces.
+    ENGINE4_MIN_RR: float = 1.0                  # Minimum reward:risk (reward_1r / risk_dollars)
     # Re-price surfaced names against the live market on every request so the
     # "distance to trigger" the desk sees is current, not the scan-time close.
     ENGINE4_LIVE_REPRICE: bool = True
