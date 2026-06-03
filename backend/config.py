@@ -752,7 +752,8 @@ class FeatureFlags:
             ENGINE4_MIN_SCORE_DEFAULT=_get_int("ENGINE4_MIN_SCORE_DEFAULT", 50),
             ENGINE4_APLUS_THRESHOLD=_get_int("ENGINE4_APLUS_THRESHOLD", 75),
             ENGINE4_MIN_DOLLAR_ADV=_get_float("ENGINE4_MIN_DOLLAR_ADV", 20_000_000.0),
-            ENGINE4_STRUCTURE_MAX=_get_int("ENGINE4_STRUCTURE_MAX", 8),
+            ENGINE4_STRUCTURE_MAX=_get_int("ENGINE4_STRUCTURE_MAX", 16),
+            ENGINE4_MIN_RR=_get_float("ENGINE4_MIN_RR", 1.0),
             ENGINE4_LIVE_REPRICE=_get_bool("ENGINE4_LIVE_REPRICE", True),
 
             ENGINE2_ENTRY_DAYS=os.getenv("ENGINE2_ENTRY_DAYS", "mon,tue,wed"),
@@ -1311,6 +1312,7 @@ class FeatureFlags:
             ("ENGINE4_MAX_WORKERS", int(self.ENGINE4_MAX_WORKERS)),
             ("ENGINE4_MIN_DOLLAR_ADV", float(self.ENGINE4_MIN_DOLLAR_ADV)),
             ("ENGINE4_STRUCTURE_MAX", int(self.ENGINE4_STRUCTURE_MAX)),
+            ("ENGINE4_MIN_RR", float(self.ENGINE4_MIN_RR)),
             ("ENGINE4_MIN_SCORE_DEFAULT", int(self.ENGINE4_MIN_SCORE_DEFAULT)),
             ("ENGINE4_APLUS_THRESHOLD", int(self.ENGINE4_APLUS_THRESHOLD)),
         )
