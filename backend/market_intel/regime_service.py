@@ -236,6 +236,72 @@ def canonical_vol_state(
 
 
 # ---------------------------------------------------------------------------
+# Live dealer-gamma injection
+# ---------------------------------------------------------------------------
+
+
+def _maybe_inject_dealer_gamma(factor_snap: FactorSnapshot, *, today: dt.date) -> None:
+    """Patch the dealer_gamma reading with a live z when the model uses it.
+
+    No-op (and zero ORATS calls) when the serving model is the legacy
+    zero-trained placeholder, so deploying this ahead of a retrain changes
+    nothing. Any failure leaves dealer_gamma at its neutral default.
+    """
+    try:
+        from backend.market_intel.gamma_history import (
+            dealer_z_today,
+            model_uses_dealer_gamma,
+        )
+
+        model, _prov = _load_calibrated_model()
+        if not model_uses_dealer_gamma(model):
+            return
+
+        try:
+            from backend.deps import get_client_optional
+            orats_client = get_client_optional()
+        except Exception:
+            orats_client = None
+        if orats_client is None:
+            return
+
+        store = None
+        try:
+            from backend.redis_store import get_store_optional
+            store = get_store_optional()
+        except Exception:
+            store = None
+
+        z = dealer_z_today(orats_client, store=store, today=today)
+        if z is None:
+            return
+
+        from backend.market_intel.factors import (
+            FactorReading,
+            FACTOR_LABELS,
+            OK as FACTOR_OK,
+        )
+
+        factor_snap.readings["dealer_gamma"] = FactorReading(
+            key="dealer_gamma",
+            label=FACTOR_LABELS.get("dealer_gamma", "Dealer Gamma z"),
+            value=float(z),
+            z=float(z),
+            quality=FACTOR_OK,
+            as_of=today.isoformat(),
+            source="market_intel.gamma_history",
+            note="live dealer-gamma z",
+        )
+        # Recompute the quality buckets so the data-quality gate sees it present.
+        readings = factor_snap.readings
+        factor_snap.missing = [k for k, r in readings.items() if r.quality == FACTOR_MISSING]
+        factor_snap.stale = [k for k, r in readings.items() if r.quality == "STALE"]
+        factor_snap.ok = [k for k, r in readings.items() if r.quality == FACTOR_OK]
+    except Exception as e:  # noqa: BLE001 - never let gamma injection break the regime
+        LOG.debug("market_intel: dealer_gamma injection skipped: %s", e)
+
+
+# ---------------------------------------------------------------------------
 # Main entrypoint
 # ---------------------------------------------------------------------------
 
@@ -282,6 +348,12 @@ def regime_snapshot(
         stale_days=_factor_stale_days(),
         today=today,
     )
+
+    # Inject the live dealer-gamma z — but only when the serving model was
+    # actually trained on a real (non-constant) dealer_gamma feature. With the
+    # legacy zero-trained model this is a no-op (the column cancels anyway), so
+    # this is safe to ship before any retrain and self-activates after the swap.
+    _maybe_inject_dealer_gamma(factor_snap, today=today)
 
     # Data quality gate.
     n_missing = len(factor_snap.missing)

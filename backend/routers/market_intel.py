@@ -222,6 +222,14 @@ def mi_v2_calibrate_endpoint(
                    "(MI_ADMIN_TOKEN / DESK_INSIGHT_ADMIN_TOKEN / ENGINE*_ADMIN_TOKEN)."
         )
     try:
+        # Compare/dry-run: train a gamma-aware candidate model WITHOUT writing
+        # it, and return a side-by-side validation diff vs the live model on
+        # known stress/calm windows. Use this to vet a retrain before swapping.
+        if bool(body.get("compare", False)):
+            from backend.market_intel.calibration import run_calibration_compare
+            lookback = int(body.get("lookback_days") or 1900)
+            return run_calibration_compare(lookback_days=lookback)
+
         from backend.market_intel.calibration import run_calibration
         lookback = int(body.get("lookback_days") or 1260)
         persist = bool(body.get("persist", True))

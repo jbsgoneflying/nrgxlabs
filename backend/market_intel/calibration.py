@@ -90,14 +90,20 @@ def build_historical_factor_matrix(
     eodhd_client: Any,
     *,
     lookback_days: int = 1260,
-) -> Tuple[List[List[float]], Dict[str, int]]:
+    orats_client: Any = None,
+    store: Any = None,
+) -> Tuple[List[List[float]], Dict[str, int], List[str]]:
     """Build the T × F z-scored factor matrix for HMM training.
 
     We replay each factor's rolling construction day-by-day, producing a
     time series of per-factor z-scores. Missing factors on a given day
     are filled with 0.0 (the neutral z).
 
-    Returns (matrix, coverage_report).
+    When ``orats_client`` is supplied, the ``dealer_gamma`` column is sourced
+    from real options-chain history (ORATS hist/strikes) instead of the legacy
+    zero-fill, so the feature carries signal the HMM can actually learn from.
+
+    Returns (matrix, coverage_report, common_dates).
     """
     # ------------------------------------------------------------------
     # Pull all needed series once.
@@ -129,13 +135,13 @@ def build_historical_factor_matrix(
 
     if len(raw) < 5:
         LOG.error("mi_calibrate: only %d series fetched; aborting", len(raw))
-        return [], {k: len(v[0]) for k, v in raw.items()}
+        return [], {k: len(v[0]) for k, v in raw.items()}, []
 
     # Align to a common date axis.
     common_dates, aligned = _align_by_date(raw)
     if len(common_dates) < MIN_Z_OBSERVATIONS + 50:
         LOG.error("mi_calibrate: only %d common days; need >= 110", len(common_dates))
-        return [], {k: len(v) for k, v in aligned.items()}
+        return [], {k: len(v) for k, v in aligned.items()}, []
 
     T = len(common_dates)
     coverage = {k: len(v) for k, v in aligned.items()}
@@ -211,8 +217,33 @@ def build_historical_factor_matrix(
             long_mean = statistics.fmean(valid) if valid else 0.0
             btc_series = [abs(c - long_mean) for c in corr_series]
 
-    # dealer_gamma — not historical; fill with 0 (neutral prior).
-    dealer_series = [0.0] * T
+    # dealer_gamma — sourced from real options-chain history when an ORATS
+    # client is supplied; otherwise the legacy zero-fill (neutral prior, but
+    # inert in the HMM because a constant column cancels across states).
+    dealer_raw_z: Optional[List[float]] = None
+    dealer_coverage = 0
+    if orats_client is not None:
+        try:
+            from backend.market_intel import gamma_history as gh
+            raw_series = gh.build_raw_series(
+                orats_client, common_dates, store=store,
+            )
+            dealer_coverage = len(raw_series)
+            if dealer_coverage > 0:
+                # Pre-built z-series, aligned to common_dates, ready to slot in.
+                dealer_raw_z = gh.dealer_z_series(raw_series, common_dates)
+                LOG.info(
+                    "mi_calibrate: dealer_gamma sourced for %d/%d days",
+                    dealer_coverage, T,
+                )
+        except Exception as e:  # noqa: BLE001
+            LOG.warning("mi_calibrate: dealer_gamma history failed: %s", e)
+            dealer_raw_z = None
+    if dealer_raw_z is None:
+        dealer_series = [0.0] * T
+    else:
+        dealer_series = dealer_raw_z
+    coverage["dealer_gamma"] = dealer_coverage
 
     # breadth_proxy (sector dispersion, 20d returns)
     sect_series: List[float] = [0.0] * T
@@ -269,7 +300,8 @@ def build_historical_factor_matrix(
         ])
     # Drop the first MIN_Z_OBSERVATIONS rows (all zeros — uninformative).
     matrix = matrix[MIN_Z_OBSERVATIONS:]
-    return matrix, coverage
+    kept_dates = common_dates[MIN_Z_OBSERVATIONS:]
+    return matrix, coverage, kept_dates
 
 
 # ---------------------------------------------------------------------------
@@ -277,9 +309,182 @@ def build_historical_factor_matrix(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_orats_client(orats_client: Any) -> Any:
+    if orats_client is not None:
+        return orats_client
+    try:
+        from backend.deps import get_client_optional
+        return get_client_optional()
+    except Exception as e:  # noqa: BLE001
+        LOG.warning("mi_calibrate: no ORATS client (%s); dealer_gamma stays inert", e)
+        return None
+
+
+#: Known stress / calm windows used to validate a candidate model before swap.
+_VALIDATION_DATES = {
+    "covid_crash_2020": ["2020-03-16", "2020-03-23"],
+    "bear_2022": ["2022-06-16", "2022-09-30", "2022-10-13"],
+}
+
+
+def _nearest_date_index(dates: List[str], target: str) -> Optional[int]:
+    """Index of the closest available date to ``target`` (abs day distance)."""
+    if not dates:
+        return None
+    try:
+        tgt = dt.date.fromisoformat(target[:10])
+    except Exception:
+        return None
+    best_i, best_d = None, None
+    for i, d in enumerate(dates):
+        try:
+            cur = dt.date.fromisoformat(str(d)[:10])
+        except Exception:
+            continue
+        dist = abs((cur - tgt).days)
+        if best_d is None or dist < best_d:
+            best_i, best_d = i, dist
+    # Only accept if reasonably close (within ~10 calendar days).
+    if best_d is not None and best_d <= 10:
+        return best_i
+    return None
+
+
+def run_calibration_compare(
+    *,
+    eodhd_client: Any = None,
+    orats_client: Any = None,
+    store: Any = None,
+    lookback_days: int = 1900,
+) -> Dict[str, Any]:
+    """Train a candidate (gamma-aware) model WITHOUT persisting and validate it
+    against the live production model on known stress/calm windows.
+
+    Returns a rich diff the desk can review before authorising a swap. Never
+    writes the model (the raw gamma series IS cached, since that's just market
+    data and is needed for live serving post-swap).
+    """
+    from backend.market_intel.regime_model import infer
+    from backend.market_intel.gamma_history import (
+        DEALER_GAMMA_IDX,
+        model_uses_dealer_gamma,
+    )
+
+    out: Dict[str, Any] = {
+        "ok": False,
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat() + "Z",
+        "lookback_days": lookback_days,
+    }
+
+    if eodhd_client is None:
+        try:
+            from backend.eodhd_client import EodhdClient
+            eodhd_client = EodhdClient.from_env()
+        except Exception as e:
+            out["error"] = f"no eodhd client: {e}"
+            return out
+    if store is None:
+        try:
+            from backend.redis_store import get_store_optional
+            store = get_store_optional()
+        except Exception:
+            store = None
+    orats_client = _resolve_orats_client(orats_client)
+    if orats_client is None:
+        out["error"] = "no ORATS client; cannot source dealer_gamma history"
+        return out
+
+    matrix, coverage, dates = build_historical_factor_matrix(
+        eodhd_client, lookback_days=lookback_days,
+        orats_client=orats_client, store=store,
+    )
+    out["factor_coverage"] = coverage
+    out["training_days"] = len(matrix)
+    if len(matrix) < 200:
+        out["error"] = f"insufficient training data ({len(matrix)} rows)"
+        return out
+
+    new_model = fit_model(matrix)
+    out["new_model"] = {
+        "training_days": new_model.training_days,
+        "log_likelihood": round(float(new_model.log_likelihood), 2),
+        "uses_dealer_gamma": model_uses_dealer_gamma(new_model),
+        "dealer_emission_means": [
+            round(float(new_model.emission_means[s][DEALER_GAMMA_IDX]), 4)
+            for s in range(new_model.n_states)
+        ],
+        "dealer_emission_stds": [
+            round(float(new_model.emission_stds[s][DEALER_GAMMA_IDX]), 4)
+            for s in range(new_model.n_states)
+        ],
+    }
+
+    # Load the live production model for side-by-side comparison.
+    try:
+        from backend.market_intel.regime_service import _load_calibrated_model
+        old_model, old_provenance = _load_calibrated_model()
+    except Exception as e:
+        old_model, old_provenance = None, f"unavailable: {e}"
+    out["old_model_source"] = old_provenance
+
+    def _infer_pair(vec: List[float]) -> Dict[str, Any]:
+        # Old model serves dealer_gamma=0 in production; zero it for fidelity.
+        old_vec = list(vec)
+        old_vec[DEALER_GAMMA_IDX] = 0.0
+        res: Dict[str, Any] = {"dealer_z": round(float(vec[DEALER_GAMMA_IDX]), 3)}
+        if old_model is not None:
+            o = infer(old_model, old_vec)
+            res["old"] = {"label": o.label, "confidence": round(o.confidence, 3), "probs": o.probs}
+        n = infer(new_model, vec)
+        res["new"] = {"label": n.label, "confidence": round(n.confidence, 3), "probs": n.probs}
+        return res
+
+    windows: Dict[str, Any] = {}
+    for window, targets in _VALIDATION_DATES.items():
+        rows = []
+        for tgt in targets:
+            idx = _nearest_date_index(dates, tgt)
+            if idx is None:
+                rows.append({"target": tgt, "note": "not in window"})
+                continue
+            entry = {"target": tgt, "matched_date": dates[idx]}
+            entry.update(_infer_pair(matrix[idx]))
+            rows.append(entry)
+        windows[window] = rows
+
+    # Most-recent day = current tape (expected calm).
+    today_entry = {"matched_date": dates[-1]} if dates else {}
+    if dates:
+        today_entry.update(_infer_pair(matrix[-1]))
+    windows["today"] = [today_entry]
+    out["windows"] = windows
+
+    # Strict gate evaluation (advisory — the swap stays a human decision).
+    def _new_label(rows) -> List[str]:
+        return [r["new"]["label"] for r in rows if isinstance(r, dict) and "new" in r]
+
+    covid_labels = _new_label(windows.get("covid_crash_2020", []))
+    bear_labels = _new_label(windows.get("bear_2022", []))
+    today_new = today_entry.get("new", {}) if isinstance(today_entry, dict) else {}
+    today_stressed_highconf = (
+        today_new.get("label") == "Stressed" and float(today_new.get("confidence") or 0) >= 0.55
+    )
+    gate = {
+        "covid_flagged_stressed": bool(covid_labels) and all(l == "Stressed" for l in covid_labels),
+        "bear2022_defensive": bool(bear_labels) and all(l in ("Stressed", "Transitional") for l in bear_labels),
+        "today_not_highconf_stressed": not today_stressed_highconf,
+        "new_model_uses_dealer_gamma": model_uses_dealer_gamma(new_model),
+    }
+    gate["pass"] = all(gate.values())
+    out["strict_gate"] = gate
+    out["ok"] = True
+    return out
+
+
 def run_calibration(
     *,
     eodhd_client: Any = None,
+    orats_client: Any = None,
     store: Any = None,
     lookback_days: int = 1260,
     persist: bool = True,
@@ -304,9 +509,12 @@ def run_calibration(
         except Exception:
             store = None
 
+    orats_client = _resolve_orats_client(orats_client)
+
     try:
-        matrix, coverage = build_historical_factor_matrix(
+        matrix, coverage, _dates = build_historical_factor_matrix(
             eodhd_client, lookback_days=lookback_days,
+            orats_client=orats_client, store=store,
         )
         report.factor_coverage = coverage
         if len(matrix) < 200:
