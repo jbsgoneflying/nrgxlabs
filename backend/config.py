@@ -583,6 +583,11 @@ class FeatureFlags:
     GATE_ICH_REGIME_ALLOW_SHORT: str = "Risk-Off,Stressed,Transitional"
     GATE_ICH_VOL_STATE_ALLOW: str = "compressing,stable,NORMAL,FALLING,falling,flat"
     GATE_ICH_MACRO_PROXIMITY_DAYS: int = 1
+    # Confidence-aware regime gating. A regime mismatch only HARD-suppresses
+    # (SUPPRESS) when the regime classifier is at least this confident; below
+    # it, a mismatch is demoted to SOFT (WATCH) so a near-tie regime read
+    # (e.g. Stressed 0.46 vs Risk-On 0.39) can't blanket-kill every long.
+    GATE_ICH_REGIME_MIN_CONFIDENCE: float = 0.55
 
     # --- Desk Brain: LLM Meta-Allocator (default OFF until verified) ---
     # Reads every engine's current opportunity set + regime + measured edge
@@ -1077,6 +1082,7 @@ class FeatureFlags:
             GATE_ICH_REGIME_ALLOW_SHORT=os.getenv("GATE_ICH_REGIME_ALLOW_SHORT", "Risk-Off,Stressed,Transitional"),
             GATE_ICH_VOL_STATE_ALLOW=os.getenv("GATE_ICH_VOL_STATE_ALLOW", "compressing,stable,NORMAL,FALLING,falling,flat"),
             GATE_ICH_MACRO_PROXIMITY_DAYS=_get_int("GATE_ICH_MACRO_PROXIMITY_DAYS", 1),
+            GATE_ICH_REGIME_MIN_CONFIDENCE=_get_float("GATE_ICH_REGIME_MIN_CONFIDENCE", 0.55),
 
             ENABLE_DESK_BRAIN=_get_bool("ENABLE_DESK_BRAIN", True),
             DESK_BRAIN_MODEL=os.getenv("DESK_BRAIN_MODEL", "gpt-5.5"),

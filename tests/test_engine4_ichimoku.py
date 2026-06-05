@@ -794,6 +794,32 @@ class TestDirectionAwareGate:
                           regime_label="Risk-On", vol_direction="falling")
         assert d.status == "SUPPRESS"
 
+    def test_low_confidence_regime_demotes_suppress_to_watch(self):
+        """A near-tie regime read (below the confidence floor) should NOT
+        hard-suppress a long — it gets demoted to WATCH instead of SUPPRESS."""
+        d = gate_ichimoku(ticker="HWM", setup_direction="bullish",
+                          regime_label="Stressed", vol_direction="falling",
+                          regime_confidence=0.46, regime_min_confidence=0.55)
+        assert d.status == "WATCH"
+        codes = [r["code"] for r in d.reasons]
+        assert "REGIME_MISMATCH" in codes
+        mismatch = next(r for r in d.reasons if r["code"] == "REGIME_MISMATCH")
+        assert mismatch["severity"] == "SOFT"
+
+    def test_high_confidence_regime_still_suppresses(self):
+        """A confident regime mismatch still HARD-suppresses the wrong-way long."""
+        d = gate_ichimoku(ticker="HWM", setup_direction="bullish",
+                          regime_label="Stressed", vol_direction="falling",
+                          regime_confidence=0.80, regime_min_confidence=0.55)
+        assert d.status == "SUPPRESS"
+
+    def test_missing_confidence_preserves_hard_suppress(self):
+        """When confidence is unknown (None), behavior is unchanged — HARD."""
+        d = gate_ichimoku(ticker="HWM", setup_direction="bullish",
+                          regime_label="Stressed", vol_direction="falling",
+                          regime_confidence=None, regime_min_confidence=0.55)
+        assert d.status == "SUPPRESS"
+
 
 class TestReconcileIchimokuVerdictHostileGamma:
     def test_hostile_gamma_caps_at_watch(self):

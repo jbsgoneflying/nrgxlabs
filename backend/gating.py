@@ -237,6 +237,7 @@ def gate_ichimoku(
     ticker: str,
     setup_direction: Optional[str] = None,
     regime_label: str = "",
+    regime_confidence: Optional[float] = None,
     vol_direction: str = "",
     gamma_ctx: Optional[dict] = None,
     high_events_within_days: int = 0,
@@ -245,6 +246,7 @@ def gate_ichimoku(
     regime_allow_short: Optional[List[str]] = None,
     vol_state_allow: Optional[List[str]] = None,
     macro_proximity_days: int = 1,
+    regime_min_confidence: float = 0.0,
 ) -> GateDecision:
     """Gate an Ichimoku Cloud Continuation setup.
 
@@ -263,8 +265,24 @@ def gate_ichimoku(
     allowed_regimes = allowed_short if is_bearish else allowed_long
     allowed_vol = vol_state_allow or ["compressing", "stable", "NORMAL", "FALLING", "falling", "flat"]
 
-    r = _check_regime(regime_label, allowed_regimes, severity="HARD")
+    # Confidence-aware regime gating: a regime mismatch only HARD-suppresses
+    # when the classifier is sufficiently confident. A low-confidence (near-tie)
+    # regime read shouldn't blanket-kill a whole direction, so demote the
+    # mismatch to SOFT (WATCH) below the threshold.
+    low_confidence_regime = (
+        regime_min_confidence > 0
+        and regime_confidence is not None
+        and regime_confidence < regime_min_confidence
+    )
+    regime_severity = "SOFT" if low_confidence_regime else "HARD"
+
+    r = _check_regime(regime_label, allowed_regimes, severity=regime_severity)
     if r:
+        if low_confidence_regime and r.code == "REGIME_MISMATCH":
+            r.detail += (
+                f" — low-confidence regime (conf {regime_confidence:.2f}"
+                f" < {regime_min_confidence:.2f}); WATCH not SUPPRESS"
+            )
         reasons.append(r)
 
     r = _check_vol_state(vol_direction, allowed_vol, severity="SOFT")
@@ -286,6 +304,8 @@ def gate_ichimoku(
         decided_at=now,
         inputs={
             "regime_label": regime_label,
+            "regime_confidence": regime_confidence,
+            "regime_min_confidence": regime_min_confidence,
             "vol_direction": vol_direction,
             "high_events_within_days": high_events_within_days,
         },
@@ -399,12 +419,14 @@ def gate_scan_results(
     scan_results: List[dict],
     engine: str,
     regime_label: str = "",
+    regime_confidence: Optional[float] = None,
     vol_direction: str = "",
     gamma_ctx: Optional[dict] = None,
     high_events_within_days: int = 0,
     regime_allow: Optional[List[str]] = None,
     regime_allow_short: Optional[List[str]] = None,
     vol_state_allow: Optional[List[str]] = None,
+    regime_min_confidence: float = 0.0,
 ) -> List[dict]:
     """Apply gating to a list of scan results, adding gate decision to each.
 
@@ -432,6 +454,8 @@ def gate_scan_results(
         )
         if is_ichimoku:
             kwargs["regime_allow_short"] = regime_allow_short
+            kwargs["regime_confidence"] = regime_confidence
+            kwargs["regime_min_confidence"] = regime_min_confidence
 
         decision = gate_fn(**kwargs)
         result["gate"] = decision.to_dict()

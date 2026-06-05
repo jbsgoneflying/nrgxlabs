@@ -49,6 +49,7 @@ def _get_gate_context(flags) -> dict:
     """
     ctx: dict = {
         "regime_label": "",
+        "regime_confidence": None,
         "vol_direction": "",
         "gamma_ctx": None,
         "high_events_within_days": 0,
@@ -61,6 +62,8 @@ def _get_gate_context(flags) -> dict:
             mi = regime_snapshot()
             if mi.label:
                 ctx["regime_label"] = mi.label
+            if mi.confidence is not None:
+                ctx["regime_confidence"] = float(mi.confidence)
             term = str((mi.vol_state or {}).get("term_structure", "")).lower()
             if term == "backwardation":
                 ctx["vol_direction"] = "rising"
@@ -211,6 +214,9 @@ def _gate_engine4_result(result, flags):
                         regime_allow=regime_allow,
                         regime_allow_short=regime_allow_short,
                         vol_state_allow=vol_state_allow,
+                        regime_min_confidence=float(
+                            getattr(flags, "GATE_ICH_REGIME_MIN_CONFIDENCE", 0.0) or 0.0
+                        ),
                         **gate_ctx,
                     )
             gs = summarize_gates(
