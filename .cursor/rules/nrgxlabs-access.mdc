@@ -10,11 +10,11 @@ alwaysApply: true
 
 - **URL**: https://app.nrgxlabs.com
 - **Invite Code**: RAVEN-BETA-2026
-- **Note**: the legacy `raven-tech.co` domain has been retired and is no longer owned. Do not reference it anywhere in code, comments, links, tests, or workflows. The org name is **NRGX Labs**; the repo directory is still `raven-tech/` for historical reasons but that's just disk layout.
+- **Note**: the legacy `raven-tech.co` domain has been retired and is no longer owned. Do not reference it anywhere in code, comments, links, tests, or workflows. The org name is **NRGX Labs**; the repo, GitHub project, and local working directory are all named `nrgxlabs` to match.
 
 ## Deployment
 
-- **Repo**: git@github.com:jbsgoneflying/raventech.git (branch: main)
+- **Repo**: git@github.com:jbsgoneflying/nrgxlabs.git (branch: main)
 - **Droplet path**: /opt/breach-algo
 - **Deploy trigger**: Push to main triggers GitHub Actions (`.github/workflows/deploy.yml`)
 - **Manual deploy** (if GH Actions unavailable): SSH into Droplet via DO console, run:

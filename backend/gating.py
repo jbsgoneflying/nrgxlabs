@@ -1,4 +1,4 @@
-"""Raven-Tech 2.0 – Gating layer for Engine 3 (Red Dog), Engine 4 (Ichimoku), and Engine 7 (Pairs).
+"""NRGX Labs 2.0 – Gating layer for Engine 3 (Red Dog), Engine 4 (Ichimoku), and Engine 7 (Pairs).
 
 Converts every scan result into one of three statuses:
   TRADABLE – green-lit for execution consideration

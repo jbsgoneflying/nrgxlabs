@@ -22,7 +22,7 @@ services:
   app-v2:
     build:
       context: .
-      dockerfile: raventech-v2/Dockerfile.v2
+      dockerfile: nrgxlabs-v2/Dockerfile.v2
     env_file:
       - .env
     ports:

@@ -20,7 +20,7 @@ router = APIRouter()
 def health() -> dict:
     return {
         "ok": True,
-        "service": "raven-tech-v2",
+        "service": "nrgxlabs-v2",
         "version": __version__,
         "ts": int(time.time()),
     }

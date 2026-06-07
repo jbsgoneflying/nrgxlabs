@@ -10,12 +10,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
   && rm -rf /var/lib/apt/lists/*
 
-COPY raventech-v2/requirements-v2.txt /app/requirements-v2.txt
+COPY nrgxlabs-v2/requirements-v2.txt /app/requirements-v2.txt
 RUN pip install --no-cache-dir -r /app/requirements-v2.txt
 
-COPY raventech-v2/v2_app   /app/v2_app
-COPY raventech-v2/static-v2 /app/static-v2
-COPY raventech-v2/deploy   /app/deploy
+COPY nrgxlabs-v2/v2_app   /app/v2_app
+COPY nrgxlabs-v2/static-v2 /app/static-v2
+COPY nrgxlabs-v2/deploy   /app/deploy
 
 RUN chmod +x /app/deploy/entrypoint-v2.sh
 

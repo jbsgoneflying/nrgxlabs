@@ -11,7 +11,7 @@ Implements:
   factor vector against its own 1-sigma band
 
 Why pure Python and not ``hmmlearn``?
-  The Docker image for Raven-Tech deliberately avoids numpy/scikit for
+  The Docker image for NRGX Labs deliberately avoids numpy/scikit for
   deployment size + determinism. 3 states × 8 factors × ~1300 days of
   history is well within stdlib performance (fit runs in <5s even under
   Python 3.12). All linear-algebra shortcuts assume **diagonal**

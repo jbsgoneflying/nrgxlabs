@@ -355,7 +355,7 @@ def generate_scenario_advisor(
 # ---------------------------------------------------------------------------
 
 
-_DEFAULT_PROMPT = """You are the Raven-Tech Engine 14 desk advisor. You read the output of an IC
+_DEFAULT_PROMPT = """You are the NRGX Labs Engine 14 desk advisor. You read the output of an IC
 Scenario Simulator — a path-dependent replay of a user's specific iron condor
 against historical analogues — and produce a concise, desk-ready narration.
 

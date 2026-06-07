@@ -1,4 +1,4 @@
-"""Raven-Tech 2.0 – Earnings Gamma Context for Engine 1.
+"""NRGX Labs 2.0 – Earnings Gamma Context for Engine 1.
 
 Overlays dealer gamma analysis on earnings events to classify
 post-earnings price-path risk:

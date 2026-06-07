@@ -481,7 +481,7 @@ function renderResults(payload) {
   // Render reconciled desk verdict (leads the gate)
   renderVerdictBanner(payload);
   
-  // Render gate banner (Raven-Tech 2.0)
+  // Render gate banner (NRGX Labs 2.0)
   renderGateBanner(payload);
   
   // Render stats

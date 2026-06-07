@@ -48,7 +48,7 @@ LOG = logging.getLogger("v2.app")
 
 CFG = get_config()
 
-app = FastAPI(title="Raven Tech v2", version=__version__)
+app = FastAPI(title="NRGX Labs v2", version=__version__)
 
 app.add_middleware(
     CORSMiddleware,
@@ -86,7 +86,7 @@ def index():
     if f.exists():
         return FileResponse(str(f))
     return HTMLResponse(
-        "<h1>Raven Tech v2</h1><p>Frontend not yet built. See /api/v2/health.</p>"
+        "<h1>NRGX Labs v2</h1><p>Frontend not yet built. See /api/v2/health.</p>"
     )
 
 
@@ -112,4 +112,4 @@ for slug in ("e1", "e2", "e14", "e15", "mi"):
     app.get(f"/{slug}", response_class=HTMLResponse)(_engine_page)
 
 
-LOG.info("Raven Tech v2 ready - version=%s public=%s", __version__, CFG.public_access)
+LOG.info("NRGX Labs v2 ready - version=%s public=%s", __version__, CFG.public_access)

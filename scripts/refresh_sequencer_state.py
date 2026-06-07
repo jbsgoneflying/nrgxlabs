@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Raven-Tech – Sequencer Breadth State Refresh (cron wrapper).
+"""NRGX Labs – Sequencer Breadth State Refresh (cron wrapper).
 
 Computes three breadth/dispersion metrics for the pattern library sequencer
 and persists them to Redis so the Engine 5 sequencer emitter can detect

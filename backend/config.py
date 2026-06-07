@@ -638,7 +638,7 @@ class FeatureFlags:
     LLM_NARRATIVE_CACHE_TTL_S: int = 1800         # 30 minutes
     LLM_MAX_CALLS_PER_MINUTE: int = 2
 
-    # --- Raven-Tech Front Layer (Market Intelligence) ---
+    # --- NRGX Labs Front Layer (Market Intelligence) ---
     ENABLE_FRONT_LAYER: bool = True
     ENABLE_FRONT_LAYER_LLM: bool = True
     FRONT_LAYER_DMS_TTL_S: int = 120 * 86400      # 120 days

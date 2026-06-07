@@ -29,9 +29,9 @@ tests/            Phase 0 smoke tests
 
 ```bash
 # From the repo root, in the existing .venv:
-.venv/bin/pip install -r raventech-v2/requirements-v2.txt
+.venv/bin/pip install -r nrgxlabs-v2/requirements-v2.txt
 PUBLIC_ACCESS=1 V2_BIND_PORT=8001 .venv/bin/python -m uvicorn v2_app.main:app \
-  --reload --port 8001 --app-dir raventech-v2
+  --reload --port 8001 --app-dir nrgxlabs-v2
 ```
 
 Then open `http://localhost:8001/`.
@@ -39,7 +39,7 @@ Then open `http://localhost:8001/`.
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest raventech-v2/tests -q
+.venv/bin/python -m pytest nrgxlabs-v2/tests -q
 ```
 
 ## Container

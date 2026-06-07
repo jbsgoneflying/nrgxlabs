@@ -33,7 +33,7 @@ def test_health_is_public_and_ok(client: TestClient) -> None:
     assert res.status_code == 200
     body = res.json()
     assert body["ok"] is True
-    assert body["service"] == "raven-tech-v2"
+    assert body["service"] == "nrgxlabs-v2"
     assert "version" in body and body["version"]
     assert isinstance(body["ts"], int) and body["ts"] > 0
 
@@ -182,7 +182,7 @@ def test_landing_page_renders_v2_brand(client: TestClient) -> None:
     html = res.text
     # The single most distinctive v2 marker — the wordmark + tag.
     assert "v2 · foundation brain" in html
-    assert "Raven Tech" in html
+    assert "NRGX Labs" in html
     # Confirms the v2.css token system is wired.
     assert "/static/v2.css" in html
 

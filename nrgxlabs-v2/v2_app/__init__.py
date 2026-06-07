@@ -1,4 +1,4 @@
-"""Raven Tech v2 — Foundation Brain + Agentic Reasoning trading platform.
+"""NRGX Labs v2 — Foundation Brain + Agentic Reasoning trading platform.
 
 This package is intentionally separate from the v1 ``backend/`` codebase. It
 runs as its own FastAPI service (port 8001) so v1 trading flows are never
@@ -10,7 +10,7 @@ Layers:
     agents/       Layer 3 - Researcher / Quant / Devil / Risk / Synthesizer
     eval/         Layer 4 - counterfactual logger, conformal coverage tracker
 
-See ``raventech-v2/README.md`` for the architecture overview.
+See ``nrgxlabs-v2/README.md`` for the architecture overview.
 """
 
 __version__ = "2.0.0-alpha.0"

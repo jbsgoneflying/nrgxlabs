@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Raven-Tech Front Layer – Daily Market State Refresh Script (cron wrapper).
+"""NRGX Labs Front Layer – Daily Market State Refresh Script (cron wrapper).
 
 Builds and persists the DailyMarketState, generates Morning Brief, and
 optionally generates the Weekly Roadmap (Sunday nights).

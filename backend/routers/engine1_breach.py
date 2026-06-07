@@ -141,7 +141,7 @@ def breach(
             benzinga_client=get_benzinga_client_optional(),
         )
 
-        # Inject Earnings Gamma Context (Raven-Tech 2.0)
+        # Inject Earnings Gamma Context (NRGX Labs 2.0)
         try:
             from backend.dealer_gamma_context import compute_dealer_gamma_context
             from backend.engine2_gamma_addons import compute_tail_ignition

@@ -74,7 +74,7 @@ def _http_get(url: str, params: Dict[str, Any], timeout_s: float) -> tuple[int, 
     req = urllib.request.Request(
         full,
         method="GET",
-        headers={"Accept": "application/json", "User-Agent": "RavenTech/1.0"},
+        headers={"Accept": "application/json", "User-Agent": "NRGXLabs/1.0"},
     )
     try:
         ctx = _build_ssl_context()

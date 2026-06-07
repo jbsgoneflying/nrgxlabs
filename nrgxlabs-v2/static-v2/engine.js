@@ -1,4 +1,4 @@
-/* Raven Tech v2 — engine landing pages.
+/* NRGX Labs v2 — engine landing pages.
  * One static HTML, populated based on URL pathname. */
 
 (function () {
@@ -102,7 +102,7 @@
 
   function render(slug) {
     var spec = SPECS[slug];
-    document.title = "Raven Tech v2 — " + slug.toUpperCase();
+    document.title = "NRGX Labs v2 — " + slug.toUpperCase();
 
     document.getElementById("v2EngineTag").textContent = spec.tag;
     document.getElementById("v2EngineBadge").textContent = spec.badge;

@@ -1,4 +1,4 @@
-"""Raven-Tech Front Layer – News Theme Intelligence.
+"""NRGX Labs Front Layer – News Theme Intelligence.
 
 Clusters headlines from EODHD and Benzinga into named themes, scoring each
 by intensity, persistence, and acceleration. Raw headlines are NEVER stored

@@ -275,7 +275,7 @@ function renderSignalCard(signal, isStructure = false) {
     }
   }
   
-  // Gate pill (Raven-Tech 2.0)
+  // Gate pill (NRGX Labs 2.0)
   let gatePillHtml = "";
   const gate = signal.gate || {};
   if (gate.status) {

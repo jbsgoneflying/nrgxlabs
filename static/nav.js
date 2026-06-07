@@ -1,4 +1,4 @@
-/* ── Raven-Tech Hamburger Nav ─────────────────────────────────────────
+/* ── NRGX Labs Hamburger Nav ─────────────────────────────────────────
    Shared across all pages. Auto-highlights the current page.
    ──────────────────────────────────────────────────────────────────── */
 (function () {

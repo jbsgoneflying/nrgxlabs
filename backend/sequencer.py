@@ -1,4 +1,4 @@
-"""Raven-Tech 2.0 – Weekly Signal Sequencer.
+"""NRGX Labs 2.0 – Weekly Signal Sequencer.
 
 Tracks when key signals flip throughout the week and matches the
 resulting sequence to named historical patterns.

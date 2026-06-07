@@ -1,4 +1,4 @@
-"""Raven-Tech Front Layer – LLM Pipeline (Read-Only).
+"""NRGX Labs Front Layer – LLM Pipeline (Read-Only).
 
 Generates Morning Brief and Weekly Roadmap from DailyMarketState.
 Also includes deterministic Asymmetry Radar detection.

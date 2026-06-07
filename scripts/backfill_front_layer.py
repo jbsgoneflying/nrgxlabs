@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Raven-Tech Front Layer – Historical Backfill Script.
+"""NRGX Labs Front Layer – Historical Backfill Script.
 
 Fetches 14 days of historical cross-asset bars, news headlines, and calendar
 events from EODHD + Benzinga, builds a DailyMarketState for each trading day,

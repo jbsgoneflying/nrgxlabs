@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 160" role="img" aria-label="Raven-Tech.co">
-  <title>Raven-Tech.co</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 160" role="img" aria-label="NRGX Labs">
+  <title>NRGX Labs</title>
   <defs>
     <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#0b0b0f" stop-opacity="0.92"/>
@@ -27,13 +27,7 @@
           font-size="54"
           font-weight="800"
           letter-spacing="-0.6"
-          fill="#0b0b0f">RAVEN-TECH</text>
-    <text x="410" y="0"
-          font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif"
-          font-size="54"
-          font-weight="700"
-          letter-spacing="-0.6"
-          fill="#0b0b0f" fill-opacity="0.78">.co</text>
+          fill="#0b0b0f">NRGX LABS</text>
   </g>
 </svg>
 

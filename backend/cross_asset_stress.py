@@ -1,4 +1,4 @@
-"""Raven-Tech Front Layer – Cross-Asset Stress Module.
+"""NRGX Labs Front Layer – Cross-Asset Stress Module.
 
 Structured ingestion for FX, Commodities, Crypto, and Volatility markets.
 Each asset produces:

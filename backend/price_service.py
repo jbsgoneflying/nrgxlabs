@@ -257,7 +257,7 @@ class PriceService:
         """Return the latest available close price for *ticker*.
 
         EODHD is EOD-only; this returns the most recent adjusted close.
-        Suitable for Raven-Tech's EOD-centric architecture.
+        Suitable for NRGX Labs's EOD-centric architecture.
         """
         today = dt.date.today()
         # Look back up to 7 days to handle weekends / holidays

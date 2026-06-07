@@ -1,5 +1,5 @@
 /**
- * Raven-Tech Calculator
+ * NRGX Labs Calculator
  * Apple-style draggable calculator popup
  */
 

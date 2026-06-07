@@ -105,7 +105,7 @@ def main() -> int:
     exit_code, snapshot_id = run_pipeline(force=force, source="cron")
     if snapshot_id:
         LOG.info("Snapshot created: %s", snapshot_id)
-        # Emit sequencer events on state changes (Raven-Tech 2.0)
+        # Emit sequencer events on state changes (NRGX Labs 2.0)
         store = get_store_optional()
         if store:
             _emit_sequencer_events(store, snapshot_id)

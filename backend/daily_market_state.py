@@ -1,7 +1,7 @@
 """NRGX Labs Front Layer – DailyMarketState.
 
 Single canonical object written once per day that synthesizes all existing
-Raven Tech engines into a deterministic market snapshot.
+NRGX Labs engines into a deterministic market snapshot.
 
 Run time:
   - Daily at 03:55 EST

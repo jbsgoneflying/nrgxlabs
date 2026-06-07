@@ -407,7 +407,7 @@ def generate_desk_insight(
     engine_name = str(engine_meta.get("name") or f"Engine {engine_id.upper()}")
     engine_description = str(
         engine_meta.get("description")
-        or "Raven-Tech quant analytics surface."
+        or "NRGX Labs quant analytics surface."
     )
     asset_class = str(engine_meta.get("asset_class") or "multi-asset")
 

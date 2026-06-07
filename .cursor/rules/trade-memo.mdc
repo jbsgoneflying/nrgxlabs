@@ -31,7 +31,7 @@ Trade memos are data-heavy decision artifacts. Always render as a Cursor canvas 
 9. **Playbook timeline** — 3 Cards stacked: pre-entry checklist, hold-period monitoring, exit execution. Each card has 3–6 bullet `Text` items, NOT a table.
 10. **Risk register Table** — 5 rows: risk, probability, impact, mitigant. Color rows by severity.
 11. **Desk one-pager Grid (2 cols)** — Bull case card / Bear case card. 5 bullets each, written as something the desk could read aloud in 30 seconds.
-12. **Footer source line** — list every data source used (Raven-Tech endpoint + URL, news outlets, social, ORATS, etc.).
+12. **Footer source line** — list every data source used (NRGX Labs endpoint + URL, news outlets, social, ORATS, etc.).
 
 ## Data gathering — parallel pulls, every time
 

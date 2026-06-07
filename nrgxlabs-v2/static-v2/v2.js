@@ -1,4 +1,4 @@
-/* Raven Tech v2 — minimal client glue.
+/* NRGX Labs v2 — minimal client glue.
  *
  * Phase 0:
  *   - Animate brain progress bars + sync the pct chip

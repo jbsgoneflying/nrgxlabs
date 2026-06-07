@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════
-   Raven-Tech · Market Intelligence
+   NRGX Labs · Market Intelligence
    Front Layer: synthesizes all engines into a daily roadmap.
    Read-only. No trade recommendations.
    ═══════════════════════════════════════════════════════════════════════ */

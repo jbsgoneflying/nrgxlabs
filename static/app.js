@@ -2198,7 +2198,7 @@ function _wingRecLabel(label) {
   return l || "—";
 }
 
-// ── Earnings Gamma Context (Raven-Tech 2.0) ──────────────────────────
+// ── Earnings Gamma Context (NRGX Labs 2.0) ──────────────────────────
 function renderEarningsGammaContext(payload) {
   const sec = $("earningsGammaSection");
   if (!sec) return;

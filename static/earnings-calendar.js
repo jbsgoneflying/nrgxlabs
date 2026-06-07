@@ -1,4 +1,4 @@
-/* ── Raven-Tech  ·  Earnings Calendar (EODHD-only) ───────────────────
+/* ── NRGX Labs  ·  Earnings Calendar (EODHD-only) ───────────────────
    Month / week views of mega-cap ($100 B+) earnings with compare workflow.
    ──────────────────────────────────────────────────────────────────── */
 (function () {

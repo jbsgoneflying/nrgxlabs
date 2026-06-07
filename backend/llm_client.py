@@ -1,4 +1,4 @@
-"""Raven-Tech 2.0 – LLM Client for narrative compression.
+"""NRGX Labs 2.0 – LLM Client for narrative compression.
 
 Thin wrapper around OpenAI API with:
   - Retry and timeout handling
