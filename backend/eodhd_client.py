@@ -216,8 +216,9 @@ class EodhdClient:
         if isinstance(data, list):
             return [x for x in data if isinstance(x, dict)]
         if isinstance(data, dict):
-            # UST endpoints wrap in {"meta": ..., "data": [...]}
-            for key in ("data", "rows", "items", "result", "results"):
+            # UST endpoints wrap in {"meta": ..., "data": [...]};
+            # calendar/earnings wraps in {"earnings": [...]}
+            for key in ("data", "rows", "items", "result", "results", "earnings"):
                 v = data.get(key)
                 if isinstance(v, list):
                     return [x for x in v if isinstance(x, dict)]
@@ -442,11 +443,12 @@ class EodhdClient:
         params: Dict[str, Any] = {"fmt": "json"}
         if symbols:
             params["symbols"] = symbols
-        else:
-            if from_date:
-                params["from"] = from_date
-            if to_date:
-                params["to"] = to_date
+        # EODHD applies a narrow default window when from/to are omitted — even
+        # with symbols set — so pass dates whenever provided.
+        if from_date:
+            params["from"] = from_date
+        if to_date:
+            params["to"] = to_date
         return self._get(url, params)
 
     def get_calendar_trends(self, *, symbols: str) -> EodhdResponse:

@@ -123,7 +123,9 @@ class EodhdEarningsProvider:
 
     def get_events(self, ticker: str, start: str, end: str) -> List[EarningsEvent]:
         sym = to_eodhd_symbol(ticker)
-        resp = self._client.get_calendar_earnings(symbols=sym)
+        resp = self._client.get_calendar_earnings(
+            symbols=sym, from_date=start[:10], to_date=end[:10]
+        )
         events: List[EarningsEvent] = []
         for row in resp.rows or []:
             date = str(row.get("report_date") or row.get("date") or "")[:10]
@@ -157,16 +159,32 @@ class ApiNinjasInsiderProvider:
         self._client = client
 
     def get_transactions(self, ticker: str, start: str, end: str) -> List[InsiderTxn]:
-        rows = self._client.get_insider_transactions(ticker, limit=100)
+        # API Ninjas returns newest-first pages of 100; paginate back until we
+        # pass the start date (or hit the page cap).
+        rows: List[dict] = []
+        for page in range(10):
+            batch = self._client.get_insider_transactions(ticker, limit=100, offset=page * 100)
+            if not batch:
+                break
+            rows.extend(batch)
+            oldest = min(
+                (str(r.get("filing_date") or r.get("transaction_date") or "9999"))[:10]
+                for r in batch
+            )
+            if oldest < start:
+                break
         txns: List[InsiderTxn] = []
         for row in rows or []:
             filing = str(row.get("filing_date") or row.get("transaction_date") or "")[:10]
             if not filing or not (start <= filing <= end):
                 continue
-            raw_type = str(row.get("transaction_type") or "").lower()
-            if "buy" in raw_type or "purchase" in raw_type or raw_type == "p":
+            raw_type = str(row.get("transaction_type") or "").strip().lower()
+            # API Ninjas taxonomy: only bare "purchase" is an open-market buy
+            # (the signal). derivative_purchase / exercise / award are comp
+            # plumbing, frequently at price=0 — excluded to avoid false clusters.
+            if raw_type in ("purchase", "buy", "p"):
                 side = "buy"
-            elif "sell" in raw_type or "sale" in raw_type or "disposition" in raw_type or raw_type == "s":
+            elif raw_type in ("sale", "sell", "s", "derivative_sale", "other_disposition"):
                 side = "sell"
             else:
                 continue

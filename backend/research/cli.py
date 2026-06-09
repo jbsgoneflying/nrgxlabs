@@ -361,6 +361,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: List[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.cmd not in ("demo", "scorecard", "gate"):
+        from backend.research.env_loader import load_research_env
+
+        load_research_env()
     args.func(args)
     return 0
 
