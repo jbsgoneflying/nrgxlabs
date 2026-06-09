@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Earnings Drift (PEAD) — Engine 18 | NRGX Labs</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="description" content="NRGX Labs — Earnings Drift scanner: large high-quality beats, LLM transcript grading, validated 10-day post-earnings drift entries." />
+    <meta name="application-name" content="NRGX Labs" />
+    <meta name="apple-mobile-web-app-title" content="NRGX Labs" />
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="/static/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=14" />
+    <style>
+      .edBanner {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+        padding: 16px 18px; border-radius: var(--radius-card);
+        border: 1px solid var(--border); background: rgba(255,255,255,0.78);
+        margin-top: 14px;
+      }
+      .edStat { display: flex; flex-direction: column; gap: 2px; min-width: 92px; }
+      .edStatLabel { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: rgba(11,11,15,0.5); }
+      .edStatValue { font-size: 20px; font-weight: 800; letter-spacing: -0.3px; }
+      .edGrow { flex: 1; }
+      .edBtn {
+        appearance: none; border: 1px solid var(--border); background: #fff;
+        border-radius: 10px; padding: 9px 16px; font-weight: 700; font-size: 13px; cursor: pointer;
+      }
+      .edBtn:hover { background: rgba(11,11,15,0.03); }
+      .edBtn:disabled { opacity: .55; cursor: default; }
+      .edBtn--sm { padding: 6px 11px; font-size: 12px; border-radius: 8px; }
+
+      .edMuted { color: rgba(11,11,15,0.5); font-size: 12px; }
+      .edEmpty { padding: 22px; text-align: center; color: rgba(11,11,15,0.5); }
+
+      /* Rolling-edge / validation banner */
+      .edValidation {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+        margin-top: 12px; padding: 10px 14px; border-radius: 12px; font-size: 12.5px;
+        border: 1px solid rgba(0,122,255,0.16); background: rgba(0,122,255,0.05);
+        color: rgba(11,11,15,0.72);
+      }
+      .edValidation--degraded { border-color: rgba(255,59,48,0.3); background: rgba(255,59,48,0.07); }
+      .edValidation b { color: rgba(11,11,15,0.86); }
+      .edDegradedFlag { font-weight: 800; font-size: 11px; padding: 2px 9px; border-radius: 999px; background: rgba(255,59,48,0.16); color: #b02018; text-transform: uppercase; letter-spacing: .04em; }
+      .edHealthyFlag  { font-weight: 800; font-size: 11px; padding: 2px 9px; border-radius: 999px; background: rgba(52,199,89,0.18); color: #1f7a3d; text-transform: uppercase; letter-spacing: .04em; }
+
+      .edSectionHead { display:flex; align-items:center; justify-content:space-between; margin-top: 22px; }
+      .edSectionHead h2 { font-size: 15px; font-weight: 800; margin: 0; }
+
+      /* Candidate cards */
+      .edCards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; margin-top: 12px; }
+      .edCard { padding: 14px 15px; border-radius: var(--radius-card); border: 1px solid var(--border); background: rgba(255,255,255,0.78); }
+      .edCard--full { border-color: rgba(52,199,89,0.45); box-shadow: 0 0 0 1px rgba(52,199,89,0.25); }
+      .edCard--pass { opacity: .72; }
+      .edCardHead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+      .edTicker { font-size: 17px; font-weight: 800; letter-spacing: -0.3px; }
+      .edPill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 800; line-height: 1.3; }
+      .edPill--beat_large { background: rgba(52,199,89,0.18); color: #1f7a3d; }
+      .edPill--beat_small { background: rgba(0,122,255,0.14); color: #0a52b8; }
+      .edPill--full { background: rgba(52,199,89,0.22); color: #1f7a3d; }
+      .edPill--half { background: rgba(255,179,64,0.22); color: #8a5a00; }
+      .edPill--pass { background: rgba(142,142,147,0.18); color: #4a4a4f; }
+      .edPill--q { background: rgba(88,86,214,0.14); color: #3b39a8; }
+      .edCardMeta { margin-left: auto; font-size: 11px; color: rgba(11,11,15,0.5); font-variant-numeric: tabular-nums; }
+
+      .edRows { margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size: 12.5px; }
+      .edRow { display: flex; justify-content: space-between; gap: 8px; }
+      .edRowL { color: rgba(11,11,15,0.5); }
+      .edRowV { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+      .edPos { color: #1f7a3d; }
+
+      .edRationale { margin-top: 10px; font-size: 12px; line-height: 1.5; color: rgba(11,11,15,0.66); border-left: 3px solid rgba(88,86,214,0.3); padding-left: 9px; }
+      .edExpected { margin-top: 10px; padding: 8px 10px; border-radius: 10px; background: rgba(0,122,255,0.05); border: 1px solid rgba(0,122,255,0.12); font-size: 11.5px; color: rgba(11,11,15,0.66); }
+      .edExpected b { color: rgba(11,11,15,0.86); }
+
+      .edCardActions { margin-top: 11px; display: flex; flex-wrap: wrap; gap: 7px; }
+
+      /* Options expression card */
+      .edOpt { margin-top: 10px; padding: 9px 11px; border-radius: 10px; border: 1px dashed rgba(88,86,214,0.4); background: rgba(88,86,214,0.04); font-size: 12px; }
+      .edOptHead { font-weight: 800; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #3b39a8; margin-bottom: 5px; }
+      .edOptBody { line-height: 1.5; color: rgba(11,11,15,0.74); font-variant-numeric: tabular-nums; }
+      .edOptDisclaimer { margin-top: 5px; font-size: 10.5px; color: #8a5a00; font-weight: 600; }
+
+      /* Tracker */
+      .edTrackerCard { padding: 0; border-radius: var(--radius-card); border: 1px solid var(--border); background: rgba(255,255,255,0.78); margin-top: 12px; }
+      .edTableWrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .edTable { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 13px; }
+      .edTable th, .edTable td { text-align: left; padding: 9px 12px; border-bottom: 1px solid rgba(11,11,15,0.07); }
+      .edTable th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: rgba(11,11,15,0.5); }
+      .edTable .edNum { text-align: right; font-variant-numeric: tabular-nums; }
+      .edStatus--active { color: #0a52b8; font-weight: 700; }
+      .edStatus--closed { color: rgba(11,11,15,0.5); font-weight: 700; }
+      .edExitDue { color: #b02018; font-weight: 800; }
+
+      .edAdvisor { margin-top: 12px; padding: 14px 16px; border-radius: var(--radius-card); border: 1px solid var(--border); background: rgba(255,255,255,0.78); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+
+      @media (max-width: 640px) {
+        .container { padding-left: 14px; padding-right: 14px; }
+        .edBanner { padding: 12px 14px; gap: 10px 14px; }
+        .edStat { min-width: 76px; }
+        .edStatValue { font-size: 18px; }
+        .edCards { grid-template-columns: 1fr; }
+      }
+    </style>
+    <link rel="stylesheet" href="/static/desk-insight.css?v=2" />
+    <meta name="raven-desk-engine" content="e18" />
+    <script src="/static/desk-insight.js?v=2"></script>
+  </head>
+  <body>
+    <main class="container" role="main">
+      <header class="appHeader">
+        <div class="appBrand">
+          <img class="brandLogo" src="/static/NRGX-Logo.png" alt="NRGX Labs" />
+          <div class="appHeaderText">
+            <div class="appSubtitle">Earnings Drift (PEAD) — Engine 18</div>
+          </div>
+        </div>
+      </header>
+
+      <section class="edBanner" aria-label="Scan summary" data-insight="scan_summary">
+        <div class="edStat">
+          <span class="edStatLabel">Candidates</span>
+          <span class="edStatValue" id="edCandidates">—</span>
+        </div>
+        <div class="edStat">
+          <span class="edStatLabel">Actionable</span>
+          <span class="edStatValue" id="edActionable">—</span>
+        </div>
+        <div class="edStat">
+          <span class="edStatLabel">Full size</span>
+          <span class="edStatValue" id="edFull">—</span>
+        </div>
+        <div class="edStat">
+          <span class="edStatLabel">Half size</span>
+          <span class="edStatValue" id="edHalf">—</span>
+        </div>
+        <div class="edGrow"></div>
+        <div class="edStat" style="min-width:auto">
+          <button class="edBtn" id="edRefresh" type="button">Rebuild scan</button>
+        </div>
+      </section>
+
+      <div id="edStatus" class="edMuted" style="margin-top:10px"></div>
+      <div id="edValidation" style="display:none"></div>
+
+      <div class="edSectionHead">
+        <h2 data-insight="candidate_card">Drift candidates</h2>
+        <span class="edMuted" id="edCandSub"></span>
+      </div>
+      <div class="edCards" id="edCards"></div>
+      <div class="edEmpty" id="edEmpty" style="display:none"></div>
+
+      <div class="edSectionHead">
+        <h2 data-insight="tracker">Desk tracker</h2>
+        <span class="edMuted" id="edTrackSub"></span>
+      </div>
+      <div class="edTrackerCard">
+        <div class="edTableWrap">
+          <table class="edTable" id="edTrackTable">
+            <thead>
+              <tr>
+                <th>Ticker</th><th>Status</th><th>Entry</th><th>Planned exit</th>
+                <th class="edNum">Entry px</th><th class="edNum">Exit px</th><th class="edNum">Return</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="edTrackBody"></tbody>
+          </table>
+        </div>
+        <div class="edEmpty" id="edTrackEmpty" style="display:none">No tracked drift trades yet — use “Track entry” on a candidate card.</div>
+      </div>
+
+      <div class="edSectionHead">
+        <h2>Desk note</h2>
+        <button class="edBtn edBtn--sm" id="edAdvisorBtn" type="button">Generate desk note</button>
+      </div>
+      <div class="edAdvisor" id="edAdvisor" style="display:none"></div>
+
+      <p class="edMuted" style="margin-top:18px" data-insight="quality_grade">
+        Validated by the Edge Bake-Off (live run 2026-06-09, S&amp;P 500, 2018-2026, 10bps/side):
+        OOS 2023+ <b>+0.65%/trade (t=2.7, n=843)</b>; large beats <b>+1.05%</b> carry the edge; misses lose money
+        (never shorted); top transcript-quality quintile <b>+1.45%/trade @ 60% hit</b>. The LLM grades transcript
+        quality only — the candidate filter, surprise buckets, and sizing tiers are <b>deterministic</b>. Entries go on
+        at the <b>next session open</b> after the report and exit after exactly <b>10 trading days</b> — discipline IS the edge.
+        Regime is shown as context only and never gates an entry.
+      </p>
+    </main>
+
+    <script src="/static/nav.js?v=15"></script>
+    <script src="/static/earnings-drift.js?v=1"></script>
+    <script src="/static/raven-chat.js?v=4"></script>
+  </body>
+</html>

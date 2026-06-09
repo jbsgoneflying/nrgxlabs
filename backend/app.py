@@ -37,6 +37,7 @@ from backend.routers import (
     desk_insight,
     desk_brain,
     ai_capex,
+    engine18_pead,
 )
 
 try:
@@ -346,6 +347,17 @@ def ai_capex_page():
     )
 
 
+@app.get("/earnings-drift")
+def earnings_drift_page():
+    fl = get_flags()
+    if not getattr(fl, "ENABLE_ENGINE18", True):
+        raise HTTPException(status_code=404, detail="Engine 18 disabled")
+    return FileResponse(
+        str(STATIC_DIR / "earnings-drift.html"),
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @app.get("/news-risk")
 def news_risk_page():
     return FileResponse(str(STATIC_DIR / "news-risk.html"))
@@ -438,6 +450,7 @@ app.include_router(raven_chat.router)
 app.include_router(desk_insight.router)
 app.include_router(desk_brain.router)
 app.include_router(ai_capex.router)
+app.include_router(engine18_pead.router)
 
 
 # ── Startup: rebuild trade indexes if they expired while the app was down ──
@@ -447,7 +460,9 @@ def _rebuild_trade_indexes():
     try:
         from backend.engine2_trades import rebuild_index_if_missing as e2_rebuild
         from backend.e1_earnings_trades import rebuild_index_if_missing as e1_rebuild
+        from backend.engine18.trades import rebuild_index_if_missing as e18_rebuild
         e2_rebuild()
         e1_rebuild()
+        e18_rebuild()
     except Exception:
         pass

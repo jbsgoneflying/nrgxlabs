@@ -353,6 +353,64 @@ def from_ai_capex(scan: Optional[Dict[str, Any]]) -> List[Opportunity]:
     return out
 
 
+def from_engine18(scan: Optional[Dict[str, Any]]) -> List[Opportunity]:
+    """Normalise an Earnings Drift (UI E18) scan into opportunities.
+
+    Only candidates the deterministic matrix sized full or half become
+    tradable; passes never reach the allocator. Long-only by engine design
+    (misses lose money — validated). Conviction maps the sizing tier plus the
+    quality grade: the same gradient the bake-off cohorts showed (+1.05%
+    large beats, +1.45% top-quintile quality).
+    """
+    out: List[Opportunity] = []
+    if not isinstance(scan, dict):
+        return out
+    edge = sleeves.get_engine_edge(18)
+    for c in (scan.get("candidates") or []):
+        if not isinstance(c, dict):
+            continue
+        ticker = str(c.get("ticker") or "").upper()
+        sizing = str(c.get("sizing") or "").lower()
+        if not ticker or sizing not in ("full", "half"):
+            continue
+        grade = c.get("grade") or {}
+        quality = _f(grade.get("score")) or 0.5
+        base = 70.0 if sizing == "full" else 50.0
+        conviction = max(0.0, min(100.0, base + 20.0 * (quality - 0.5) * 2.0))
+        rep = c.get("report") or {}
+        surprise = _f(rep.get("surprise_pct"))
+        out.append(
+            Opportunity(
+                engine_id=18,
+                engine_name=edge.engine_name or "Earnings Drift (PEAD)",
+                sleeve=sleeves.SLEEVE_DIRECTIONAL,
+                ticker=ticker,
+                direction="long",
+                structure="earnings_drift",
+                conviction=conviction,
+                verdict=_VERDICT_TRADABLE,
+                desk_status="",
+                summary=(
+                    f"{'Large' if c.get('bucket') == 'beat_large' else 'Small'} beat"
+                    f" {f'{surprise * 100:+.0f}%' if surprise is not None else ''}"
+                    f" · quality {grade.get('quintile') or '?'} · {sizing} size"
+                    f" · exit {c.get('exit_date') or '?'}"
+                ),
+                source="engine18",
+                raw={
+                    "bucket": c.get("bucket"),
+                    "sizing": sizing,
+                    "quintile": grade.get("quintile"),
+                    "qualityScore": quality,
+                    "surprisePct": surprise,
+                    "entryDate": c.get("entry_date"),
+                    "exitDate": c.get("exit_date"),
+                },
+            )
+        )
+    return out
+
+
 def from_consensus(consensus: Any) -> List[Opportunity]:
     """Normalise a consensus_engine.ConsensusResult's income-sleeve signals.
 
@@ -412,6 +470,7 @@ def build_opportunity_set(
     earnings_radar: Optional[Dict[str, Any]] = None,
     vix_alert: Optional[Dict[str, Any]] = None,
     ai_capex: Optional[Dict[str, Any]] = None,
+    engine18: Optional[Dict[str, Any]] = None,
     extra: Optional[List[Opportunity]] = None,
 ) -> List[Opportunity]:
     """Assemble the normalised opportunity set from all wired sources."""
@@ -421,6 +480,7 @@ def build_opportunity_set(
     opps.extend(from_earnings_radar(earnings_radar))
     opps.extend(from_vix_alert(vix_alert))
     opps.extend(from_ai_capex(ai_capex))
+    opps.extend(from_engine18(engine18))
     if consensus is not None:
         opps.extend(from_consensus(consensus))
     if extra:

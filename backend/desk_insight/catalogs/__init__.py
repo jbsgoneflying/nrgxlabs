@@ -32,6 +32,7 @@ from backend.desk_insight.catalogs import (
     e13_gap_regime,
     e14_ic_scenario,
     e15_earnings_ic,
+    e18_earnings_drift,
     market_intel,
 )
 
@@ -50,6 +51,7 @@ _REGISTRY: Dict[str, Any] = {
     "e13":           e13_gap_regime,
     "e14":           e14_ic_scenario,
     "e15":           e15_earnings_ic,
+    "e18":           e18_earnings_drift,
     "calendar":      calendar,
     "compare":       compare,
 }
@@ -71,6 +73,8 @@ _ALIASES: Dict[str, str] = {
     "news-risk":               "e11",
     "vix-fade":                "e12",
     "gap-regime":              "e13",
+    "earnings-drift":          "e18",
+    "engine18":                "e18",
     "earnings-calendar":       "calendar",
 }
 

@@ -313,6 +313,43 @@ def test_aggregator_from_earnings_radar():
     assert aggregator.from_earnings_radar({}) == []
 
 
+def test_aggregator_from_engine18():
+    scan = {
+        "candidates": [
+            {"ticker": "BIGB", "sizing": "full", "bucket": "beat_large",
+             "grade": {"score": 0.9, "quintile": "Q5"},
+             "report": {"surprise_pct": 0.30},
+             "entry_date": "2026-06-09", "exit_date": "2026-06-23"},
+            {"ticker": "SMLB", "sizing": "half", "bucket": "beat_small",
+             "grade": {"score": 0.6, "quintile": "Q4"},
+             "report": {"surprise_pct": 0.08},
+             "entry_date": "2026-06-09", "exit_date": "2026-06-23"},
+            # Pass-tier candidates never reach the allocator.
+            {"ticker": "PASS", "sizing": "pass", "bucket": "beat_small",
+             "grade": {"score": 0.2, "quintile": "Q1"},
+             "report": {"surprise_pct": 0.06}},
+        ]
+    }
+    opps = aggregator.from_engine18(scan)
+    assert [o.ticker for o in opps] == ["BIGB", "SMLB"]
+    big = opps[0]
+    assert big.engine_id == 18
+    assert big.sleeve == sleeves.SLEEVE_DIRECTIONAL
+    assert big.direction == "long"           # engine is long-only by design
+    assert big.structure == "earnings_drift"
+    assert big.conviction > opps[1].conviction  # full+Q5 beats half+Q4
+    assert big.is_actionable
+    assert "Large beat" in big.summary and "Q5" in big.summary
+    # Edge prior carries the validated bake-off sample.
+    edge = sleeves.get_engine_edge(18)
+    assert edge.sample == 843
+    assert edge.sleeve == sleeves.SLEEVE_DIRECTIONAL
+    assert edge.edge_score > sleeves.get_engine_edge(17).edge_score  # proven > unproven
+    # Empty / malformed input degrades safely.
+    assert aggregator.from_engine18(None) == []
+    assert aggregator.from_engine18({}) == []
+
+
 def test_aggregator_from_vix_alert():
     # No spike -> no opportunity.
     assert aggregator.from_vix_alert({"detected": False}) == []

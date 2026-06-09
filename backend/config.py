@@ -26,6 +26,7 @@ ENGINE_REGISTRY = {
     15: {"name": "Earnings IC Scenario Simulator",    "backend": "engine15_earnings_ic", "api": "/api/earnings-ic"},
     16: {"name": "Desk Brain (Meta-Allocator)",       "backend": "desk_brain",          "api": "/api/desk-brain"},
     17: {"name": "AI Capex Reality Engine",           "backend": "ai_capex",            "api": "/api/ai-capex"},
+    18: {"name": "Earnings Drift (PEAD)",              "backend": "engine18_pead",       "api": "/api/engine18"},
 }
 
 
@@ -644,6 +645,26 @@ class FeatureFlags:
     AI_CAPEX_WEB_AGENT_MODEL: str = "gpt-5.5"
     AI_CAPEX_MAX_WEB_CALLS: int = 12                  # hard cap on agent calls per run
 
+    # --- Engine 18: Earnings Drift (PEAD) ---
+    # Validated by the Edge Bake-Off (backend/research/, run 2026-06-09):
+    # OOS 2023+ +0.65%/trade (t=2.7, n=843); large beats +1.05% carry the edge;
+    # misses LOSE money short -> long-only by design; top transcript-quality
+    # quintile +1.45%/trade @ 60% hit. The LLM grades transcript quality; the
+    # candidate filter, buckets, and sizing tiers are deterministic.
+    ENABLE_ENGINE18: bool = True
+    ENGINE18_MODEL: str = "gpt-5.5"                   # transcript quality grader
+    ENGINE18_MIN_SURPRISE: float = 0.05               # EPS surprise floor (beat only)
+    ENGINE18_LARGE_SURPRISE: float = 0.20             # beat_large threshold
+    ENGINE18_HOLD_DAYS: int = 10                      # hold horizon (trading days)
+    ENGINE18_MIN_ADV_USD: float = 10_000_000.0        # liquidity floor ($ avg daily volume)
+    ENGINE18_LOOKBACK_DAYS: int = 3                   # report recency window for the scan
+    ENGINE18_SCAN_TTL_S: int = 24 * 60 * 60           # Redis serve cache for the scan
+    ENGINE18_EVIDENCE_TTL_S: int = 30 * 86400         # per-ticker evidence audit trail
+    ENGINE18_TRAILING_GRADES_MAX: int = 500           # trailing quality-score window
+    ENGINE18_TRADE_TTL_S: int = 180 * 86400           # tracked trades retention
+    ENGINE18_TRADE_MAX_INDEX: int = 200               # tracked trades index cap
+    ENGINE18_LLM_MAX_CALLS_PER_MINUTE: int = 20       # grader rate limit
+
     # --- LLM Integration ---
     ENABLE_LLM_NARRATIVE: bool = True
     LLM_NARRATIVE_CACHE_TTL_S: int = 1800         # 30 minutes
@@ -1128,6 +1149,21 @@ class FeatureFlags:
             AI_CAPEX_WEB_AGENT_MODEL=os.getenv("AI_CAPEX_WEB_AGENT_MODEL", "gpt-5.5"),
             AI_CAPEX_MAX_WEB_CALLS=_get_int("AI_CAPEX_MAX_WEB_CALLS", 12),
 
+            # --- Engine 18: Earnings Drift (PEAD) ---
+            ENABLE_ENGINE18=_get_bool("ENABLE_ENGINE18", True),
+            ENGINE18_MODEL=os.getenv("ENGINE18_MODEL", "gpt-5.5"),
+            ENGINE18_MIN_SURPRISE=_get_float("ENGINE18_MIN_SURPRISE", 0.05),
+            ENGINE18_LARGE_SURPRISE=_get_float("ENGINE18_LARGE_SURPRISE", 0.20),
+            ENGINE18_HOLD_DAYS=_get_int("ENGINE18_HOLD_DAYS", 10),
+            ENGINE18_MIN_ADV_USD=_get_float("ENGINE18_MIN_ADV_USD", 10_000_000.0),
+            ENGINE18_LOOKBACK_DAYS=_get_int("ENGINE18_LOOKBACK_DAYS", 3),
+            ENGINE18_SCAN_TTL_S=_get_int("ENGINE18_SCAN_TTL_S", 24 * 60 * 60),
+            ENGINE18_EVIDENCE_TTL_S=_get_int("ENGINE18_EVIDENCE_TTL_S", 30 * 86400),
+            ENGINE18_TRAILING_GRADES_MAX=_get_int("ENGINE18_TRAILING_GRADES_MAX", 500),
+            ENGINE18_TRADE_TTL_S=_get_int("ENGINE18_TRADE_TTL_S", 180 * 86400),
+            ENGINE18_TRADE_MAX_INDEX=_get_int("ENGINE18_TRADE_MAX_INDEX", 200),
+            ENGINE18_LLM_MAX_CALLS_PER_MINUTE=_get_int("ENGINE18_LLM_MAX_CALLS_PER_MINUTE", 20),
+
             ENABLE_LLM_NARRATIVE=_get_bool("ENABLE_LLM_NARRATIVE", False),
             LLM_NARRATIVE_CACHE_TTL_S=_get_int("LLM_NARRATIVE_CACHE_TTL_S", 1800),
             LLM_MAX_CALLS_PER_MINUTE=_get_int("LLM_MAX_CALLS_PER_MINUTE", 2),
@@ -1509,6 +1545,23 @@ class FeatureFlags:
             ("AI_CAPEX_HYPE_RATIO_MAX", float(self.AI_CAPEX_HYPE_RATIO_MAX)),
             ("AI_CAPEX_ENABLE_WEB_AGENT", bool(self.AI_CAPEX_ENABLE_WEB_AGENT)),
             ("AI_CAPEX_MAX_WEB_CALLS", int(self.AI_CAPEX_MAX_WEB_CALLS)),
+        )
+
+
+    def cache_key_engine18(self) -> tuple:
+        """Engine 18 cache fingerprint (Earnings Drift / PEAD).
+
+        Excludes ENGINE18_MODEL and the LLM rate limit: they don't change the
+        deterministic candidate filter / bucket / sizing math for a given set
+        of grades — only the scoring knobs and ingest window do.
+        """
+        return (
+            ("ENABLE_ENGINE18", bool(self.ENABLE_ENGINE18)),
+            ("ENGINE18_MIN_SURPRISE", float(self.ENGINE18_MIN_SURPRISE)),
+            ("ENGINE18_LARGE_SURPRISE", float(self.ENGINE18_LARGE_SURPRISE)),
+            ("ENGINE18_HOLD_DAYS", int(self.ENGINE18_HOLD_DAYS)),
+            ("ENGINE18_MIN_ADV_USD", float(self.ENGINE18_MIN_ADV_USD)),
+            ("ENGINE18_LOOKBACK_DAYS", int(self.ENGINE18_LOOKBACK_DAYS)),
         )
 
 

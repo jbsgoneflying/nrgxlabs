@@ -17,6 +17,7 @@
     { href: "/post-event",      label: "Engine 7",  desc: "Post-event trade extension evaluator" },
     { href: "/compare",         label: "Engine 10", desc: "Multi-ticker side-by-side" },
     { href: "/ai-capex",        label: "Engine 17", desc: "AI Capex Reality Engine" },
+    { href: "/earnings-drift",  label: "Engine 18", desc: "Earnings drift scanner (PEAD)" },
   ];
 
   /* Which nav item matches the current URL? */

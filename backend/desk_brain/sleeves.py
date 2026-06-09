@@ -90,6 +90,7 @@ ENGINE_SLEEVE_MAP: Dict[int, str] = {
     6:  SLEEVE_DIRECTIONAL,   # Thematic Pairs
     7:  SLEEVE_DIRECTIONAL,   # Post-Event Extension
     17: SLEEVE_THEMATIC,      # AI Capex Reality Engine
+    18: SLEEVE_DIRECTIONAL,   # Earnings Drift (PEAD)
     3:  SLEEVE_OVERLAY,       # Global Lead-Lag Regime
     8:  SLEEVE_OVERLAY,       # Credit Stress Drift
     11: SLEEVE_OVERLAY,       # Macro / Headline Risk
@@ -153,6 +154,11 @@ _EDGE_PRIORS: Dict[int, Dict[str, Any]] = {
     # Thin prior: unproven, so the allocator sizes it tiny until paper history
     # builds (sample shrinkage drives edge_score toward the floor).
     17: {"name": "AI Capex Reality Engine", "expectancy_r": 0.08, "win_rate": 0.50, "sharpe": 0.40, "sample": 15},
+    # Edge Bake-Off OOS 2023+ (n=843): +0.65%/trade net, hit 52.3%, t=2.7,
+    # std 7.0%/trade, annualised Sharpe 0.47. R conversion: +0.65% on a ~5%
+    # 10-trading-day equity risk unit ≈ 0.13R. Backtested prior — large
+    # sample, so it earns full confidence credit unlike the E17 paper prior.
+    18: {"name": "Earnings Drift (PEAD)",   "expectancy_r": 0.13, "win_rate": 0.52, "sharpe": 0.47, "sample": 843},
 }
 
 
