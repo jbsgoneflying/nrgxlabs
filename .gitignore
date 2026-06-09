@@ -43,4 +43,7 @@ data/trade_archive/*.json
 data/engine14_chains.db
 data/engine14_chains.db-*
 
+# Edge Bake-Off research harness — generated reports/scorecards (reproducible)
+backend/research/reports/
+
 

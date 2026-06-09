@@ -1,0 +1,12 @@
+{
+  "_comment": "SEED catalyst calendar for the Edge Bake-Off catalyst-convexity pilot (Strategy #2). This is a STARTER list, NOT a research-grade dataset. To produce a credible backtest the desk must expand this with a clean, point-in-time history of scheduled binary catalysts (FDA PDUFA dates, major product/regulatory/legal events) and confirm ORATS historical option-chain coverage for each name. Sample sizes here are far too small for statistical power. Pattern mirrors data/universe/geopolitical_shocks.json.",
+  "schema": {
+    "ticker": "underlying symbol",
+    "event_date": "YYYY-MM-DD of the scheduled catalyst (point-in-time, known in advance)",
+    "kind": "fda_pdufa | product | ruling | other",
+    "note": "free text"
+  },
+  "events": [
+    {"ticker": "EXAMPLE", "event_date": "2025-01-15", "kind": "fda_pdufa", "note": "Seed placeholder — replace with curated catalysts."}
+  ]
+}
