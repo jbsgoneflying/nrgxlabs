@@ -218,6 +218,62 @@ function renderLiveStrip(live) {
   </div>`;
 }
 
+// Top-down context row: index alignment, sector trend, relative strength,
+// and beta coupling — the 2026-06 A–E stack, surfaced per card.
+function renderContextRow(signal) {
+  const ind = signal.indicators || {};
+  const dir = String(signal.direction || "bullish").toLowerCase();
+  const isBear = ["bearish", "bear", "short"].includes(dir);
+  const want = isBear ? "bearish" : "bullish";
+
+  const tones = {
+    good: "background:rgba(52,199,89,0.14);color:#1b8a3e;",
+    bad: "background:rgba(255,59,48,0.14);color:#cc2f26;",
+    neutral: "background:rgba(142,142,147,0.16);color:var(--muted);",
+  };
+  const chip = (label, tone) =>
+    `<span style="display:inline-block;font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px;margin:2px 4px 0 0;${tones[tone] || tones.neutral}">${escapeHtml(label)}</span>`;
+  const arrowFor = (d) => (d === "bullish" ? "↑" : d === "bearish" ? "↓" : "→");
+
+  const chips = [];
+
+  // Index alignment vs the name's proxy (SPY for S&P, QQQ for Nasdaq 100).
+  const idx = String(ind.indexDirection || "").toLowerCase();
+  if (idx) {
+    const proxy = signal.indexMembership === "nasdaq100" ? "QQQ" : "SPY";
+    const tone = idx === want ? "good" : idx === "neutral" ? "neutral" : "bad";
+    chips.push(chip(`${proxy} ${arrowFor(idx)}`, tone));
+  }
+
+  // Sector trend (the name's GICS sector ETF cloud).
+  const sec = String(ind.sectorBias || "").toLowerCase();
+  if (ind.sectorEtf) {
+    const known = sec === "bullish" || sec === "bearish";
+    const tone = known ? (sec === want ? "good" : "bad") : "neutral";
+    chips.push(chip(`${ind.sectorEtf} ${arrowFor(sec)}`, tone));
+  }
+
+  // Relative strength vs the index (leader for longs / laggard for shorts).
+  if (ind.rsRatio !== null && ind.rsRatio !== undefined) {
+    const rs = Number(ind.rsRatio);
+    const leader = isBear ? rs < 0 : rs > 0;
+    const pct = `${rs >= 0 ? "+" : ""}${(rs * 100).toFixed(1)}%`;
+    chips.push(chip(`RS ${pct} ${leader ? "lead" : "lag"}`, leader ? "good" : "bad"));
+  }
+
+  // Beta coupling (drives how hard the index-alignment gate bites).
+  if (ind.beta !== null && ind.beta !== undefined) {
+    const b = Number(ind.beta);
+    const corr = ind.corr !== null && ind.corr !== undefined ? Number(ind.corr) : null;
+    const coupled = b >= 1.0 || (corr !== null && corr >= 0.6);
+    chips.push(chip(`β ${b.toFixed(2)} ${coupled ? "coupled" : "idio"}`, "neutral"));
+  }
+
+  if (!chips.length) return "";
+  return `<div class="signalCardContext" style="display:flex;flex-wrap:wrap;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid var(--hairline,rgba(0,0,0,0.07));">
+    <span style="font-size:8px;font-weight:800;letter-spacing:0.5px;text-transform:uppercase;color:var(--muted);margin-right:6px;">Top-Down</span>${chips.join("")}</div>`;
+}
+
 function renderSignalCard(signal, isStructure = false) {
   const ticker = escapeHtml(signal.ticker || "");
   const direction = signal.direction || "bullish";
@@ -239,9 +295,9 @@ function renderSignalCard(signal, isStructure = false) {
   
   // Build tags HTML
   let tagsHtml = "";
-  for (const tag of tags.slice(0, 6)) {
+  for (const tag of tags.slice(0, 8)) {
     const isPositive = ["Chikou Clear", "Vol Surge", "Strong Close", "Kijun Rising", "Kijun Falling", 
-                        "RSI Confirm", "Cloud Aligned", "Cloud Optimal", "Gamma Supportive"].includes(tag);
+                        "RSI Confirm", "Cloud Aligned", "Cloud Optimal", "Sector Aligned", "Leadership"].includes(tag);
     const isWarning = ["Earnings Warning"].includes(tag);
     const tagClass = isPositive ? "positive" : (isWarning ? "warning" : "");
     tagsHtml += `<span class="tagChip ${tagClass}">${escapeHtml(tag)}</span>`;
@@ -364,6 +420,7 @@ function renderSignalCard(signal, isStructure = false) {
           <span class="value">${ichimoku.cloudBias || "—"}</span>
         </div>
       </div>
+      ${renderContextRow(signal)}
       ${tagsHtml ? `<div class="signalCardTags">${tagsHtml}</div>` : ""}
       ${isStructure ? '<div class="structureNote">Watch for next pullback to Kijun</div>' : ""}
       ${actionsHtml}
