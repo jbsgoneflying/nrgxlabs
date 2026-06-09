@@ -119,17 +119,25 @@ def load_sector_map(repo_root: Optional[Path] = None) -> Dict[str, str]:
     if _sector_map_cache is not None:
         return _sector_map_cache
     root = repo_root or Path(__file__).resolve().parent.parent
-    path = root / "data" / "universe" / "sector_map.json"
+    # Candidate locations: the repo/volume path first, then the baked-in image
+    # seed copy (which is never shadowed by the persistent /app/data volume).
+    candidates = [
+        root / "data" / "universe" / "sector_map.json",
+        Path("/app/seed-data/universe/sector_map.json"),
+    ]
     mapping: Dict[str, str] = {}
-    try:
-        if path.exists():
-            data = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
-            raw = data.get("map", data) if isinstance(data, dict) else {}
-            for k, v in raw.items():
-                if isinstance(k, str) and isinstance(v, str):
-                    mapping[k.strip().upper()] = v.strip().upper()
-    except Exception as e:
-        LOG.warning(f"Failed to load sector map: {e}")
+    for path in candidates:
+        try:
+            if path.exists():
+                data = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+                raw = data.get("map", data) if isinstance(data, dict) else {}
+                for k, v in raw.items():
+                    if isinstance(k, str) and isinstance(v, str):
+                        mapping[k.strip().upper()] = v.strip().upper()
+                if mapping:
+                    break
+        except Exception as e:
+            LOG.warning(f"Failed to load sector map from {path}: {e}")
     _sector_map_cache = mapping
     return mapping
 

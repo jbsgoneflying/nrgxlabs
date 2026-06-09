@@ -19,6 +19,11 @@ COPY backend /app/backend
 COPY static /app/static
 COPY scripts /app/scripts
 COPY data /app/data
+# Baked-in seed copy of the repo's static data. /app/data is shadowed at runtime
+# by a persistent named volume (see docker-compose.yml), so new/updated static
+# reference files (universe lists, sector map) won't appear there on redeploy.
+# The entrypoint re-seeds them from /app/seed-data into the volume on each boot.
+COPY data /app/seed-data
 COPY deploy /app/deploy
 
 RUN chmod +x /app/deploy/entrypoint.sh
