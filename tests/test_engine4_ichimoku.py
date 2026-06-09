@@ -39,6 +39,9 @@ from backend.engine4_ichimoku import (
     build_ichimoku_signal,
     signal_to_dict,
     compute_distance_to_actionable,
+    compute_index_ichimoku_state,
+    compute_relative_strength,
+    compute_beta_corr,
     _entry_offset,
 )
 from backend.gating import (
@@ -989,3 +992,183 @@ class TestLiveRepricing:
         }], "structure": []}
         scr.apply_live_price_overlay(result, client=object(), max_workers=1)
         assert result["actionable"][0]["live"]["available"] is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: Top-Down Context Stack (2026-06) — index alignment, sector, RS, beta
+# ---------------------------------------------------------------------------
+
+class TestIndexIchimokuState:
+    def test_bullish_when_above_cloud(self):
+        state = compute_index_ichimoku_state(make_bars(120, trend="up"), symbol="SPY")
+        assert state["available"] is True
+        assert state["direction"] == "bullish"
+        assert state["priceVsCloud"] == "above"
+
+    def test_bearish_when_below_cloud(self):
+        state = compute_index_ichimoku_state(make_bars(120, trend="down"), symbol="SPY")
+        assert state["available"] is True
+        assert state["direction"] == "bearish"
+        assert state["priceVsCloud"] == "below"
+
+    def test_unavailable_with_insufficient_bars(self):
+        state = compute_index_ichimoku_state(make_bars(30), symbol="SPY")
+        assert state["available"] is False
+        assert state["direction"] == "neutral"
+
+
+class TestRelativeStrength:
+    def test_leader_has_positive_rs(self):
+        # Name doubles while index is flat → strongly positive excess return.
+        name = [100.0 * (1 + 0.01 * i) for i in range(70)]
+        index = [100.0] * 70
+        rs = compute_relative_strength(name, index, lookback=63)
+        assert rs["rsRatio"] is not None
+        assert rs["rsRatio"] > 0
+
+    def test_laggard_has_negative_rs(self):
+        name = [100.0 - 0.2 * i for i in range(70)]
+        index = [100.0 + 0.2 * i for i in range(70)]
+        rs = compute_relative_strength(name, index, lookback=63)
+        assert rs["rsRatio"] < 0
+
+    def test_insufficient_data_returns_none(self):
+        rs = compute_relative_strength([100, 101], [100, 100], lookback=63)
+        assert rs["rsRatio"] is None
+
+
+class TestBetaCorr:
+    def test_perfectly_coupled_high_beta(self):
+        # Name moves 2x the index each day → beta ~2, corr ~1.
+        index = [100.0]
+        name = [100.0]
+        for i in range(1, 80):
+            r = 0.01 if i % 2 == 0 else -0.008
+            index.append(index[-1] * (1 + r))
+            name.append(name[-1] * (1 + 2 * r))
+        bc = compute_beta_corr(name, index, lookback=60)
+        assert bc["beta"] is not None
+        assert bc["beta"] > 1.5
+        assert bc["corr"] > 0.95
+
+    def test_insufficient_data_returns_none(self):
+        bc = compute_beta_corr([100, 101, 102], [100, 101, 102], lookback=60)
+        assert bc["beta"] is None
+
+
+class TestSectorAndRelStrengthScoring:
+    def test_full_aligned_setup_scores_100(self):
+        """A fully-aligned bull setup (all components maxed) totals 100 — proves
+        the score still normalizes to 100 after the gamma->sector+RS swap."""
+        signal = _base_signal(
+            chikouTangled=False, volumeRatio=1.6, closePosition=0.80,
+            kijunSlope="positive", rsi=65.0, cloudBias="bullish",
+            cloudThickness=3.0, close=100.0, timeInCloud=2, kijunFlatDays=0,
+            sectorBias="bullish", rsRatio=0.10,
+        )
+        result = score_ichimoku_setup(signal)
+        assert result["score"] == 100.0
+        assert result["scores"]["sector"] == 8
+        assert result["scores"]["relStrength"] == 7
+
+    def test_fighting_sector_zeros_sector_credit(self):
+        bull = score_ichimoku_setup(_base_signal(sectorBias="bearish"))
+        assert bull["scores"]["sector"] == 0.0
+
+    def test_unknown_sector_gets_half_credit(self):
+        s = score_ichimoku_setup(_base_signal())  # no sectorBias key
+        assert s["scores"]["sector"] == 4.0
+
+    def test_leadership_rewarded_for_longs(self):
+        leader = score_ichimoku_setup(_base_signal(rsRatio=0.08))["scores"]["relStrength"]
+        laggard = score_ichimoku_setup(_base_signal(rsRatio=-0.08))["scores"]["relStrength"]
+        assert leader == 7
+        assert laggard == 0.0
+
+    def test_gamma_no_longer_affects_score(self):
+        """Dealer gamma must not change the quality score (it's a gate input now)."""
+        a = score_ichimoku_setup(_base_signal(), gamma_context={"netGammaSign": "positive", "environment": "supportive"})
+        b = score_ichimoku_setup(_base_signal(), gamma_context={"netGammaSign": "negative", "environment": "challenging"})
+        assert a["score"] == b["score"]
+        assert a["breakdown"]["gamma"] == 0.0
+
+
+class TestIndexAlignmentGate:
+    def _idx(self, direction):
+        return {"available": True, "direction": direction, "symbol": "SPY"}
+
+    def test_disabled_by_default_no_index_reason(self):
+        d = gate_ichimoku(ticker="AAPL", setup_direction="bullish",
+                          regime_label="Risk-On", vol_direction="falling",
+                          index_state=self._idx("bearish"), index_beta=1.5)
+        codes = [r["code"] for r in d.reasons]
+        assert "INDEX_TREND_MISMATCH" not in codes
+
+    def test_high_beta_mismatch_is_hard(self):
+        d = gate_ichimoku(ticker="AAPL", setup_direction="bullish",
+                          regime_label="Risk-On", vol_direction="falling",
+                          index_state=self._idx("bearish"), index_align_enable=True,
+                          index_beta=1.4, index_corr=0.8)
+        assert d.status == "SUPPRESS"
+        mismatch = next(r for r in d.reasons if r["code"] == "INDEX_TREND_MISMATCH")
+        assert mismatch["severity"] == "HARD"
+
+    def test_low_corr_mismatch_is_soft(self):
+        d = gate_ichimoku(ticker="IDIO", setup_direction="bullish",
+                          regime_label="Risk-On", vol_direction="falling",
+                          index_state=self._idx("bearish"), index_align_enable=True,
+                          index_beta=0.3, index_corr=0.2)
+        assert d.status == "WATCH"
+        mismatch = next(r for r in d.reasons if r["code"] == "INDEX_TREND_MISMATCH")
+        assert mismatch["severity"] == "SOFT"
+
+    def test_aligned_index_passes(self):
+        d = gate_ichimoku(ticker="AAPL", setup_direction="bullish",
+                          regime_label="Risk-On", vol_direction="falling",
+                          index_state=self._idx("bullish"), index_align_enable=True,
+                          index_beta=1.4, index_corr=0.8)
+        codes = [r["code"] for r in d.reasons]
+        assert "INDEX_TREND_MISMATCH" not in codes
+        assert "INDEX_TREND_NEUTRAL" not in codes
+
+    def test_neutral_index_is_soft(self):
+        d = gate_ichimoku(ticker="AAPL", setup_direction="bullish",
+                          regime_label="Risk-On", vol_direction="falling",
+                          index_state=self._idx("neutral"), index_align_enable=True,
+                          index_beta=1.4, index_corr=0.8)
+        assert d.status == "WATCH"
+        assert any(r["code"] == "INDEX_TREND_NEUTRAL" for r in d.reasons)
+
+
+class TestVerdictTopDownDemotions:
+    def _sig(self, **indicators):
+        return {
+            "quality": {"grade": "A+", "score": 88},
+            "freshness": {"bucket": "actionable"},
+            "gate": {"status": "TRADABLE"},
+            "tags": [],
+            "direction": indicators.pop("direction", "bullish"),
+            "indicators": indicators,
+        }
+
+    def test_fighting_sector_caps_at_watch(self):
+        v = reconcile_ichimoku_verdict(self._sig(sectorBias="bearish"))
+        assert v["status"] == VERDICT_WATCH
+        assert any("sector" in d.lower() for d in v["drivers"])
+
+    def test_laggard_long_caps_at_watch(self):
+        v = reconcile_ichimoku_verdict(self._sig(rsRatio=-0.05))
+        assert v["status"] == VERDICT_WATCH
+
+    def test_aligned_leader_stays_tradable(self):
+        v = reconcile_ichimoku_verdict(self._sig(sectorBias="bullish", rsRatio=0.05))
+        assert v["status"] == VERDICT_TRADABLE
+
+
+class TestSectorMap:
+    def test_loads_known_mapping(self):
+        from backend.engine4_screener import load_sector_map
+        m = load_sector_map()
+        assert m.get("AAPL") == "XLK"
+        assert m.get("JPM") == "XLF"
+        assert m.get("XOM") == "XLE"

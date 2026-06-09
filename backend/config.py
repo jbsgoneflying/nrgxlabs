@@ -167,6 +167,10 @@ class FeatureFlags:
     # Re-price surfaced names against the live market on every request so the
     # "distance to trigger" the desk sees is current, not the scan-time close.
     ENGINE4_LIVE_REPRICE: bool = True
+    # Top-down context lookbacks: relative strength (excess return vs index) and
+    # daily-return beta/correlation to the index proxy (SPY/QQQ).
+    ENGINE4_RS_LOOKBACK: int = 63                 # ~3 months for relative strength
+    ENGINE4_BETA_LOOKBACK: int = 60              # ~3 months for beta/correlation
 
     # Engine 2 policy knobs (risk-only; env-driven; safe defaults)
     # NOTE (v2): these three flags are retained for backwards compatibility
@@ -588,6 +592,13 @@ class FeatureFlags:
     # it, a mismatch is demoted to SOFT (WATCH) so a near-tie regime read
     # (e.g. Stressed 0.46 vs Risk-On 0.39) can't blanket-kill every long.
     GATE_ICH_REGIME_MIN_CONFIDENCE: float = 0.55
+    # Top-down index-trend alignment gate. When enabled, a continuation setup
+    # whose index proxy (SPY/QQQ) is trending the opposite way is gated; the
+    # bite is beta/correlation-aware (index-coupled names HARD-suppress, low-corr
+    # idiosyncratic names get a SOFT watch). Off by default until backtested.
+    GATE_ICH_INDEX_ALIGN_ENABLE: bool = False
+    GATE_ICH_INDEX_BETA_HARD: float = 1.0       # beta >= this → mismatch is HARD
+    GATE_ICH_INDEX_CORR_HARD: float = 0.6       # corr >= this → mismatch is HARD
 
     # --- Desk Brain: LLM Meta-Allocator (default OFF until verified) ---
     # Reads every engine's current opportunity set + regime + measured edge
@@ -760,6 +771,8 @@ class FeatureFlags:
             ENGINE4_STRUCTURE_MAX=_get_int("ENGINE4_STRUCTURE_MAX", 16),
             ENGINE4_MIN_RR=_get_float("ENGINE4_MIN_RR", 1.0),
             ENGINE4_LIVE_REPRICE=_get_bool("ENGINE4_LIVE_REPRICE", True),
+            ENGINE4_RS_LOOKBACK=_get_int("ENGINE4_RS_LOOKBACK", 63),
+            ENGINE4_BETA_LOOKBACK=_get_int("ENGINE4_BETA_LOOKBACK", 60),
 
             ENGINE2_ENTRY_DAYS=os.getenv("ENGINE2_ENTRY_DAYS", "mon,tue,wed"),
             ENGINE2_EM_MULTS=os.getenv("ENGINE2_EM_MULTS", "0.7,0.8,0.9,1.0,1.1,1.2"),
@@ -1083,6 +1096,9 @@ class FeatureFlags:
             GATE_ICH_VOL_STATE_ALLOW=os.getenv("GATE_ICH_VOL_STATE_ALLOW", "compressing,stable,NORMAL,FALLING,falling,flat"),
             GATE_ICH_MACRO_PROXIMITY_DAYS=_get_int("GATE_ICH_MACRO_PROXIMITY_DAYS", 1),
             GATE_ICH_REGIME_MIN_CONFIDENCE=_get_float("GATE_ICH_REGIME_MIN_CONFIDENCE", 0.55),
+            GATE_ICH_INDEX_ALIGN_ENABLE=_get_bool("GATE_ICH_INDEX_ALIGN_ENABLE", False),
+            GATE_ICH_INDEX_BETA_HARD=_get_float("GATE_ICH_INDEX_BETA_HARD", 1.0),
+            GATE_ICH_INDEX_CORR_HARD=_get_float("GATE_ICH_INDEX_CORR_HARD", 0.6),
 
             ENABLE_DESK_BRAIN=_get_bool("ENABLE_DESK_BRAIN", True),
             DESK_BRAIN_MODEL=os.getenv("DESK_BRAIN_MODEL", "gpt-5.5"),
@@ -1254,6 +1270,14 @@ class FeatureFlags:
             ("LEGAL_REG_TICKER_DENYLIST", tuple(self.LEGAL_REG_TICKER_DENYLIST)),
             ("LEGAL_REG_TICKER_ALLOWLIST", tuple(self.LEGAL_REG_TICKER_ALLOWLIST)),
             ("LEGAL_REG_KEYWORDS", tuple(self.LEGAL_REG_KEYWORDS)),
+
+            # Engine 4 top-down context (affects the Ichimoku score + gate, and
+            # the screener's structure-scan cache hashes this fingerprint).
+            ("ENGINE4_RS_LOOKBACK", int(self.ENGINE4_RS_LOOKBACK)),
+            ("ENGINE4_BETA_LOOKBACK", int(self.ENGINE4_BETA_LOOKBACK)),
+            ("GATE_ICH_INDEX_ALIGN_ENABLE", bool(self.GATE_ICH_INDEX_ALIGN_ENABLE)),
+            ("GATE_ICH_INDEX_BETA_HARD", float(self.GATE_ICH_INDEX_BETA_HARD)),
+            ("GATE_ICH_INDEX_CORR_HARD", float(self.GATE_ICH_INDEX_CORR_HARD)),
         )
 
     # Backwards-compatible alias used by some modules.
@@ -1321,6 +1345,11 @@ class FeatureFlags:
             ("ENGINE4_MIN_RR", float(self.ENGINE4_MIN_RR)),
             ("ENGINE4_MIN_SCORE_DEFAULT", int(self.ENGINE4_MIN_SCORE_DEFAULT)),
             ("ENGINE4_APLUS_THRESHOLD", int(self.ENGINE4_APLUS_THRESHOLD)),
+            ("ENGINE4_RS_LOOKBACK", int(self.ENGINE4_RS_LOOKBACK)),
+            ("ENGINE4_BETA_LOOKBACK", int(self.ENGINE4_BETA_LOOKBACK)),
+            ("GATE_ICH_INDEX_ALIGN_ENABLE", bool(self.GATE_ICH_INDEX_ALIGN_ENABLE)),
+            ("GATE_ICH_INDEX_BETA_HARD", float(self.GATE_ICH_INDEX_BETA_HARD)),
+            ("GATE_ICH_INDEX_CORR_HARD", float(self.GATE_ICH_INDEX_CORR_HARD)),
         )
 
     def cache_key_engine5(self) -> tuple:

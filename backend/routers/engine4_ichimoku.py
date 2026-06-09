@@ -205,6 +205,11 @@ def _gate_engine4_result(result, flags):
             regime_allow = [s.strip() for s in str(flags.GATE_ICH_REGIME_ALLOW).split(",") if s.strip()]
             regime_allow_short = [s.strip() for s in str(flags.GATE_ICH_REGIME_ALLOW_SHORT).split(",") if s.strip()]
             vol_state_allow = [s.strip() for s in str(flags.GATE_ICH_VOL_STATE_ALLOW).split(",") if s.strip()]
+            # Top-down index-trend alignment context (from the scan result).
+            index_states = result.get("indexState") if isinstance(result.get("indexState"), dict) else None
+            index_align_enable = bool(getattr(flags, "GATE_ICH_INDEX_ALIGN_ENABLE", False))
+            index_beta_hard = float(getattr(flags, "GATE_ICH_INDEX_BETA_HARD", 1.0) or 1.0)
+            index_corr_hard = float(getattr(flags, "GATE_ICH_INDEX_CORR_HARD", 0.6) or 0.6)
             for key in ("actionable", "structure", "watchlist"):
                 setups = result.get(key)
                 if isinstance(setups, list):
@@ -217,6 +222,10 @@ def _gate_engine4_result(result, flags):
                         regime_min_confidence=float(
                             getattr(flags, "GATE_ICH_REGIME_MIN_CONFIDENCE", 0.0) or 0.0
                         ),
+                        index_states=index_states,
+                        index_align_enable=index_align_enable,
+                        index_beta_hard=index_beta_hard,
+                        index_corr_hard=index_corr_hard,
                         **gate_ctx,
                     )
             gs = summarize_gates(

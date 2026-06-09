@@ -123,6 +123,68 @@ def _check_macro_proximity(
     return None
 
 
+def _check_index_alignment(
+    setup_direction: Optional[str],
+    index_state: Optional[dict],
+    *,
+    beta: Optional[float] = None,
+    corr: Optional[float] = None,
+    beta_hard: float = 1.0,
+    corr_hard: float = 0.6,
+) -> Optional[GateReason]:
+    """Top-down index-trend filter for a continuation setup.
+
+    A long wants its index trending up (or at least not down); a short wants
+    the index trending down. The bite is beta/correlation-aware: an
+    index-coupled name (high beta or high correlation) is a hostage to the
+    tape, so a mismatch HARD-suppresses. A low-correlation idiosyncratic name
+    can buck the index, so the same mismatch is only a SOFT watch. A neutral
+    index (price inside its own cloud) is always SOFT.
+    """
+    if not index_state or not isinstance(index_state, dict) or not index_state.get("available"):
+        return None  # no data → don't gate
+
+    idx_dir = str(index_state.get("direction") or "neutral").lower()
+    is_bearish = str(setup_direction or "").lower() in ("bearish", "bear", "short")
+    want = "bearish" if is_bearish else "bullish"
+    opposite = "bullish" if is_bearish else "bearish"
+
+    coupled = (
+        (beta is not None and beta >= beta_hard)
+        or (corr is not None and corr >= corr_hard)
+    )
+
+    if idx_dir == opposite:
+        severity = "HARD" if coupled else "SOFT"
+        coupling = (
+            f"beta {beta:.2f}" if beta is not None else
+            (f"corr {corr:.2f}" if corr is not None else "coupling unknown")
+        )
+        return GateReason(
+            code="INDEX_TREND_MISMATCH",
+            label="Index trend mismatch",
+            severity=severity,
+            detail=(
+                f"{want} setup vs {idx_dir} index "
+                f"({index_state.get('symbol') or 'index'}); {coupling}"
+            ),
+            source_value={"indexDirection": idx_dir, "beta": beta, "corr": corr},
+            threshold_value=want,
+        )
+
+    if idx_dir == "neutral":
+        return GateReason(
+            code="INDEX_TREND_NEUTRAL",
+            label="Index trend neutral",
+            severity="SOFT",
+            detail=f"Index ({index_state.get('symbol') or 'index'}) is inside its own cloud",
+            source_value="neutral",
+            threshold_value=want,
+        )
+
+    return None
+
+
 def _check_dealer_gamma_hostile(
     gamma_ctx: Optional[dict],
 ) -> Optional[GateReason]:
@@ -247,6 +309,13 @@ def gate_ichimoku(
     vol_state_allow: Optional[List[str]] = None,
     macro_proximity_days: int = 1,
     regime_min_confidence: float = 0.0,
+    # Index-trend alignment (top-down stack)
+    index_state: Optional[dict] = None,
+    index_align_enable: bool = False,
+    index_beta: Optional[float] = None,
+    index_corr: Optional[float] = None,
+    index_beta_hard: float = 1.0,
+    index_corr_hard: float = 0.6,
 ) -> GateDecision:
     """Gate an Ichimoku Cloud Continuation setup.
 
@@ -293,6 +362,18 @@ def gate_ichimoku(
     if r:
         reasons.append(r)
 
+    if index_align_enable:
+        r = _check_index_alignment(
+            setup_direction,
+            index_state,
+            beta=index_beta,
+            corr=index_corr,
+            beta_hard=index_beta_hard,
+            corr_hard=index_corr_hard,
+        )
+        if r:
+            reasons.append(r)
+
     status = _resolve_status(reasons)
     now = dt.datetime.utcnow().isoformat() + "Z"
 
@@ -308,6 +389,10 @@ def gate_ichimoku(
             "regime_min_confidence": regime_min_confidence,
             "vol_direction": vol_direction,
             "high_events_within_days": high_events_within_days,
+            "index_align_enable": index_align_enable,
+            "index_direction": (index_state or {}).get("direction") if isinstance(index_state, dict) else None,
+            "index_beta": index_beta,
+            "index_corr": index_corr,
         },
     )
 
@@ -427,6 +512,11 @@ def gate_scan_results(
     regime_allow_short: Optional[List[str]] = None,
     vol_state_allow: Optional[List[str]] = None,
     regime_min_confidence: float = 0.0,
+    # Index-trend alignment (Ichimoku top-down stack)
+    index_states: Optional[Dict[str, dict]] = None,
+    index_align_enable: bool = False,
+    index_beta_hard: float = 1.0,
+    index_corr_hard: float = 0.6,
 ) -> List[dict]:
     """Apply gating to a list of scan results, adding gate decision to each.
 
@@ -434,6 +524,9 @@ def gate_scan_results(
     `regime_allow` / `regime_allow_short` / `vol_state_allow` let the router
     pass config-driven allow-lists (so the policy is tunable without a code
     change). `regime_allow_short` is Ichimoku-only (direction-aware gating).
+    `index_states` is keyed by index ("spx"/"ndx") and selected per result via
+    its `indexMembership`; per-name beta/corr are read from each result's
+    `indicators` block.
     """
     is_ichimoku = engine != "engine3_red_dog"
     gate_fn = gate_red_dog if engine == "engine3_red_dog" else gate_ichimoku
@@ -456,6 +549,20 @@ def gate_scan_results(
             kwargs["regime_allow_short"] = regime_allow_short
             kwargs["regime_confidence"] = regime_confidence
             kwargs["regime_min_confidence"] = regime_min_confidence
+
+            # Select the index state for this name and its index coupling.
+            idx_state = None
+            if index_states:
+                membership = str(result.get("indexMembership") or "sp500")
+                key = "ndx" if membership == "nasdaq100" else "spx"
+                idx_state = index_states.get(key)
+            indicators = result.get("indicators") if isinstance(result.get("indicators"), dict) else {}
+            kwargs["index_state"] = idx_state
+            kwargs["index_align_enable"] = index_align_enable
+            kwargs["index_beta"] = indicators.get("beta")
+            kwargs["index_corr"] = indicators.get("corr")
+            kwargs["index_beta_hard"] = index_beta_hard
+            kwargs["index_corr_hard"] = index_corr_hard
 
         decision = gate_fn(**kwargs)
         result["gate"] = decision.to_dict()
@@ -574,11 +681,19 @@ def reconcile_ichimoku_verdict(
     gate = signal.get("gate", {}) if isinstance(signal.get("gate"), dict) else {}
     freshness = signal.get("freshness", {}) if isinstance(signal.get("freshness"), dict) else {}
     tags = signal.get("tags", []) if isinstance(signal.get("tags"), list) else []
+    indicators = signal.get("indicators", {}) if isinstance(signal.get("indicators"), dict) else {}
 
     grade = str(quality.get("grade") or "C")
     score = float(quality.get("score") or 0.0)
     gate_status = str(gate.get("status") or "")
     bucket = str(freshness.get("bucket") or "actionable")
+
+    direction = str(signal.get("direction") or "").lower()
+    is_bearish = direction in ("bearish", "bear", "short")
+    want_sector = "bearish" if is_bearish else "bullish"
+    sector_bias = str(indicators.get("sectorBias") or "").lower()
+    rs_ratio = indicators.get("rsRatio")
+    index_direction = str(indicators.get("indexDirection") or "").lower()
 
     # Continuation likes orderly, dealer-stabilised tape (positive/long gamma);
     # negative gamma ("challenging") can whip the pullback before it resumes.
@@ -613,6 +728,15 @@ def reconcile_ichimoku_verdict(
         demote(VERDICT_WATCH, "Dealer gamma can whip the pullback")
     if "Earnings Warning" in tags:
         demote(VERDICT_WATCH, "Earnings inside the hold window")
+    # Sector trend: a name fighting its own sector is at most a watch.
+    if sector_bias in ("bullish", "bearish") and sector_bias != want_sector:
+        demote(VERDICT_WATCH, "Fights its sector trend")
+    # Relative strength: a laggard long (or a leader you're shorting) is weak.
+    if rs_ratio is not None:
+        if not is_bearish and rs_ratio < 0:
+            demote(VERDICT_WATCH, "Lagging its index (weak leadership)")
+        elif is_bearish and rs_ratio > 0:
+            demote(VERDICT_WATCH, "Outperforming its index on a short")
 
     if verdict == VERDICT_TRADABLE:
         drivers.append(f"Grade {grade}, fresh trigger, gate clear")
@@ -633,6 +757,9 @@ def reconcile_ichimoku_verdict(
             "gateStatus": gate_status or "n/a",
             "gammaEnvironment": gamma_env or "n/a",
             "regimeLabel": regime_label or "n/a",
+            "sectorBias": sector_bias or "n/a",
+            "indexDirection": index_direction or "n/a",
+            "rsRatio": rs_ratio,
         },
     }
 

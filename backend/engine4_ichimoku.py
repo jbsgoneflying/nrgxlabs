@@ -34,7 +34,13 @@ from backend.technicals import (
 # A+ threshold: setups scoring >= 75 are considered high-quality
 APLUS_THRESHOLD = 75
 
-# Scoring weights (total possible = 100)
+# Scoring weights (total possible = 100).
+#
+# 2026-06 top-down stack: dealer gamma was REMOVED from the quality score
+# (it now lives solely in the gate + verdict — see backend/gating.py) to fix a
+# double-count, and the freed 15 points were reallocated to two top-down
+# context signals that actually move single-name hit-rate: sector-trend
+# alignment and relative strength vs the name's index. Total still sums to 100.
 SCORE_CHIKOU_CLEAN = 15          # Chikou not tangled in prior candles
 SCORE_VOLUME_SURGE = 15          # Trigger volume > 1.25x 20D avg
 SCORE_CANDLE_STRENGTH = 15       # Close in top/bottom 33% of range
@@ -42,14 +48,19 @@ SCORE_KIJUN_SLOPE = 10           # Kijun slope supportive of direction
 SCORE_RSI_RECOVERY = 10          # RSI > 50 (bull) or < 50 (bear)
 SCORE_CLOUD_BIAS = 10            # Forward cloud aligned with direction
 SCORE_CLOUD_THICKNESS = 10       # Cloud thickness in reasonable range
-SCORE_GAMMA_SUPPORTIVE = 15      # Market gamma regime supports setup
+SCORE_SECTOR_ALIGN = 8           # Name's sector ETF cloud agrees with setup
+SCORE_REL_STRENGTH = 7           # Name leads (bull) / lags (bear) its index
+
+# Legacy alias kept so external callers referencing the old constant don't
+# break. Gamma no longer contributes to the quality score.
+SCORE_GAMMA_SUPPORTIVE = 0
 
 # Downgrade penalties
 PENALTY_TIME_IN_CLOUD = -15      # > 10 of 20 closes inside cloud
 PENALTY_KIJUN_FLAT = -10         # Kijun flat > 5 days
 PENALTY_LOW_VOLUME = -10         # Trigger volume < 1.0x avg
 PENALTY_EARNINGS_SOON = -25      # Earnings within 5 sessions
-PENALTY_GAMMA_MISMATCH = -10     # Market gamma opposes setup
+PENALTY_GAMMA_MISMATCH = 0       # Retired: gamma is a gate input, not a score penalty
 
 # Thresholds
 VOLUME_SURGE_THRESHOLD = 1.25    # 1.25x average volume for surge
@@ -120,7 +131,9 @@ class IchimokuSignal:
     rsi_score: float = 0.0
     cloud_bias_score: float = 0.0
     cloud_thickness_score: float = 0.0
-    gamma_score: float = 0.0
+    sector_score: float = 0.0
+    rel_strength_score: float = 0.0
+    gamma_score: float = 0.0  # retired from scoring; kept at 0 for back-compat
     
     # Penalty scores
     time_in_cloud_penalty: int = 0
@@ -162,6 +175,14 @@ class IchimokuSignal:
     distance_to_actionable: Optional[float] = None  # 0 = actionable; higher = staler structure
     verdict: Optional[Dict[str, Any]] = None        # reconciled desk verdict
 
+    # --- Top-down context stack (2026-06) ---
+    sector_etf: Optional[str] = None               # mapped GICS sector ETF (e.g. XLK)
+    sector_bias: Optional[str] = None              # sector ETF Ichimoku direction
+    index_direction: Optional[str] = None          # SPY/QQQ Ichimoku direction
+    rs_ratio: Optional[float] = None               # excess return vs index over RS lookback
+    beta: Optional[float] = None                   # daily-return beta to index
+    corr: Optional[float] = None                   # daily-return correlation to index
+
 
 def _ramp(x: Optional[float], lo: float, hi: float) -> float:
     """Linear ramp: 0 at lo, 1 at hi, clamped to [0,1]. Supports lo>hi (descending)."""
@@ -182,6 +203,193 @@ def _entry_offset(atr: Optional[float]) -> float:
 VOL_RAMP_LO, VOL_RAMP_HI = VOLUME_LOW_THRESHOLD, 1.6   # 1.0 → 1.6 for full volume credit
 RSI_RAMP_LO, RSI_RAMP_HI = 50.0, 65.0                  # 50 → 65 for full recovery credit
 CANDLE_RAMP_LO, CANDLE_RAMP_HI = 0.50, 0.80            # close position within range
+
+# Relative-strength ramp: excess return vs the index over the RS lookback.
+# 0% excess → no credit, +8% excess → full credit (bearish mirrors at the
+# negative side, i.e. the name underperforming earns the short credit).
+RS_RAMP_LO, RS_RAMP_HI = 0.0, 0.08
+
+# Index-trend / context coupling defaults (mirrored in config; kept here so the
+# pure functions have sane fallbacks when called without flags).
+INDEX_BETA_HARD_DEFAULT = 1.0
+INDEX_CORR_HARD_DEFAULT = 0.6
+RS_LOOKBACK_DEFAULT = 63
+BETA_LOOKBACK_DEFAULT = 60
+
+
+# ---------------------------------------------------------------------------
+# Top-Down Context Helpers (index alignment, relative strength, beta)
+# ---------------------------------------------------------------------------
+
+def compute_index_ichimoku_state(
+    bars: List[DailyBar],
+    *,
+    symbol: str = "",
+) -> Dict[str, Any]:
+    """Reduce a broad-index (SPY/QQQ) or sector-ETF bar series to a one-line
+    Ichimoku posture used as a top-down filter.
+
+    Direction is read primarily off price-vs-cloud (the canonical Ichimoku
+    trend read): above the cloud = bullish, below = bearish, inside = neutral.
+    Tenkan/Kijun cross and the forward cloud bias are surfaced as secondary
+    context but do not override the cloud position.
+    """
+    state: Dict[str, Any] = {
+        "symbol": symbol,
+        "available": False,
+        "direction": "neutral",
+        "priceVsCloud": "unknown",
+        "tkCross": "neutral",
+        "futureBias": None,
+        "asOf": None,
+    }
+    if not bars or len(bars) < 60:
+        return state
+
+    ich = compute_ichimoku_series(bars)
+    if not ich.get("enabled"):
+        return state
+
+    closes = ich.get("closes") or []
+    tenkan_series = ich.get("tenkan_series") or []
+    kijun_series = ich.get("kijun_series") or []
+    cloud_series = ich.get("cloud_series") or []
+    span_a_series = ich.get("span_a_series") or []
+    span_b_series = ich.get("span_b_series") or []
+
+    if not closes or not cloud_series:
+        return state
+
+    close = closes[-1]
+    tenkan = tenkan_series[-1] if tenkan_series else None
+    kijun = kijun_series[-1] if kijun_series else None
+    cloud = cloud_series[-1]
+    span_a = span_a_series[-1] if span_a_series else None
+    span_b = span_b_series[-1] if span_b_series else None
+
+    if cloud is None or close is None:
+        return state
+
+    top = cloud.get("cloudTop")
+    bot = cloud.get("cloudBottom")
+    if top is None or bot is None:
+        return state
+
+    if close > top:
+        pvc = "above"
+        direction = "bullish"
+    elif close < bot:
+        pvc = "below"
+        direction = "bearish"
+    else:
+        pvc = "inside"
+        direction = "neutral"
+
+    tk = "neutral"
+    if tenkan is not None and kijun is not None:
+        if tenkan > kijun:
+            tk = "bullish"
+        elif tenkan < kijun:
+            tk = "bearish"
+
+    future_bias = None
+    if span_a is not None and span_b is not None:
+        future_bias = "bullish" if span_a >= span_b else "bearish"
+
+    state.update({
+        "available": True,
+        "direction": direction,
+        "priceVsCloud": pvc,
+        "tkCross": tk,
+        "futureBias": future_bias,
+        "asOf": bars[-1].trade_date,
+        "close": round(float(close), 4),
+        "cloudTop": round(float(top), 4),
+        "cloudBottom": round(float(bot), 4),
+    })
+    return state
+
+
+def _aligned_tail(a: List[float], b: List[float], n: int) -> Tuple[List[float], List[float]]:
+    """Tail-align two close series to the same length (min of both, capped n)."""
+    m = min(len(a), len(b), n)
+    if m <= 0:
+        return ([], [])
+    return (a[-m:], b[-m:])
+
+
+def compute_relative_strength(
+    name_closes: List[float],
+    index_closes: List[float],
+    *,
+    lookback: int = RS_LOOKBACK_DEFAULT,
+) -> Dict[str, Any]:
+    """Excess return of the name over its index across the RS lookback.
+
+    rsRatio > 0 → the name is leading its index (a leadership signal for longs);
+    rsRatio < 0 → the name is lagging (the signal a short wants).
+    """
+    out: Dict[str, Any] = {"rsRatio": None, "nameRet": None, "indexRet": None}
+    if not name_closes or not index_closes:
+        return out
+
+    nc, ic = _aligned_tail(name_closes, index_closes, lookback + 1)
+    if len(nc) < 10:
+        return out
+
+    n0, n1 = nc[0], nc[-1]
+    i0, i1 = ic[0], ic[-1]
+    if not n0 or not i0:
+        return out
+
+    name_ret = (n1 / n0) - 1.0
+    index_ret = (i1 / i0) - 1.0
+    out["nameRet"] = round(name_ret, 5)
+    out["indexRet"] = round(index_ret, 5)
+    out["rsRatio"] = round(name_ret - index_ret, 5)
+    return out
+
+
+def compute_beta_corr(
+    name_closes: List[float],
+    index_closes: List[float],
+    *,
+    lookback: int = BETA_LOOKBACK_DEFAULT,
+) -> Dict[str, Any]:
+    """Daily-return beta and correlation of the name to its index.
+
+    Used to scale how hard the index-trend gate bites: high beta / high
+    correlation names are index hostages (mismatch is HARD), low-correlation
+    idiosyncratic names earn a softer WATCH.
+    """
+    out: Dict[str, Any] = {"beta": None, "corr": None}
+    if not name_closes or not index_closes:
+        return out
+
+    nc, ic = _aligned_tail(name_closes, index_closes, lookback + 1)
+    if len(nc) < 20:
+        return out
+
+    nr = [nc[i] / nc[i - 1] - 1.0 for i in range(1, len(nc)) if nc[i - 1]]
+    ir = [ic[i] / ic[i - 1] - 1.0 for i in range(1, len(ic)) if ic[i - 1]]
+    m = min(len(nr), len(ir))
+    if m < 15:
+        return out
+    nr, ir = nr[-m:], ir[-m:]
+
+    mean_n = sum(nr) / m
+    mean_i = sum(ir) / m
+    cov = sum((nr[i] - mean_n) * (ir[i] - mean_i) for i in range(m)) / m
+    var_i = sum((ir[i] - mean_i) ** 2 for i in range(m)) / m
+    var_n = sum((nr[i] - mean_n) ** 2 for i in range(m)) / m
+
+    if var_i <= 0:
+        return out
+    beta = cov / var_i
+    out["beta"] = round(beta, 3)
+    if var_n > 0:
+        out["corr"] = round(cov / math.sqrt(var_n * var_i), 3)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1299,7 +1507,8 @@ def score_ichimoku_setup(
         "rsi": 0.0,
         "cloudBias": 0.0,
         "cloudThickness": 0.0,
-        "gamma": 0.0,
+        "sector": 0.0,
+        "relStrength": 0.0,
     }
     
     penalties: Dict[str, int] = {
@@ -1307,7 +1516,7 @@ def score_ichimoku_setup(
         "kijunFlat": 0,
         "lowVolume": 0,
         "earnings": 0,
-        "gammaMismatch": 0,
+        "gammaMismatch": 0,  # retired (always 0); kept for payload back-compat
     }
     
     tags: List[str] = []
@@ -1393,27 +1602,35 @@ def score_ichimoku_setup(
             notes.append(f"Thick cloud ({thickness_pct:.1f}% of price) may slow progress.")
         scores["cloudThickness"] = round(thickness_credit * SCORE_CLOUD_THICKNESS, 2)
     
-    # --- Gamma supportive (15 points) ---
-    if gamma_context is not None:
-        gamma_sign = gamma_context.get("netGammaSign")
-        gamma_env = gamma_context.get("environment")
-        
-        # For continuation setups:
-        # - Positive gamma = mean reversion environment (pullbacks get bought)
-        # - Negative gamma = trend acceleration (breakouts follow through)
-        
-        if gamma_env == "supportive":
-            scores["gamma"] = SCORE_GAMMA_SUPPORTIVE
-            tags.append("Gamma Supportive")
-        elif gamma_sign == "positive":
-            # Positive gamma supports pullback continuation
-            scores["gamma"] = SCORE_GAMMA_SUPPORTIVE
-            tags.append("Gamma Supportive")
-        elif gamma_sign == "negative":
-            # Negative gamma can work but be more selective
-            scores["gamma"] = SCORE_GAMMA_SUPPORTIVE // 2
-            notes.append("Negative gamma environment - be selective.")
-    
+    # --- Sector trend alignment (8 points) ---
+    # The name's GICS sector ETF cloud direction. Full credit when the sector
+    # is trending WITH the setup, zero when it fights it, half when the sector
+    # is neutral/unknown (missing data shouldn't silently kill a clean name).
+    sector_bias = signal.get("sectorBias")
+    if sector_bias in ("bullish", "bearish"):
+        if sector_bias == ("bullish" if direction == "bullish" else "bearish"):
+            scores["sector"] = SCORE_SECTOR_ALIGN
+            tags.append("Sector Aligned")
+        else:
+            scores["sector"] = 0.0
+            notes.append("Setup fights its sector trend.")
+    else:
+        scores["sector"] = round(SCORE_SECTOR_ALIGN * 0.5, 2)  # neutral/unknown
+
+    # --- Relative strength vs index (7 points, continuous) ---
+    # Longs are rewarded for leading the index, shorts for lagging it.
+    rs_ratio = signal.get("rsRatio")
+    if rs_ratio is not None:
+        if direction == "bullish":
+            rs_credit = _ramp(rs_ratio, RS_RAMP_LO, RS_RAMP_HI)
+        else:
+            rs_credit = _ramp(rs_ratio, -RS_RAMP_LO, -RS_RAMP_HI)
+        scores["relStrength"] = round(rs_credit * SCORE_REL_STRENGTH, 2)
+        if (direction == "bullish" and rs_ratio > 0) or (direction == "bearish" and rs_ratio < 0):
+            tags.append("Leadership")
+    else:
+        scores["relStrength"] = round(SCORE_REL_STRENGTH * 0.5, 2)  # unknown
+
     # --- PENALTIES ---
     
     # Time in cloud (chop detection)
@@ -1434,15 +1651,10 @@ def score_ichimoku_setup(
         notes.append(f"Earnings in {earnings_days_ahead} sessions - gap risk.")
         tags.append("Earnings Warning")
     
-    # Gamma mismatch (opposing direction)
-    if gamma_context is not None:
-        gamma_sign = gamma_context.get("netGammaSign")
-        # Negative gamma with countertrend setup = mismatch
-        # For a pullback continuation, negative gamma means fast adverse moves possible
-        if gamma_sign == "negative" and scores["gamma"] == 0:
-            penalties["gammaMismatch"] = PENALTY_GAMMA_MISMATCH
-            notes.append("Gamma regime may not support this setup type.")
-    
+    # NOTE: dealer gamma intentionally no longer affects the quality score.
+    # It is evaluated once, in the gate + reconciled verdict (backend/gating.py),
+    # so a name can't be rewarded (or penalised) for gamma twice.
+
     # --- Calculate total score ---
     total_positive = sum(scores.values())
     total_penalties = sum(penalties.values())  # Already negative
@@ -1477,7 +1689,9 @@ def score_ichimoku_setup(
             "rsi": scores["rsi"],
             "cloudBias": scores["cloudBias"],
             "cloudThickness": scores["cloudThickness"],
-            "gamma": scores["gamma"],
+            "sector": scores["sector"],
+            "relStrength": scores["relStrength"],
+            "gamma": 0.0,  # retired from scoring; kept for payload back-compat
             "timeInCloudPenalty": penalties["timeInCloud"],
             "kijunFlatPenalty": penalties["kijunFlat"],
             "lowVolumePenalty": penalties["lowVolume"],
@@ -1626,6 +1840,12 @@ def build_ichimoku_signal(
     earnings_days_ahead: Optional[int] = None,
     index_membership: str = "sp500",
     dollar_adv: Optional[float] = None,
+    sector_etf: Optional[str] = None,
+    sector_state: Optional[Dict[str, Any]] = None,
+    index_state: Optional[Dict[str, Any]] = None,
+    rs_ratio: Optional[float] = None,
+    beta: Optional[float] = None,
+    corr: Optional[float] = None,
 ) -> Optional[IchimokuSignal]:
     """
     Build a complete IchimokuSignal from detection results.
@@ -1636,7 +1856,19 @@ def build_ichimoku_signal(
     signal_data = detection.get("signal")
     if not signal_data:
         return None
-    
+
+    # Fold top-down context into the signal payload so the scorer can read it
+    # the same way it reads the rest of the structure.
+    sector_bias = None
+    if isinstance(sector_state, dict) and sector_state.get("available"):
+        d = sector_state.get("direction")
+        sector_bias = d if d in ("bullish", "bearish") else None
+    index_direction = None
+    if isinstance(index_state, dict) and index_state.get("available"):
+        index_direction = index_state.get("direction")
+    signal_data["sectorBias"] = sector_bias
+    signal_data["rsRatio"] = rs_ratio
+
     # Score the setup
     scoring = score_ichimoku_setup(
         signal_data,
@@ -1712,6 +1944,8 @@ def build_ichimoku_signal(
         rsi_score=scoring["breakdown"].get("rsi", 0),
         cloud_bias_score=scoring["breakdown"].get("cloudBias", 0),
         cloud_thickness_score=scoring["breakdown"].get("cloudThickness", 0),
+        sector_score=scoring["breakdown"].get("sector", 0),
+        rel_strength_score=scoring["breakdown"].get("relStrength", 0),
         gamma_score=scoring["breakdown"].get("gamma", 0),
         time_in_cloud_penalty=scoring["breakdown"].get("timeInCloudPenalty", 0),
         kijun_flat_penalty=scoring["breakdown"].get("kijunFlatPenalty", 0),
@@ -1740,6 +1974,12 @@ def build_ichimoku_signal(
         reclaim_bar_range_atr=freshness["reclaimBarRangeAtr"],
         dollar_adv=dollar_adv,
         distance_to_actionable=compute_distance_to_actionable(freshness),
+        sector_etf=sector_etf,
+        sector_bias=sector_bias,
+        index_direction=index_direction,
+        rs_ratio=rs_ratio,
+        beta=beta,
+        corr=corr,
     )
 
 
@@ -1786,6 +2026,8 @@ def signal_to_dict(signal: IchimokuSignal) -> Dict[str, Any]:
                 "rsi": signal.rsi_score,
                 "cloudBias": signal.cloud_bias_score,
                 "cloudThickness": signal.cloud_thickness_score,
+                "sector": signal.sector_score,
+                "relStrength": signal.rel_strength_score,
                 "gamma": signal.gamma_score,
             },
             "penalties": {
@@ -1804,6 +2046,12 @@ def signal_to_dict(signal: IchimokuSignal) -> Dict[str, Any]:
             "timeInCloud": signal.time_in_cloud,
             "chikouTangled": signal.chikou_tangled,
             "dollarAdv": signal.dollar_adv,
+            "sectorEtf": signal.sector_etf,
+            "sectorBias": signal.sector_bias,
+            "indexDirection": signal.index_direction,
+            "rsRatio": signal.rs_ratio,
+            "beta": signal.beta,
+            "corr": signal.corr,
         },
         "freshness": {
             "bucket": signal.freshness_bucket,

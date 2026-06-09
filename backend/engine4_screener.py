@@ -23,8 +23,13 @@ from backend.config import get_flags
 from backend.dealer_gamma_context import compute_dealer_gamma_context
 from backend.engine4_ichimoku import (
     APLUS_THRESHOLD,
+    BETA_LOOKBACK_DEFAULT,
+    RS_LOOKBACK_DEFAULT,
     IchimokuSignal,
     build_ichimoku_signal,
+    compute_beta_corr,
+    compute_index_ichimoku_state,
+    compute_relative_strength,
     detect_ichimoku_setup,
     signal_to_dict,
 )
@@ -85,6 +90,90 @@ def load_index_memberships(repo_root: Optional[Path] = None) -> Dict[str, str]:
             memberships[ticker] = "nasdaq100"
     
     return memberships
+
+
+# ---------------------------------------------------------------------------
+# Top-Down Context: index proxies + sector map
+# ---------------------------------------------------------------------------
+
+# Liquid ETF proxies used for the index-trend read, relative strength, and
+# beta. Nasdaq100 names key off QQQ; everything else off SPY.
+INDEX_PROXY = {"sp500": "SPY", "nasdaq100": "QQQ", "both": "QQQ"}
+
+
+def index_proxy_for(membership: str) -> str:
+    return INDEX_PROXY.get(membership, "SPY")
+
+
+_sector_map_cache: Optional[Dict[str, str]] = None
+
+
+def load_sector_map(repo_root: Optional[Path] = None) -> Dict[str, str]:
+    """Load the ticker -> GICS sector ETF map (data/universe/sector_map.json).
+
+    Names not present in the map simply get no sector context (the scorer
+    treats unknown sector as neutral, never a penalty), so a partial map
+    degrades gracefully.
+    """
+    global _sector_map_cache
+    if _sector_map_cache is not None:
+        return _sector_map_cache
+    root = repo_root or Path(__file__).resolve().parent.parent
+    path = root / "data" / "universe" / "sector_map.json"
+    mapping: Dict[str, str] = {}
+    try:
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+            raw = data.get("map", data) if isinstance(data, dict) else {}
+            for k, v in raw.items():
+                if isinstance(k, str) and isinstance(v, str):
+                    mapping[k.strip().upper()] = v.strip().upper()
+    except Exception as e:
+        LOG.warning(f"Failed to load sector map: {e}")
+    _sector_map_cache = mapping
+    return mapping
+
+
+def fetch_index_context(
+    client: OratsClient,
+    *,
+    symbol: str,
+    as_of_date: dt.date,
+    use_cache: bool = True,
+) -> Tuple[List[DailyBar], Dict[str, Any]]:
+    """Fetch an index/sector proxy's bars and reduce to a one-line Ichimoku state.
+
+    Returns (bars, state); bars are reused for relative-strength and beta so we
+    only pull each proxy once per scan.
+    """
+    try:
+        bars = fetch_bars_for_ticker(
+            client, ticker=symbol, as_of_date=as_of_date, use_cache=use_cache
+        )
+    except Exception as e:
+        LOG.warning(f"Index/sector context fetch failed for {symbol}: {e}")
+        bars = []
+    state = compute_index_ichimoku_state(bars, symbol=symbol)
+    return bars, state
+
+
+def fetch_sector_states(
+    client: OratsClient,
+    etfs: Set[str],
+    *,
+    as_of_date: dt.date,
+    use_cache: bool = True,
+) -> Tuple[Dict[str, List[DailyBar]], Dict[str, Dict[str, Any]]]:
+    """Fetch + reduce each distinct sector ETF once. Returns (bars_by_etf, states_by_etf)."""
+    bars_by_etf: Dict[str, List[DailyBar]] = {}
+    states_by_etf: Dict[str, Dict[str, Any]] = {}
+    for etf in sorted(e for e in etfs if e):
+        bars, state = fetch_index_context(
+            client, symbol=etf, as_of_date=as_of_date, use_cache=use_cache
+        )
+        bars_by_etf[etf] = bars
+        states_by_etf[etf] = state
+    return bars_by_etf, states_by_etf
 
 
 # ---------------------------------------------------------------------------
@@ -399,6 +488,12 @@ def scan_ticker(
     benzinga_client: Any = None,
     min_dollar_adv: float = 0.0,
     use_cache: bool = True,
+    index_bars: Optional[List[DailyBar]] = None,
+    index_state: Optional[Dict[str, Any]] = None,
+    sector_etf: Optional[str] = None,
+    sector_state: Optional[Dict[str, Any]] = None,
+    rs_lookback: int = RS_LOOKBACK_DEFAULT,
+    beta_lookback: int = BETA_LOOKBACK_DEFAULT,
 ) -> Optional[IchimokuSignal]:
     """
     Scan a single ticker for Ichimoku continuation setup.
@@ -435,6 +530,20 @@ def scan_ticker(
         ich_series = compute_ichimoku_series(bars)
         closes = ich_series.get("closes", [])
         tenkan_series = ich_series.get("tenkan_series", [])
+
+        # Top-down context: relative strength + beta/corr vs the index proxy.
+        rs_ratio: Optional[float] = None
+        beta: Optional[float] = None
+        corr: Optional[float] = None
+        if index_bars:
+            index_closes = [float(b.close) for b in index_bars if b.close is not None]
+            if index_closes and closes:
+                rs_ratio = compute_relative_strength(
+                    closes, index_closes, lookback=rs_lookback
+                ).get("rsRatio")
+                bc = compute_beta_corr(closes, index_closes, lookback=beta_lookback)
+                beta = bc.get("beta")
+                corr = bc.get("corr")
         
         # Build scored signal with freshness classification
         signal = build_ichimoku_signal(
@@ -447,6 +556,12 @@ def scan_ticker(
             earnings_days_ahead=earnings_days,
             index_membership=index_membership,
             dollar_adv=dollar_adv,
+            sector_etf=sector_etf,
+            sector_state=sector_state,
+            index_state=index_state,
+            rs_ratio=rs_ratio,
+            beta=beta,
+            corr=corr,
         )
         
         return signal
@@ -478,11 +593,20 @@ def scan_single_ticker(
     memberships = load_index_memberships()
     index_membership = memberships.get(t, "sp500")
     
-    # Fetch appropriate gamma context
+    # Fetch appropriate gamma + index context
+    proxy = index_proxy_for(index_membership)
     if index_membership == "nasdaq100":
         gamma_context = fetch_gamma_context_ndx(client, today)
     else:
         gamma_context = fetch_gamma_context_spx(client, today)
+    index_bars, index_state = fetch_index_context(client, symbol=proxy, as_of_date=today)
+
+    # Sector context for this name
+    sector_map = load_sector_map()
+    sector_etf = sector_map.get(t)
+    sector_state = None
+    if sector_etf:
+        _, sector_state = fetch_index_context(client, symbol=sector_etf, as_of_date=today)
     
     # Fetch bars
     bars = fetch_bars_for_ticker(client, ticker=t, as_of_date=today)
@@ -518,6 +642,8 @@ def scan_single_ticker(
         "trigger": detection.get("trigger"),
         "indicators": detection.get("indicators"),
         "gammaContext": gamma_context,
+        "indexState": index_state,
+        "sectorState": sector_state,
         "indexMembership": index_membership,
         "earningsDaysAhead": earnings_days,
         "notes": detection.get("notes", []),
@@ -526,16 +652,35 @@ def scan_single_ticker(
     if detection.get("hasSignal"):
         from backend.technicals import compute_ichimoku_series
         ich_series = compute_ichimoku_series(bars)
+        ich_closes = ich_series.get("closes", [])
+
+        rs_ratio: Optional[float] = None
+        beta: Optional[float] = None
+        corr: Optional[float] = None
+        if index_bars and ich_closes:
+            index_closes = [float(b.close) for b in index_bars if b.close is not None]
+            if index_closes:
+                rs_ratio = compute_relative_strength(ich_closes, index_closes).get("rsRatio")
+                bc = compute_beta_corr(ich_closes, index_closes)
+                beta = bc.get("beta")
+                corr = bc.get("corr")
+
         signal = build_ichimoku_signal(
             ticker=t,
             detection=detection,
             bars=bars,
-            closes=ich_series.get("closes", []),
+            closes=ich_closes,
             tenkan_series=ich_series.get("tenkan_series", []),
             gamma_context=gamma_context,
             earnings_days_ahead=earnings_days,
             index_membership=index_membership,
             dollar_adv=_compute_dollar_adv(bars),
+            sector_etf=sector_etf,
+            sector_state=sector_state,
+            index_state=index_state,
+            rs_ratio=rs_ratio,
+            beta=beta,
+            corr=corr,
         )
         if signal:
             result["signal"] = signal_to_dict(signal)
@@ -609,6 +754,23 @@ def run_universe_scan(
     # Fetch gamma contexts (once per index)
     gamma_spx = fetch_gamma_context_spx(client, today)
     gamma_ndx = fetch_gamma_context_ndx(client, today)
+
+    # Top-down context, computed once per scan:
+    #  - index Ichimoku state + bars (for the alignment gate, RS, and beta)
+    #  - sector ETF states (one Ichimoku read per distinct sector ETF)
+    rs_lookback = int(getattr(flags, "ENGINE4_RS_LOOKBACK", RS_LOOKBACK_DEFAULT) or RS_LOOKBACK_DEFAULT)
+    beta_lookback = int(getattr(flags, "ENGINE4_BETA_LOOKBACK", BETA_LOOKBACK_DEFAULT) or BETA_LOOKBACK_DEFAULT)
+    spy_bars, index_spx = fetch_index_context(
+        client, symbol=index_proxy_for("sp500"), as_of_date=today, use_cache=use_cache
+    )
+    qqq_bars, index_ndx = fetch_index_context(
+        client, symbol=index_proxy_for("nasdaq100"), as_of_date=today, use_cache=use_cache
+    )
+    sector_map = load_sector_map()
+    needed_etfs = {sector_map[t] for t in universe if sector_map.get(t)}
+    _, sector_states = fetch_sector_states(
+        client, needed_etfs, as_of_date=today, use_cache=use_cache
+    )
     
     # Scan in parallel
     signals: List[IchimokuSignal] = []
@@ -617,11 +779,16 @@ def run_universe_scan(
     def _scan_one(ticker: str) -> Optional[IchimokuSignal]:
         membership = memberships.get(ticker, "sp500")
         
-        # Select appropriate gamma context
+        # Select appropriate gamma + index context
         if membership == "nasdaq100":
             gamma = gamma_ndx
+            idx_bars, idx_state = qqq_bars, index_ndx
         else:
             gamma = gamma_spx
+            idx_bars, idx_state = spy_bars, index_spx
+
+        s_etf = sector_map.get(ticker)
+        s_state = sector_states.get(s_etf) if s_etf else None
         
         return scan_ticker(
             client,
@@ -632,6 +799,12 @@ def run_universe_scan(
             benzinga_client=benzinga_client,
             min_dollar_adv=min_dollar_adv,
             use_cache=use_cache,
+            index_bars=idx_bars,
+            index_state=idx_state,
+            sector_etf=s_etf,
+            sector_state=s_state,
+            rs_lookback=rs_lookback,
+            beta_lookback=beta_lookback,
         )
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -718,6 +891,11 @@ def run_universe_scan(
             "spx": gamma_spx,
             "ndx": gamma_ndx,
         },
+        "indexState": {
+            "spx": index_spx,
+            "ndx": index_ndx,
+        },
+        "sectorStates": sector_states,
         "meta": {
             "scanDurationMs": elapsed_ms,
             "direction": direction,
@@ -725,6 +903,8 @@ def run_universe_scan(
             "structureMax": structure_max,
             "minRR": min_rr,
             "subRRRejected": sub_rr_count,
+            "rsLookback": rs_lookback,
+            "betaLookback": beta_lookback,
             "errors": errors[:10] if errors else [],
         },
     }
