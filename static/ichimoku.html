@@ -16,6 +16,32 @@
     <link rel="stylesheet" href="/static/styles.css?v=14" />
     <style>
       /* Engine 5 (Ichimoku trend-continuation) specific styles */
+      .tickerStrip {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        margin-top: 10px;
+        padding: 8px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(11, 11, 15, 0.03);
+        font-size: 12px;
+      }
+
+      .tickerStripText {
+        flex: 1;
+        font-weight: 600;
+        letter-spacing: 0.2px;
+        line-height: 1.7;
+        word-break: break-word;
+        user-select: all;
+      }
+
+      .tickerStripCopy {
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
       .watchlistGrid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
@@ -521,6 +547,7 @@
             </h2>
             <div class="sectionMeta muted" id="actionableMeta">—</div>
           </div>
+          <div id="actionableTickers" class="tickerStrip" style="display:none;"></div>
           <div id="actionableGrid" class="watchlistGrid"></div>
         </section>
 
@@ -548,6 +575,7 @@
             <div class="sectionMeta muted" id="structureMeta">—</div>
             <button id="approachingToggle" class="ghostButton" type="button" style="margin-left:auto;">Show approaching</button>
           </div>
+          <div id="structureTickers" class="tickerStrip" style="display:none;"></div>
           <div id="structureGrid" class="watchlistGrid" style="display:none;"></div>
         </section>
 
@@ -679,7 +707,7 @@
     <script src="/static/desk-insight.js?v=2"></script>
     <script src="/static/ui_kit.js?v=7"></script>
     <script src="/static/position_calculator.js?v=4"></script>
-    <script src="/static/ichimoku.js?v=13"></script>
+    <script src="/static/ichimoku.js?v=14"></script>
     <script src="/static/calculator.js"></script>
     <script src="/static/nav.js?v=14"></script>
     <script src="/static/raven-chat.js?v=4"></script>

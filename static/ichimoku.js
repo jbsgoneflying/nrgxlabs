@@ -428,6 +428,43 @@ function renderSignalCard(signal, isStructure = false) {
   `;
 }
 
+// Comma-separated ticker strip with a Copy button — paste straight into
+// TradingView's "Add symbol" dialog to load the day's names in one go.
+function renderTickerStrip(elId, signals) {
+  const el = $(elId);
+  if (!el) return;
+
+  const tickers = [...new Set(
+    signals.map(s => String(s.ticker || "").toUpperCase()).filter(Boolean)
+  )];
+
+  if (tickers.length === 0) {
+    el.innerHTML = "";
+    el.style.display = "none";
+    return;
+  }
+
+  const list = tickers.join(", ");
+  el.style.display = "";
+  el.innerHTML = `
+    <span class="tickerStripText mono">${escapeHtml(list)}</span>
+    <button class="ghostButton tickerStripCopy" type="button" title="Copy tickers — paste into TradingView's Add Symbol dialog">Copy</button>
+  `;
+
+  const btn = el.querySelector(".tickerStripCopy");
+  btn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    let ok = false;
+    if (window.RavenUI && typeof window.RavenUI.copyToClipboard === "function") {
+      ok = await window.RavenUI.copyToClipboard(list);
+    } else {
+      ok = await navigator.clipboard.writeText(list).then(() => true).catch(() => false);
+    }
+    btn.textContent = ok ? "Copied ✓" : "Copy failed";
+    setTimeout(() => { btn.textContent = "Copy"; }, 1600);
+  });
+}
+
 function renderSignals(payload) {
   const actionable = payload.actionable || [];
   const structure = payload.structure || [];
@@ -453,6 +490,7 @@ function renderSignals(payload) {
   } else {
     actionableSection.classList.add("hidden");
   }
+  renderTickerStrip("actionableTickers", actionable);
   
   // Approaching (Watchlist) Section — capped + ranked, collapsed by default
   const structureGrid = $("structureGrid");
@@ -475,6 +513,7 @@ function renderSignals(payload) {
   } else {
     structureSection.classList.add("hidden");
   }
+  renderTickerStrip("structureTickers", structure);
   
   // Empty State
   const emptySection = $("emptySection");
