@@ -373,6 +373,11 @@ def from_engine18(scan: Optional[Dict[str, Any]]) -> List[Opportunity]:
         sizing = str(c.get("sizing") or "").lower()
         if not ticker or sizing not in ("full", "half"):
             continue
+        # Late manual profiles: the validated entry (next open after the
+        # report) has passed — mid-drift entries were never backtested, so
+        # they stay informational and never reach the allocator.
+        if str(c.get("entry_status") or "") == "late":
+            continue
         grade = c.get("grade") or {}
         quality = _f(grade.get("score")) or 0.5
         base = 70.0 if sizing == "full" else 50.0

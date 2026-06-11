@@ -3,6 +3,7 @@
 Endpoints:
 - ``GET  /api/engine18``                  — current scan (Redis-cached; rescore fallback).
 - ``POST /api/engine18/refresh``          — rebuild (``?background=true`` spawns the script).
+- ``POST /api/engine18/profile``          — manual on-demand PEAD profile for one ticker.
 - ``GET  /api/engine18/status``           — last run health + background-process state.
 - ``GET  /api/engine18/evidence/{t}``     — per-ticker evidence (report + grades + excerpt).
 - ``POST /api/engine18/advisor``          — narrative-only LLM desk note.
@@ -138,6 +139,45 @@ def refresh_scan(
         except Exception as exc:
             LOG.exception("engine18: refresh failed")
             raise HTTPException(status_code=500, detail=f"Engine 18 refresh failed: {exc}")
+
+
+@router.post("/api/engine18/profile")
+async def run_profile(request: Request):
+    """On-demand manual PEAD profile for one ticker (the hybrid desk path).
+
+    Body: ``{ticker, actual_eps?, estimate_eps?, report_date?, timing?}`` —
+    the EPS fields are a last-resort override for when vendors lag the print
+    (the ORCL case). Qualifying candidates merge into the scan tagged
+    ``origin="manual"``; non-qualifying reports return an explicit verdict.
+    """
+    _require_enabled()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+
+    ticker = str(body.get("ticker") or "").strip().upper()
+    if not ticker or len(ticker) > 10 or not all(c.isalnum() or c in ".-" for c in ticker):
+        raise HTTPException(status_code=422, detail="A valid ticker is required (e.g. ORCL)")
+
+    overrides = {
+        k: body.get(k)
+        for k in ("actual_eps", "estimate_eps", "report_date", "timing")
+        if body.get(k) not in (None, "")
+    }
+
+    with _refresh_lock:
+        try:
+            from backend.engine18 import pipeline
+
+            return {"engine": 18, "ticker": ticker, **pipeline.build_profile(ticker, overrides=overrides)}
+        except HTTPException:
+            raise
+        except Exception as exc:
+            LOG.exception("engine18: manual profile failed for %s", ticker)
+            raise HTTPException(status_code=500, detail=f"Engine 18 profile failed: {exc}")
 
 
 @router.get("/api/engine18/status")

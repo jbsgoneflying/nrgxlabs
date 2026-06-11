@@ -328,6 +328,12 @@ def test_aggregator_from_engine18():
             {"ticker": "PASS", "sizing": "pass", "bucket": "beat_small",
              "grade": {"score": 0.2, "quintile": "Q1"},
              "report": {"surprise_pct": 0.06}},
+            # Late manual profile: validated entry passed — informational only.
+            {"ticker": "LATE", "sizing": "full", "bucket": "beat_large",
+             "grade": {"score": 0.9, "quintile": "Q5"},
+             "report": {"surprise_pct": 0.40},
+             "entry_date": "2026-06-05", "exit_date": "2026-06-19",
+             "origin": "manual", "entry_status": "late", "days_late": 3},
         ]
     }
     opps = aggregator.from_engine18(scan)

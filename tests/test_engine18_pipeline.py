@@ -185,3 +185,113 @@ def test_rescore_from_store_no_network():
 
 def test_rescore_from_store_empty_returns_none():
     assert pipeline.rescore_from_store(flags=FLAGS, store=FakeStore()) is None
+
+
+# ---------------------------------------------------------------------------
+# Manual on-demand profile
+# ---------------------------------------------------------------------------
+
+class _NoFmp:
+    def earnings_calendar(self, *, date_from=None, date_to=None, limit=None):
+        return _Resp([])
+
+
+def test_build_profile_qualifying_merges_into_scan():
+    store = FakeStore()
+    pipeline.build_scan(
+        flags=FLAGS, eodhd_client=FakeEodhd(), transcript_provider=FakeTranscripts(),
+        llm_fn=_llm, store=store, as_of=AS_OF, universe=UNIVERSE,
+    )
+
+    out = pipeline.build_profile(
+        "BIGB",
+        flags=FLAGS,
+        eodhd_client=FakeEodhd(),
+        fmp_client=_NoFmp(),
+        transcript_provider=FakeTranscripts(),
+        llm_fn=_llm,
+        store=store,
+        as_of=AS_OF,
+    )
+    assert out["verdict"] == "candidate"
+    assert out["source"] == "eodhd"
+    cand = out["candidate"]
+    assert cand["origin"] == "manual"
+    assert cand["eps_source"] == "eodhd"
+    # AS_OF == entry date (2026-06-09) -> still on time.
+    assert cand["entry_status"] == "on_time" and cand["days_late"] == 0
+
+    # Merged into the stored scan: BIGB replaced (no duplicate), SMLB kept.
+    scan = store.data["e18:scan:latest"]
+    tickers = [c["ticker"] for c in scan["candidates"]]
+    assert sorted(tickers) == ["BIGB", "SMLB"]
+    merged = next(c for c in scan["candidates"] if c["ticker"] == "BIGB")
+    assert merged["origin"] == "manual"
+    assert scan["meta"]["lastManualProfile"]["ticker"] == "BIGB"
+
+
+def test_build_profile_miss_returns_explicit_verdict():
+    out = pipeline.build_profile(
+        "MISS",
+        flags=FLAGS,
+        eodhd_client=FakeEodhd(),
+        fmp_client=_NoFmp(),
+        transcript_provider=FakeTranscripts(),
+        llm_fn=_llm,
+        store=FakeStore(),
+        as_of=AS_OF,
+    )
+    assert out["found"] is True
+    assert out["verdict"] == "not_tradable"
+    assert "miss" in out["reason"].lower()
+    assert "candidate" not in out
+
+
+def test_build_profile_late_entry_flagged():
+    store = FakeStore()
+    out = pipeline.build_profile(
+        "BIGB",
+        flags=FLAGS,
+        eodhd_client=FakeEodhd(),
+        fmp_client=_NoFmp(),
+        transcript_provider=FakeTranscripts(),
+        llm_fn=_llm,
+        store=store,
+        as_of=dt.date(2026, 6, 12),  # Friday — 3 trading days past the 06-09 entry
+    )
+    assert out["verdict"] == "candidate"
+    cand = out["candidate"]
+    assert cand["entry_status"] == "late"
+    assert cand["days_late"] == 3
+    assert "late" in out["warning"].lower()
+
+
+def test_build_profile_illiquid_verdict():
+    out = pipeline.build_profile(
+        "BIGB",
+        flags=FLAGS,
+        eodhd_client=FakeEodhd(thin_ticker="BIGB"),
+        fmp_client=_NoFmp(),
+        transcript_provider=FakeTranscripts(),
+        llm_fn=_llm,
+        store=FakeStore(),
+        as_of=AS_OF,
+    )
+    assert out["verdict"] == "illiquid"
+    assert "floor" in out["reason"]
+
+
+def test_build_profile_no_report_verdict():
+    out = pipeline.build_profile(
+        "GHOST",
+        flags=FLAGS,
+        eodhd_client=FakeEodhd(),
+        fmp_client=_NoFmp(),
+        transcript_provider=FakeTranscripts(),
+        llm_fn=_llm,
+        store=FakeStore(),
+        as_of=AS_OF,
+    )
+    assert out["found"] is False
+    assert out["verdict"] == "no_report"
+    assert "GHOST" in out["reason"]

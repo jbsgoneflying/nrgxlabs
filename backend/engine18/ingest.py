@@ -135,6 +135,135 @@ def fetch_recent_reports(
     return out
 
 
+def _fmp_optional():
+    try:
+        from backend.fmp_client import FmpClient
+
+        return FmpClient.from_env()
+    except Exception:
+        return None
+
+
+def _report_from_eodhd_row(ticker: str, row: dict) -> Optional[EarningsReport]:
+    date = str(row.get("report_date") or row.get("date") or "")[:10]
+    actual = _f(row.get("actual"))
+    estimate = _f(row.get("estimate"))
+    if not date or actual is None or estimate is None:
+        return None
+    surprise = (actual - estimate) / abs(estimate) if estimate != 0 else None
+    timing = _TIMING_MAP.get(str(row.get("before_after_market") or "").strip(), "")
+    return EarningsReport(
+        ticker=ticker, report_date=date, timing=timing,
+        actual_eps=actual, estimate_eps=estimate, surprise_pct=surprise,
+    )
+
+
+def _report_from_fmp_row(ticker: str, row: dict) -> Optional[EarningsReport]:
+    date = str(row.get("date") or "")[:10]
+    actual = _f(row.get("epsActual") if "epsActual" in row else row.get("eps"))
+    estimate = _f(row.get("epsEstimated"))
+    if not date or actual is None or estimate is None:
+        return None
+    surprise = (actual - estimate) / abs(estimate) if estimate != 0 else None
+    timing = str(row.get("time") or "").strip().lower()
+    if timing not in ("bmo", "amc"):
+        timing = ""
+    return EarningsReport(
+        ticker=ticker, report_date=date, timing=timing,
+        actual_eps=actual, estimate_eps=estimate, surprise_pct=surprise,
+    )
+
+
+def fetch_report_for_ticker(
+    ticker: str,
+    *,
+    window_days: int = 10,
+    as_of: Optional[dt.date] = None,
+    client=None,
+    fmp_client=None,
+    overrides: Optional[dict] = None,
+) -> Tuple[Optional[EarningsReport], str, str]:
+    """On-demand single-ticker report lookup for the manual PEAD profile.
+
+    Source order: EODHD calendar -> FMP calendar (posts actuals faster) ->
+    agent-supplied EPS overrides (last resort while vendors lag the print).
+    Returns ``(report | None, eps_source, reason)``. No universe gate — the
+    desk may profile any liquid US name (the ADV floor still applies later).
+    """
+    ticker = str(ticker or "").strip().upper()
+    today = as_of or dt.date.today()
+    start = (today - dt.timedelta(days=int(window_days))).isoformat()
+    end = (today + dt.timedelta(days=1)).isoformat()
+    saw_dateonly_row = False
+
+    client = client or _eodhd_optional()
+    if client is not None:
+        try:
+            resp = client.get_calendar_earnings(
+                symbols=to_eodhd_symbol(ticker), from_date=start, to_date=end
+            )
+            rows = [
+                row for row in (resp.rows or [])
+                if _plain_ticker(row.get("code")) == ticker
+            ]
+        except Exception as exc:
+            LOG.warning("engine18: profile EODHD fetch failed for %s: %s", ticker, exc)
+            rows = []
+        reports = [r for r in (_report_from_eodhd_row(ticker, row) for row in rows) if r]
+        saw_dateonly_row = bool(rows) and not reports
+        if reports:
+            reports.sort(key=lambda r: r.report_date)
+            return reports[-1], "eodhd", ""
+
+    fmp = fmp_client or _fmp_optional()
+    if fmp is not None:
+        try:
+            resp = fmp.earnings_calendar(date_from=start, date_to=end)
+            rows = [
+                row for row in (resp.rows or [])
+                if str(row.get("symbol") or "").strip().upper() == ticker
+            ]
+        except Exception as exc:
+            LOG.warning("engine18: profile FMP fetch failed for %s: %s", ticker, exc)
+            rows = []
+        reports = [r for r in (_report_from_fmp_row(ticker, row) for row in rows) if r]
+        if reports:
+            reports.sort(key=lambda r: r.report_date)
+            return reports[-1], "fmp", ""
+
+    ov = overrides or {}
+    actual = _f(ov.get("actual_eps"))
+    estimate = _f(ov.get("estimate_eps"))
+    if actual is not None and estimate is not None:
+        date = str(ov.get("report_date") or today.isoformat())[:10]
+        timing = str(ov.get("timing") or "").strip().lower()
+        if timing not in ("bmo", "amc"):
+            timing = ""
+        surprise = (actual - estimate) / abs(estimate) if estimate != 0 else None
+        return (
+            EarningsReport(
+                ticker=ticker, report_date=date, timing=timing,
+                actual_eps=actual, estimate_eps=estimate, surprise_pct=surprise,
+            ),
+            "manual",
+            "",
+        )
+
+    if saw_dateonly_row:
+        reason = (
+            f"{ticker} has a calendar entry but no actual EPS posted yet — "
+            "vendors may be lagging the print. Re-try later or enter the "
+            "actual/estimate EPS from the press release."
+        )
+    else:
+        reason = (
+            f"No earnings report found for {ticker} in the last "
+            f"{int(window_days)} days. Check the ticker, or enter the "
+            "report EPS manually."
+        )
+    return None, "", reason
+
+
 def fetch_liquidity(
     ticker: str, *, client=None, lookback_days: int = 45
 ) -> Tuple[Optional[float], Optional[float]]:

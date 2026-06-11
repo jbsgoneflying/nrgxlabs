@@ -60,6 +60,10 @@ class DriftCandidate:
     last_close: Optional[float] = None
     expected: Dict[str, Any] = field(default_factory=dict)  # validated cohort stats
     regime_context: Optional[str] = None                    # display only, never a gate
+    origin: str = "scan"            # "scan" (auto) | "manual" (on-demand profile)
+    entry_status: str = ""          # "" | "on_time" | "late" (validated entry passed)
+    days_late: int = 0              # business days past the validated entry open
+    eps_source: str = "eodhd"       # "eodhd" | "fmp" | "manual" (agent override)
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -71,7 +75,8 @@ class DriftCandidate:
         gr = QualityGrade.from_dict(d.get("grade") or {})
         out = cls(ticker=str(d.get("ticker") or ""), report=rep, grade=gr)
         for k in ("bucket", "sizing", "entry_date", "exit_date", "hold_days",
-                  "adv_usd", "last_close", "expected", "regime_context"):
+                  "adv_usd", "last_close", "expected", "regime_context",
+                  "origin", "entry_status", "days_late", "eps_source"):
             if k in d:
                 setattr(out, k, d[k])
         return out

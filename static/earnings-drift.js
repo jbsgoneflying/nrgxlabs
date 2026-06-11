@@ -2,7 +2,8 @@
    Fetches /api/engine18 and renders candidate cards (surprise bucket, quality
    quintile, sizing tier, entry/exit dates, expected-edge stats), the desk
    tracker (track entry / close), the informational options expression card,
-   the rolling-edge validation banner, and the narrative desk note. */
+   the rolling-edge validation banner, the narrative desk note, and the manual
+   on-demand PEAD profile (single ticker through the same validated pipeline). */
 (function () {
   "use strict";
 
@@ -85,14 +86,23 @@
     var bucketLabel = c.bucket === "beat_large" ? "Large beat" : "Small beat";
     var sizingLabel = c.sizing === "full" ? "FULL SIZE" : (c.sizing === "half" ? "HALF SIZE" : "PASS");
     var gradeSrc = g.source === "llm" ? "LLM" : (g.source === "heuristic" ? "heuristic" : "no transcript");
+    var manualPill = c.origin === "manual"
+      ? '<span class="edPill edPill--manual" title="On-demand profile — EPS source: ' + esc((c.eps_source || "").toUpperCase()) + '">MANUAL</span>'
+      : "";
+    var lateChip = c.entry_status === "late"
+      ? '<div class="edLateChip">⚠ ' + c.days_late + " trading day" + (c.days_late === 1 ? "" : "s") +
+        " past the validated entry (" + esc(c.entry_date) + " open). Mid-drift entries were never backtested — expected stats below do NOT apply.</div>"
+      : "";
     return '<div class="' + cardCls + '">' +
       '<div class="edCardHead">' +
         '<span class="edTicker">' + esc(c.ticker) + "</span>" +
         '<span class="edPill edPill--' + esc(c.bucket) + '">' + bucketLabel + "</span>" +
         '<span class="edPill edPill--q">' + esc(g.quintile || "—") + "</span>" +
         '<span class="edPill edPill--' + esc(c.sizing) + '">' + sizingLabel + "</span>" +
+        manualPill +
         '<span class="edCardMeta">' + esc(rep.report_date || "") + (rep.timing ? " · " + esc(rep.timing).toUpperCase() : "") + "</span>" +
       "</div>" +
+      lateChip +
       '<div class="edRows">' +
         '<div class="edRow"><span class="edRowL">EPS surprise</span><span class="edRowV ' + ((rep.surprise_pct || 0) >= 0 ? "edPos" : "") + '">' + pct(rep.surprise_pct) + "</span></div>" +
         '<div class="edRow"><span class="edRowL">Actual / est</span><span class="edRowV">' + num(rep.actual_eps, 2) + " / " + num(rep.estimate_eps, 2) + "</span></div>" +
@@ -273,6 +283,62 @@
       .then(function () { btn.disabled = false; });
   }
 
+  /* ── Manual profile ── */
+  function setVerdict(kind, html) {
+    var el = $("edProfileVerdict");
+    el.className = "edVerdict" + (kind ? " edVerdict--" + kind : "");
+    el.innerHTML = html || "";
+  }
+
+  function runProfile() {
+    var ticker = ($("edProfileTicker").value || "").trim().toUpperCase();
+    if (!ticker) { setVerdict("err", "Enter a ticker first."); return; }
+    var btn = $("edProfileRun");
+    var body = { ticker: ticker };
+    var actual = $("edOvActual").value, est = $("edOvEstimate").value;
+    if (actual !== "") body.actual_eps = parseFloat(actual);
+    if (est !== "") body.estimate_eps = parseFloat(est);
+    if ($("edOvDate").value) body.report_date = $("edOvDate").value;
+    if ($("edOvTiming").value) body.timing = $("edOvTiming").value;
+
+    btn.disabled = true;
+    setVerdict("no", "Profiling " + esc(ticker) + " — report lookup, transcript, quality grade…");
+    fetch("/api/engine18/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then(function (r) {
+        return r.json().then(function (doc) {
+          if (!r.ok) throw new Error((doc && doc.detail) || ("HTTP " + r.status));
+          return doc;
+        });
+      })
+      .then(function (doc) {
+        if (doc.verdict === "candidate") {
+          var c = doc.candidate || {};
+          var late = c.entry_status === "late";
+          setVerdict("ok",
+            "<b>" + esc(ticker) + " qualifies</b> — " +
+            (c.bucket === "beat_large" ? "large beat" : "small beat") +
+            ", quality " + esc((c.grade || {}).quintile || "?") +
+            ", <b>" + esc(c.sizing || "?").toUpperCase() + " size</b>" +
+            " · entry " + esc(c.entry_date) + " open · exit " + esc(c.exit_date) +
+            " · EPS source: " + esc((doc.source || "").toUpperCase()) +
+            (late ? "<br/><b>⚠ " + esc(doc.warning || "Late entry — validated entry point has passed.") + "</b>" : "") +
+            "<br/>Added to the candidate list below (tagged MANUAL).");
+          load();
+        } else {
+          var label = doc.verdict === "no_report" ? "No report found"
+            : doc.verdict === "illiquid" ? esc(ticker) + " is below the liquidity floor"
+            : esc(ticker) + " — not tradable";
+          setVerdict("no", "<b>" + label + ".</b> " + esc(doc.reason || ""));
+        }
+      })
+      .catch(function (err) { setVerdict("err", "Profile failed: " + esc(err.message)); })
+      .then(function () { btn.disabled = false; });
+  }
+
   /* ── Banner / status / load ── */
   function renderBanner(p) {
     var s = p.summary || {};
@@ -355,6 +421,11 @@
   function init() {
     $("edRefresh").addEventListener("click", rebuild);
     $("edAdvisorBtn").addEventListener("click", generateAdvisor);
+    $("edProfileRun").addEventListener("click", runProfile);
+    $("edProfileTicker").addEventListener("keydown", function (e) { if (e.key === "Enter") runProfile(); });
+    $("edProfileToggle").addEventListener("click", function () {
+      $("edOverrides").classList.toggle("open");
+    });
     load();
     loadTrades();
   }

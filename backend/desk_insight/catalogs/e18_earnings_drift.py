@@ -100,6 +100,31 @@ CATALOG = {
         ],
     },
 
+    "manual_profile": {
+        "title": "Manual PEAD Profile",
+        "spec": (
+            "On-demand single-ticker profile — the hybrid complement to the "
+            "auto-scan. The desk enters a name it KNOWS just reported (e.g. "
+            "ORCL the morning after an AMC print) and the system runs the "
+            "exact validated pipeline on it: report lookup (EODHD calendar, "
+            "FMP fallback for faster actuals, manual EPS entry as last resort "
+            "when vendors lag the print), liquidity floor, transcript grade, "
+            "deterministic sizing.\n"
+            "Qualifying names merge into the candidate list tagged MANUAL. "
+            "Non-qualifying reports return an explicit verdict (miss / "
+            "below-floor / illiquid) instead of silently disappearing.\n"
+            "Late-entry guard: the validated entry is the NEXT session open "
+            "after the report. Profile a name after that open and the card is "
+            "flagged LATE — mid-drift entries were never backtested, the "
+            "expected stats do not apply, and late candidates never reach the "
+            "Desk Brain allocator."
+        ),
+        "related_cards": [
+            {"engine": "e18", "slug": "candidate_card", "label": "Candidate Card"},
+            {"engine": "e18", "slug": "scan_summary", "label": "Scan Summary"},
+        ],
+    },
+
     "options_expression": {
         "title": "Options Expression",
         "spec": (

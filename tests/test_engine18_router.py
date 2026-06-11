@@ -75,6 +75,7 @@ def test_flag_gating_404_when_disabled(client, monkeypatch):
     assert client.get("/api/engine18/status").status_code == 404
     assert client.get("/api/engine18/trades").status_code == 404
     assert client.post("/api/engine18/refresh").status_code == 404
+    assert client.post("/api/engine18/profile", json={"ticker": "ORCL"}).status_code == 404
     assert client.get("/earnings-drift").status_code == 404
 
 
@@ -132,6 +133,57 @@ def test_evidence_endpoint(client, fake_store, monkeypatch):
     assert doc["found"] is True
     assert doc["evidence"]["grade"]["score"] == 0.9
     assert client.get("/api/engine18/evidence/NOPE").json()["found"] is False
+
+
+# ---------------------------------------------------------------------------
+# Manual profile endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_profile_requires_valid_ticker(client, monkeypatch):
+    monkeypatch.setenv("ENABLE_ENGINE18", "1")
+    assert client.post("/api/engine18/profile", json={}).status_code == 422
+    assert client.post("/api/engine18/profile", json={"ticker": ""}).status_code == 422
+    assert client.post("/api/engine18/profile", json={"ticker": "BAD TICKER!"}).status_code == 422
+    assert client.post("/api/engine18/profile", json={"ticker": "WAYTOOLONGNAME"}).status_code == 422
+
+
+def test_profile_happy_path(client, monkeypatch):
+    monkeypatch.setenv("ENABLE_ENGINE18", "1")
+    captured = {}
+
+    def fake_build_profile(ticker, *, overrides=None, **kwargs):
+        captured["ticker"] = ticker
+        captured["overrides"] = overrides
+        return {"found": True, "verdict": "candidate", "source": "manual",
+                "candidate": {"ticker": ticker, "sizing": "full", "origin": "manual"}}
+
+    monkeypatch.setattr("backend.engine18.pipeline.build_profile", fake_build_profile)
+    r = client.post("/api/engine18/profile", json={
+        "ticker": "orcl", "actual_eps": 2.1, "estimate_eps": 1.95,
+        "report_date": "2026-06-10", "timing": "amc",
+    })
+    assert r.status_code == 200
+    doc = r.json()
+    assert doc["engine"] == 18
+    assert doc["ticker"] == "ORCL"
+    assert doc["verdict"] == "candidate"
+    assert captured["ticker"] == "ORCL"
+    assert captured["overrides"] == {
+        "actual_eps": 2.1, "estimate_eps": 1.95,
+        "report_date": "2026-06-10", "timing": "amc",
+    }
+
+
+def test_profile_passes_through_verdicts(client, monkeypatch):
+    monkeypatch.setenv("ENABLE_ENGINE18", "1")
+    monkeypatch.setattr(
+        "backend.engine18.pipeline.build_profile",
+        lambda ticker, **kw: {"found": False, "verdict": "no_report", "reason": "nothing in window"},
+    )
+    doc = client.post("/api/engine18/profile", json={"ticker": "GHOST"}).json()
+    assert doc["found"] is False
+    assert doc["verdict"] == "no_report"
 
 
 # ---------------------------------------------------------------------------
