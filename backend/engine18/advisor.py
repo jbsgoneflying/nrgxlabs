@@ -62,13 +62,14 @@ def generate_drift_advisor(
         if len(payload_str) > 25000:
             payload_str = payload_str[:25000]
 
+        # gpt-5.5 rejects non-default temperature (see 225f89b).
         resp = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": payload_str},
             ],
-            temperature=0.2,
+            temperature=1,
         )
         narrative = (resp.choices[0].message.content or "").strip()
         if not narrative:

@@ -658,7 +658,11 @@ class FeatureFlags:
     ENGINE18_HOLD_DAYS: int = 10                      # hold horizon (trading days)
     ENGINE18_MIN_ADV_USD: float = 10_000_000.0        # liquidity floor ($ avg daily volume)
     ENGINE18_LOOKBACK_DAYS: int = 3                   # report recency window for the scan
-    ENGINE18_SCAN_TTL_S: int = 24 * 60 * 60           # Redis serve cache for the scan
+    # 48h, not 24h: the cron writes daily at 12:45 UTC, so a 24h TTL expires
+    # the snapshot at exactly the moment the next run is due — any cron
+    # hiccup then serves an EMPTY page instead of yesterday's (clearly
+    # timestamped) scan. Stale-but-labeled beats blank.
+    ENGINE18_SCAN_TTL_S: int = 48 * 60 * 60           # Redis serve cache for the scan
     ENGINE18_EVIDENCE_TTL_S: int = 30 * 86400         # per-ticker evidence audit trail
     ENGINE18_TRAILING_GRADES_MAX: int = 500           # trailing quality-score window
     ENGINE18_TRADE_TTL_S: int = 180 * 86400           # tracked trades retention
@@ -1157,7 +1161,7 @@ class FeatureFlags:
             ENGINE18_HOLD_DAYS=_get_int("ENGINE18_HOLD_DAYS", 10),
             ENGINE18_MIN_ADV_USD=_get_float("ENGINE18_MIN_ADV_USD", 10_000_000.0),
             ENGINE18_LOOKBACK_DAYS=_get_int("ENGINE18_LOOKBACK_DAYS", 3),
-            ENGINE18_SCAN_TTL_S=_get_int("ENGINE18_SCAN_TTL_S", 24 * 60 * 60),
+            ENGINE18_SCAN_TTL_S=_get_int("ENGINE18_SCAN_TTL_S", 48 * 60 * 60),
             ENGINE18_EVIDENCE_TTL_S=_get_int("ENGINE18_EVIDENCE_TTL_S", 30 * 86400),
             ENGINE18_TRAILING_GRADES_MAX=_get_int("ENGINE18_TRAILING_GRADES_MAX", 500),
             ENGINE18_TRADE_TTL_S=_get_int("ENGINE18_TRADE_TTL_S", 180 * 86400),

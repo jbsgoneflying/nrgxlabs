@@ -71,10 +71,12 @@ def llm_score(text: str, *, model: str) -> Optional[Tuple[float, str]]:
             "multi-week drift up, 0 = strongly bearish. "
             "Text:\n" + text[:6000]
         )
+        # gpt-5.5 rejects non-default temperature (see 225f89b) — the request
+        # 400s and every grade silently falls back to the heuristic.
         resp = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0,
+            temperature=1,
         )
         content = resp.choices[0].message.content or ""
         return _parse_grade(content)
