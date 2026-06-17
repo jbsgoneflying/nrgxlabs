@@ -65,8 +65,32 @@ class DriftCandidate:
     days_late: int = 0              # business days past the validated entry open
     eps_source: str = "eodhd"       # "eodhd" | "fmp" | "manual" (agent override)
 
+    # PEAD is long-only — the bake-off showed misses lose money and shorting
+    # them also loses, so direction is fixed and surfaced for the desk plan.
+    direction: str = "long"
+
+    def decision(self) -> str:
+        """Deterministic GO / NO_GO / CAUTION verdict the desk acts on.
+
+        Mirrors the validated sizing matrix: only full/half-size tiers are
+        capital-committable (GO). A pass tier is NO_GO. A qualifying signal
+        whose validated entry open has already passed is CAUTION — the
+        mid-drift entry was never backtested, so the desk must review.
+        """
+        if self.sizing not in ("full", "half"):
+            return "NO_GO"
+        if self.entry_status == "late":
+            return "CAUTION"
+        return "GO"
+
+    def confidence(self) -> str:
+        """Plain-language confidence tier derived from the sizing matrix."""
+        return {"full": "High", "half": "Moderate"}.get(self.sizing, "Low")
+
     def to_dict(self) -> dict:
         d = asdict(self)
+        d["decision"] = self.decision()
+        d["confidence"] = self.confidence()
         return d
 
     @classmethod
@@ -76,7 +100,7 @@ class DriftCandidate:
         out = cls(ticker=str(d.get("ticker") or ""), report=rep, grade=gr)
         for k in ("bucket", "sizing", "entry_date", "exit_date", "hold_days",
                   "adv_usd", "last_close", "expected", "regime_context",
-                  "origin", "entry_status", "days_late", "eps_source"):
+                  "origin", "entry_status", "days_late", "eps_source", "direction"):
             if k in d:
                 setattr(out, k, d[k])
         return out

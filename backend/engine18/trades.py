@@ -92,6 +92,7 @@ def log_trade(
         "entryPrice": trade_data.get("entryPrice"),
         "shares": trade_data.get("shares"),
         "sizing": str(trade_data.get("sizing") or ""),
+        "decision": str(trade_data.get("decision") or ""),
         "mode": str(trade_data.get("mode") or "tracked"),
         "signalSnapshot": trade_data.get("signalSnapshot") if isinstance(trade_data.get("signalSnapshot"), dict) else {},
         "notes": str(trade_data.get("notes") or ""),

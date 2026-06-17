@@ -81,9 +81,12 @@
 
       /* Candidate cards */
       .edCards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; margin-top: 12px; }
-      .edCard { padding: 14px 15px; border-radius: var(--radius-card); border: 1px solid var(--border); background: rgba(255,255,255,0.78); }
-      .edCard--full { border-color: rgba(52,199,89,0.45); box-shadow: 0 0 0 1px rgba(52,199,89,0.25); }
-      .edCard--pass { opacity: .72; }
+      .edCard { padding: 14px 15px; border-radius: var(--radius-card); border: 1px solid var(--border); background: rgba(255,255,255,0.78); border-left-width: 4px; }
+      .edCard--full { box-shadow: 0 0 0 1px rgba(52,199,89,0.18); }
+      .edCard--pass { opacity: .85; }
+      .edCard--go { border-left-color: #1f9d4d; }
+      .edCard--nogo { border-left-color: #8e8e93; }
+      .edCard--caution { border-left-color: #e0922f; }
       .edCardHead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
       .edTicker { font-size: 17px; font-weight: 800; letter-spacing: -0.3px; }
       .edPill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 800; line-height: 1.3; }
@@ -94,6 +97,33 @@
       .edPill--pass { background: rgba(142,142,147,0.18); color: #4a4a4f; }
       .edPill--q { background: rgba(88,86,214,0.14); color: #3b39a8; }
       .edCardMeta { margin-left: auto; font-size: 11px; color: rgba(11,11,15,0.5); font-variant-numeric: tabular-nums; }
+      .edCardPills { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+
+      /* GO / NO GO badge + colors */
+      .edDecBadge { font-size: 12px; font-weight: 900; letter-spacing: .04em; padding: 3px 11px; border-radius: 999px; text-transform: uppercase; }
+      .edDecBadge--go { background: rgba(52,199,89,0.2); color: #157a38; }
+      .edDecBadge--nogo { background: rgba(142,142,147,0.2); color: #44454a; }
+      .edDecBadge--caution { background: rgba(255,149,0,0.2); color: #9a5a00; }
+      .edDec--go { color: #157a38; }
+      .edDec--nogo { color: #44454a; }
+      .edDec--caution { color: #9a5a00; }
+
+      /* Trade plan block */
+      .edPlan { margin-top: 11px; padding: 11px 12px; border-radius: 12px; background: rgba(11,11,15,0.03); border: 1px solid rgba(11,11,15,0.06); display: grid; gap: 5px; }
+      .edPlanHead { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: rgba(11,11,15,0.45); margin-bottom: 2px; }
+      .edPlanRow { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 13px; }
+      .edPlanL { color: rgba(11,11,15,0.52); font-weight: 600; }
+      .edPlanV { font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+      .edPlanV .edMuted { font-weight: 600; }
+
+      .edDetail { margin-top: 10px; }
+      .edDetail > summary { cursor: pointer; font-size: 11.5px; font-weight: 700; color: rgba(11,11,15,0.5); list-style: none; user-select: none; }
+      .edDetail > summary::-webkit-details-marker { display: none; }
+      .edDetail > summary::before { content: "▸ "; }
+      .edDetail[open] > summary::before { content: "▾ "; }
+
+      .edBtn--go { border-color: rgba(52,199,89,0.5); background: rgba(52,199,89,0.08); }
+      .edBtn--caution { border-color: rgba(255,149,0,0.5); background: rgba(255,149,0,0.07); }
 
       .edRows { margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size: 12.5px; }
       .edRow { display: flex; justify-content: space-between; gap: 8px; }
@@ -238,7 +268,7 @@
     </main>
 
     <script src="/static/nav.js?v=15"></script>
-    <script src="/static/earnings-drift.js?v=2"></script>
+    <script src="/static/earnings-drift.js?v=3"></script>
     <script src="/static/raven-chat.js?v=4"></script>
   </body>
 </html>

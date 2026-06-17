@@ -161,6 +161,39 @@ def test_score_candidate_full_path():
     assert c.expected["bucketAvgNetPct"] == 1.05
 
 
+def test_decision_and_direction_in_payload():
+    # Large beat + Q5 -> full size -> GO, long.
+    go = score_candidate(
+        _report(0.30), QualityGrade(score=0.9, quintile="Q5"),
+        min_surprise=0.05, large_surprise=0.20, hold_days=10,
+    )
+    assert go.decision() == "GO"
+    assert go.confidence() == "High"
+    d = go.to_dict()
+    assert d["decision"] == "GO"
+    assert d["confidence"] == "High"
+    assert d["direction"] == "long"
+
+    # Large beat + Q1 -> pass -> NO_GO (the KMX shape: big headline, weak quality).
+    nogo = score_candidate(
+        _report(0.38), QualityGrade(score=0.32, quintile="Q1"),
+        min_surprise=0.05, large_surprise=0.20, hold_days=10,
+    )
+    assert nogo.sizing == "pass"
+    assert nogo.decision() == "NO_GO"
+    assert nogo.to_dict()["decision"] == "NO_GO"
+
+    # A tradable signal whose validated entry has passed -> CAUTION.
+    late = score_candidate(
+        _report(0.30), QualityGrade(score=0.9, quintile="Q5"),
+        min_surprise=0.05, large_surprise=0.20, hold_days=10,
+    )
+    late.entry_status = "late"
+    late.days_late = 2
+    assert late.decision() == "CAUTION"
+    assert late.to_dict()["decision"] == "CAUTION"
+
+
 def test_score_candidate_rejects_miss_and_small():
     grade = QualityGrade(quintile="Q5")
     assert score_candidate(_report(-0.20), grade, min_surprise=0.05, large_surprise=0.20, hold_days=10) is None

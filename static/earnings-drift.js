@@ -79,13 +79,37 @@
     "</div>";
   }
 
+  /* Deterministic desk verdict. Prefer the backend's value; fall back to the
+     same rule so the card stays correct even against an older API. */
+  function decisionFor(c) {
+    if (c.decision) return c.decision;
+    if (c.sizing === "full" || c.sizing === "half") return c.entry_status === "late" ? "CAUTION" : "GO";
+    return "NO_GO";
+  }
+
+  var DECISION_META = {
+    GO:      { label: "GO",      cls: "go",      sub: "Commit capital — enter LONG at the open" },
+    NO_GO:   { label: "NO GO",   cls: "nogo",    sub: "Do not commit capital — signal does not clear the bar" },
+    CAUTION: { label: "CAUTION", cls: "caution", sub: "Validated entry has passed — desk review before sizing" },
+  };
+
+  function planRow(label, value, sub) {
+    return '<div class="edPlanRow"><span class="edPlanL">' + label + "</span>" +
+      '<span class="edPlanV">' + value + (sub ? ' <span class="edMuted">' + sub + "</span>" : "") + "</span></div>";
+  }
+
   function candidateCard(c) {
     var rep = c.report || {};
     var g = c.grade || {};
-    var cardCls = "edCard" + (c.sizing === "full" ? " edCard--full" : (c.sizing === "pass" ? " edCard--pass" : ""));
+    var decision = decisionFor(c);
+    var dm = DECISION_META[decision] || DECISION_META.NO_GO;
+    var cardCls = "edCard edCard--" + dm.cls + (c.sizing === "full" ? " edCard--full" : (c.sizing === "pass" ? " edCard--pass" : ""));
     var bucketLabel = c.bucket === "beat_large" ? "Large beat" : "Small beat";
     var sizingLabel = c.sizing === "full" ? "FULL SIZE" : (c.sizing === "half" ? "HALF SIZE" : "PASS");
+    var sizeSub = c.sizing === "full" ? "full position" : (c.sizing === "half" ? "half position" : "no allocation");
     var gradeSrc = g.source === "llm" ? "LLM" : (g.source === "heuristic" ? "heuristic" : "no transcript");
+    var confidence = c.confidence || (c.sizing === "full" ? "High" : (c.sizing === "half" ? "Moderate" : "Low"));
+    var entryRef = c.last_close != null ? "ref ~$" + num(c.last_close, 2) : "no ref px";
     var manualPill = c.origin === "manual"
       ? '<span class="edPill edPill--manual" title="On-demand profile — EPS source: ' + esc((c.eps_source || "").toUpperCase()) + '">MANUAL</span>'
       : "";
@@ -93,31 +117,45 @@
       ? '<div class="edLateChip">⚠ ' + c.days_late + " trading day" + (c.days_late === 1 ? "" : "s") +
         " past the validated entry (" + esc(c.entry_date) + " open). Mid-drift entries were never backtested — expected stats below do NOT apply.</div>"
       : "";
+
+    var plan =
+      '<div class="edPlan">' +
+        '<div class="edPlanHead">Trade plan</div>' +
+        planRow("Decision", '<b class="edDec--' + dm.cls + '">' + dm.label + "</b>", dm.sub) +
+        planRow("Direction", "LONG", "PEAD long-only") +
+        planRow("Size", sizingLabel, sizeSub) +
+        planRow("Entry", esc(c.entry_date || "—") + " open", entryRef) +
+        planRow("Hold", (c.hold_days || 10) + " trading days", "→ exit " + esc(c.exit_date || "—")) +
+        planRow("Confidence", esc(confidence), esc(g.quintile || "—") + " quality · " + num(g.score, 2)) +
+      "</div>";
+
     return '<div class="' + cardCls + '">' +
       '<div class="edCardHead">' +
         '<span class="edTicker">' + esc(c.ticker) + "</span>" +
+        '<span class="edDecBadge edDecBadge--' + dm.cls + '">' + dm.label + "</span>" +
+        '<span class="edCardMeta">' + esc(rep.report_date || "") + (rep.timing ? " · " + esc(rep.timing).toUpperCase() : "") + "</span>" +
+      "</div>" +
+      '<div class="edCardPills">' +
         '<span class="edPill edPill--' + esc(c.bucket) + '">' + bucketLabel + "</span>" +
         '<span class="edPill edPill--q">' + esc(g.quintile || "—") + "</span>" +
         '<span class="edPill edPill--' + esc(c.sizing) + '">' + sizingLabel + "</span>" +
         manualPill +
-        '<span class="edCardMeta">' + esc(rep.report_date || "") + (rep.timing ? " · " + esc(rep.timing).toUpperCase() : "") + "</span>" +
       "</div>" +
       lateChip +
+      plan +
+      '<details class="edDetail"><summary>Signal detail</summary>' +
       '<div class="edRows">' +
         '<div class="edRow"><span class="edRowL">EPS surprise</span><span class="edRowV ' + ((rep.surprise_pct || 0) >= 0 ? "edPos" : "") + '">' + pct(rep.surprise_pct) + "</span></div>" +
         '<div class="edRow"><span class="edRowL">Actual / est</span><span class="edRowV">' + num(rep.actual_eps, 2) + " / " + num(rep.estimate_eps, 2) + "</span></div>" +
-        '<div class="edRow"><span class="edRowL">Entry (open)</span><span class="edRowV">' + esc(c.entry_date || "—") + "</span></div>" +
-        '<div class="edRow"><span class="edRowL">Exit (' + (c.hold_days || 10) + ' td)</span><span class="edRowV">' + esc(c.exit_date || "—") + "</span></div>" +
         '<div class="edRow"><span class="edRowL">Quality score</span><span class="edRowV">' + num(g.score, 2) + ' <span class="edMuted">(' + gradeSrc + ")</span></span></div>" +
         '<div class="edRow"><span class="edRowL">ADV</span><span class="edRowV">' + money(c.adv_usd) + "</span></div>" +
       "</div>" +
       (g.rationale ? '<div class="edRationale">' + esc(g.rationale) + "</div>" : "") +
       expectedLine(c) +
       optionsBlock(c) +
+      "</details>" +
       '<div class="edCardActions">' +
-        (c.sizing !== "pass"
-          ? '<button class="edBtn edBtn--sm" data-track="' + esc(c.ticker) + '">Track entry</button>'
-          : "") +
+        '<button class="edBtn edBtn--sm edBtn--' + dm.cls + '" data-track="' + esc(c.ticker) + '">Log trade</button>' +
         '<button class="edBtn edBtn--sm" data-evidence="' + esc(c.ticker) + '">Evidence</button>' +
       "</div>" +
     "</div>";
@@ -167,6 +205,18 @@
   function trackEntry(ticker) {
     var c = findCandidate(ticker);
     if (!c) return;
+    var decision = decisionFor(c);
+
+    // The desk can log any candidate for the record — but committing capital to
+    // a NO GO / CAUTION signal is a deliberate manual override, so confirm it.
+    var override = decision !== "GO";
+    if (override) {
+      var why = decision === "NO_GO"
+        ? ticker + " is a NO GO (sizing PASS — outside the validated edge)."
+        : ticker + " is CAUTION (validated entry has passed; mid-drift entry was never backtested).";
+      if (!window.confirm(why + "\n\nLog this as a MANUAL OVERRIDE trade anyway?")) return;
+    }
+
     var px = window.prompt("Entry price for " + ticker + " (fill at " + c.entry_date + " open):", c.last_close != null ? String(c.last_close) : "");
     if (px === null) return;
     var body = {
@@ -176,6 +226,9 @@
       holdDays: c.hold_days,
       entryPrice: px === "" ? null : parseFloat(px),
       sizing: c.sizing,
+      decision: decision,
+      mode: override ? "manual_override" : "tracked",
+      notes: override ? ("Manual override of " + decision + " verdict.") : "",
       signalSnapshot: c,
     };
     fetch("/api/engine18/trade", {
@@ -184,8 +237,8 @@
       body: JSON.stringify(body),
     })
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-      .then(function () { setStatus("Tracked " + ticker + " drift entry."); loadTrades(); })
-      .catch(function (err) { setStatus("Failed to track trade: " + err.message, true); });
+      .then(function () { setStatus("Logged " + ticker + " drift trade" + (override ? " (manual override)" : "") + "."); loadTrades(); })
+      .catch(function (err) { setStatus("Failed to log trade: " + err.message, true); });
   }
 
   function closeTrade(tradeId, ticker) {
@@ -216,8 +269,11 @@
       var out = t.outcome || {};
       var exitDue = t.status === "active" && t.plannedExitDate && t.plannedExitDate <= today;
       var tr = document.createElement("tr");
+      var overrideTag = t.mode === "manual_override"
+        ? ' <span class="edPill edPill--manual" title="Logged against the desk verdict">OVERRIDE</span>'
+        : "";
       tr.innerHTML =
-        "<td><b>" + esc(t.ticker) + "</b>" + (t.sizing ? ' <span class="edMuted">' + esc(t.sizing) + "</span>" : "") + "</td>" +
+        "<td><b>" + esc(t.ticker) + "</b>" + (t.sizing ? ' <span class="edMuted">' + esc(t.sizing) + "</span>" : "") + overrideTag + "</td>" +
         '<td><span class="edStatus--' + esc(t.status) + '">' + esc(t.status) + "</span></td>" +
         "<td>" + esc(t.entryDate || "—") + "</td>" +
         "<td>" + (exitDue ? '<span class="edExitDue" title="Past the validated 10-trading-day hold — exit now">' + esc(t.plannedExitDate) + " ⚠</span>" : esc(t.plannedExitDate || "—")) + "</td>" +
@@ -318,11 +374,13 @@
         if (doc.verdict === "candidate") {
           var c = doc.candidate || {};
           var late = c.entry_status === "late";
-          setVerdict("ok",
-            "<b>" + esc(ticker) + " qualifies</b> — " +
+          var decision = decisionFor(c);
+          var dm = DECISION_META[decision] || DECISION_META.NO_GO;
+          setVerdict(decision === "GO" ? "ok" : "no",
+            '<b class="edDec--' + dm.cls + '">' + dm.label + "</b> — " + esc(ticker) + " · " +
             (c.bucket === "beat_large" ? "large beat" : "small beat") +
             ", quality " + esc((c.grade || {}).quintile || "?") +
-            ", <b>" + esc(c.sizing || "?").toUpperCase() + " size</b>" +
+            ", <b>" + esc(c.sizing || "?").toUpperCase() + " size</b> (LONG)" +
             " · entry " + esc(c.entry_date) + " open · exit " + esc(c.exit_date) +
             " · EPS source: " + esc((doc.source || "").toUpperCase()) +
             (late ? "<br/><b>⚠ " + esc(doc.warning || "Late entry — validated entry point has passed.") + "</b>" : "") +
