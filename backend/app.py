@@ -106,12 +106,12 @@ def _verify_token(token: str) -> bool:
 
 
 def _auth_enabled() -> bool:
-    # The app is intentionally public by default so the full desk-agent
-    # walkthrough (every route, every engine) is reachable without a cookie.
-    # Set ``PUBLIC_ACCESS=0`` (or any falsy value) in the environment to
-    # re-engage the invite-code gate. ``INVITE_CODE`` still must be set and
-    # non-empty for the gate to do anything.
-    public = (os.getenv("PUBLIC_ACCESS") or "1").strip().lower()
+    # The desk is invite-only: the app is gated by default so general traffic
+    # off the splash page (nrgxlabs.com -> "Enter the desk") hits the invite
+    # code wall before reaching any engine. Set ``PUBLIC_ACCESS=1`` (or any
+    # truthy value) in the environment to drop the gate for a full walkthrough.
+    # ``INVITE_CODE`` still must be set and non-empty for the gate to engage.
+    public = (os.getenv("PUBLIC_ACCESS") or "0").strip().lower()
     if public in ("1", "true", "yes", "on"):
         return False
     return bool(INVITE_CODE)
@@ -120,6 +120,12 @@ def _auth_enabled() -> bool:
 def _path_is_public(path: str) -> bool:
     p = str(path or "")
     if p.startswith("/static/"):
+        # Static assets (css/js/images/fonts) stay public so the /login page
+        # can render. The engine HTML shells live in this same folder but are
+        # served through gated routes (/spx, /market-intelligence, ...); block
+        # direct .html access so the gate can't be bypassed via /static/*.html.
+        if p.lower().endswith(".html"):
+            return False
         return True
     if p in ("/api/health", "/privacy-policy", "/support/fasting-guide"):
         return True

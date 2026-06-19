@@ -77,7 +77,7 @@ def get_config() -> V2Config:
         auth_secret=_str("AUTH_SECRET"),
         auth_cookie_name=_str("AUTH_COOKIE_NAME", "raven_session"),
         auth_cookie_ttl_s=_int("AUTH_COOKIE_TTL_S", 7 * 24 * 60 * 60),
-        public_access=_bool("PUBLIC_ACCESS", True),
+        public_access=_bool("PUBLIC_ACCESS", False),
         service_name=_str("V2_SERVICE_NAME", "nrgxlabs-v2"),
         bind_host=_str("V2_BIND_HOST", "0.0.0.0"),
         bind_port=_int("V2_BIND_PORT", 8001),
