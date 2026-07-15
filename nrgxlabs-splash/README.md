@@ -1,106 +1,63 @@
 # NRGX Labs — splash / project page
 
-The public face of NRGX Labs at `https://nrgxlabs.com`. A project page in
-the [joshuabsmith.io](https://joshuabsmith.io) ecosystem: portal hero
-(logo, tagline, desk ledger, door into the app), then scroll sections for
-the lab thesis, codebase proof, and builder — with quiet links back to
-Joshua’s founder page. Pure static HTML/CSS — no build step, no backend,
-no JS framework.
+The public face of NRGX Labs at `https://nrgxlabs.com`. **Direction B —
+The Terminal**: dark desk aesthetic, live tape header, hero + three
+institutional panels (research / method / access). Pure static HTML/CSS —
+no build step, no backend, no JS framework.
+
+Founder narrative lives on [joshuabsmith.io](https://joshuabsmith.io).
+This page speaks as infrastructure for private capital — not a portfolio
+site.
 
 ## Live page
 
-**`index.html`** is the live splash. It is identical to `d-portal.html`
-(the file we explored as "Direction D — The Portal" during design, now
-extended into a full project page). The duplicate exists so the page
-loads cleanly on the bare domain (`nrgxlabs.com/` resolves to
-`index.html` by default) while the `d-portal.html` filename remains for
-back-reference against the other exploration directions in this folder.
+**`index.html`** is the live splash. It uses `b-terminal.css` and is kept
+in sync with `d-portal.html` (historical filename from the portal
+exploration; both files are identical on deploy).
 
 The splash is served directly from this folder on the droplet — nginx
 points its `root` directive at `/opt/breach-algo/nrgxlabs-splash/`,
-and edits ship on the next push to `main` (the existing GitHub Actions
-deploy workflow runs `git pull` on the droplet, which updates these
-files in place).
+and edits ship on the next push to `main`.
 
 See **[`/deploy/nrgxlabs-migration.md`](../deploy/nrgxlabs-migration.md)**
-for the full domain migration runbook (DNS → nginx → certbot → cutover).
+for the full domain migration runbook.
 
 ## Page shape
 
-1. **Hero** — calling-card first viewport: corners, logo, typed tagline,
-   desk ledger, Enter the desk → `https://app.nrgxlabs.com`
-2. **The lab** — invite-only institutional options research; quant decides,
-   the model explains
-3. **The system** — codebase proof (engines, routes, lines, tests) + engine labels
-4. **From the builder** — founder proof points + link to joshuabsmith.io
-5. **CTA + colophon** — second desk door, desk@ email, Built by Joshua b. Smith
+1. **Top bar** — NRG logo, live regime tape, Enter the desk
+2. **Hero** — headline + engine state panel (redacted values)
+3. **Three panels** — `/01 research` · `/02 method` · `/03 access`
+4. **Footer** — NRGX/Labs · Private Capital Research · app + email
 
 ## What's in this folder
 
 | File | What it is |
 |---|---|
 | `index.html` | **Live page** — what `nrgxlabs.com` serves |
-| `d-portal.html` | Identical to `index.html`; kept for design comparison |
-| `d-portal.css` | Styles for the page (hero + below-the-fold sections) |
-| `tokens.css` | Brand palette, type, spacing — shared across all directions |
-| `NRG-Logo.png` | The wordmark + X-blade lockup (used as logo + OG image + favicon) |
-| `robots.txt` | Allows indexing of the splash, blocks the exploration-only files |
-| `sitemap.xml` | Single-URL sitemap pointing at the apex |
-| `a-quiet-lab.{html,css}` | Direction A — The Quiet Lab (exploration only) |
-| `b-terminal.{html,css}`  | Direction B — The Terminal (exploration only) |
-| `c-memo.{html,css}`      | Direction C — The Memo (exploration only) |
-| `assets/nrgxlabs-logo.png` | Earlier logo file, superseded by `NRG-Logo.png` |
-| `assets/nrgxlabs-mark.svg` | Custom SVG attempt, superseded by `NRG-Logo.png` |
-
-The exploration-only directions (`a-quiet-lab.html`, `b-terminal.html`,
-`c-memo.html`) are kept as a record of the design alternatives we
-considered. They are explicitly disallowed in `robots.txt` so search
-engines don't index them, but they're still browsable directly if you
-want to compare moods.
-
-## How to open the live page locally
-
-From the workspace root:
-
-```bash
-open nrgxlabs-splash/index.html
-```
-
-For a quick visual diff against the other directions:
-
-```bash
-open nrgxlabs-splash/a-quiet-lab.html
-open nrgxlabs-splash/b-terminal.html
-open nrgxlabs-splash/c-memo.html
-```
+| `d-portal.html` | Identical to `index.html` (kept for deploy convention) |
+| `b-terminal.css` | **Live styles** — terminal / desk aesthetic |
+| `d-portal.css` | Legacy portal styles (exploration archive) |
+| `tokens.css` | Brand palette, type, spacing — shared across directions |
+| `NRG-Logo.png` | Wordmark lockup (logo + OG image + favicon source) |
+| `a-quiet-lab.{html,css}` | Direction A — exploration only |
+| `b-terminal.html` | Direction B prototype (superseded by `index.html`) |
+| `c-memo.{html,css}` | Direction C — exploration only |
 
 ## Editing the page
 
-Most copy edits live in `index.html` (keep `d-portal.html` in sync):
+Copy and styles live in `index.html` + `b-terminal.css`:
 
-- **Tagline** — single line, typed in via JS (see `<span class="pTaglineText" data-typed>`)
-- **Desk ledger rows** — `<li class="pLedgerRow">` blocks; engine codes/names/values
-- **Door label** — `<span class="pDoorLabel">Enter the desk</span>`
-- **Lab / System / Builder / CTA** — sections `#lab`, `#system`, `#builder`, `#enter`
-- **Colophon** — footer link to `https://joshuabsmith.io`
-- **Footer email** — `mailto:desk@nrgxlabs.com`
+- **Tape / timestamp** — header `.tTape`; ET stamp via `[data-stamp]` JS
+- **Engine rows** — hero panel table + `/01 research` list
+- **Method / access copy** — panels `/02` and `/03`
+- **CTA** — `https://app.nrgxlabs.com` and `desk@nrgxlabs.com`
 
-Style edits go in `d-portal.css` (logo sizing, ledger borders, section
-layout, proof grid). Brand-level colors / fonts / spacing live in
-`tokens.css` and propagate everywhere.
-
-After editing: `git push origin main`. The droplet picks up the change
-within ~90 seconds via the existing deploy workflow. nginx caches
-HTML with `Cache-Control: no-store`, so changes are visible on next
-page load — no manual cache purge needed.
+After editing: bump `?v=` on CSS links in `index.html`, sync
+`d-portal.html`, `git push origin main`. nginx serves HTML with
+`no-store`; CSS is cached 7 days — always version-bust CSS on style changes.
 
 ## Open follow-ups
 
-- [ ] **Square favicon variant** — current favicon links use the wide
-      logo PNG, which scales poorly at 16×16. Crop or redraw a
-      square-format mark and replace the `<link rel="icon">` references.
-- [ ] **MX records for `desk@nrgxlabs.com`** — set up email forwarding
-      in GoDaddy so the footer mailto actually delivers somewhere.
-- [ ] **App-side rebrand** — once `app.nrgxlabs.com` is the canonical
-      hostname, sweep the static frontend for "Raven Tech" → "NRGX Labs"
-      in page titles, headers, and login screen.
+- [ ] **Square favicon variant** — crop or redraw for 16×16
+- [ ] **MX records for `desk@nrgxlabs.com`** — email forwarding in DNS
+- [ ] **Live tape values** — wire regime/VIX from `/api/desk-state` when ready

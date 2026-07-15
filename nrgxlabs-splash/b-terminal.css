@@ -1,4 +1,4 @@
-/* Direction B — "The Terminal"
+/* Direction B — "The Terminal" (live at nrgxlabs.com)
    Dark inverted palette. Bordered panels feel like Bloomberg cells.
    Gold reserved for live state. Mono accents for data. */
 
@@ -8,19 +8,24 @@
   --tBorder: var(--hairline-dark);
   --tBorderStrong: rgba(244, 241, 234, 0.18);
   --tPanelBg: #131820;
+  min-height: 100vh;
 }
 
-/* The logo is intended for cream backgrounds. Wrap it on dark with a
-   subtle vignette so the wordmark reads cleanly. */
+/* The logo matte matches cream; wrap on dark so the wordmark reads cleanly. */
 .tBrand {
   display: inline-block;
-  background: var(--cream);
-  padding: 6px 14px;
+  background: var(--paper);
+  padding: 8px 16px;
   border: 1px solid var(--tBorderStrong);
+  transition: opacity var(--dur) var(--ease);
+}
+
+.tBrand:hover {
+  opacity: 0.94;
 }
 
 .tBrand img {
-  height: 28px;
+  height: 26px;
   width: auto;
   display: block;
 }
@@ -321,7 +326,7 @@
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: var(--s-4);
-  padding: var(--s-7) 0;
+  padding: 0 0 var(--s-10);
 }
 
 .tCell {
@@ -379,39 +384,13 @@
   margin: 0;
 }
 
-/* ---------- Access ---------- */
-.tAccess {
-  padding: var(--s-9) 0 var(--s-10);
-  border-top: 1px solid var(--tBorder);
-  margin-top: var(--s-7);
-}
-
-.tAccessInner {
-  max-width: 640px;
-}
-
-.tAccessTitle {
-  font-size: var(--t-2xl);
-  font-weight: 500;
-  letter-spacing: var(--track-display);
-  margin: var(--s-4) 0 var(--s-4);
-  line-height: 1.15;
-}
-
-.tAccessBody {
-  font-size: var(--t-md);
-  line-height: 1.65;
-  color: var(--muted-dark);
-  margin: 0 0 var(--s-6);
-}
-
-.tAccessBody a {
+.tCellBody a {
   color: var(--gold-soft);
   border-bottom: 1px solid rgba(181, 137, 74, 0.4);
   padding-bottom: 1px;
 }
 
-.tAccessBody a:hover {
+.tCellBody a:hover {
   color: var(--gold);
   border-color: var(--gold);
 }
@@ -467,6 +446,10 @@
 }
 
 @media (max-width: 720px) {
+  .tBrand img {
+    height: 22px;
+  }
+
   .tTop {
     flex-direction: column;
     align-items: flex-start;
@@ -503,5 +486,18 @@
   .tFootRight {
     margin-left: 0;
     flex-basis: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tTapeDot {
+    animation: none;
+    opacity: 0.85;
+  }
+
+  .tEnter,
+  .tBtn,
+  .tBrand {
+    transition: none;
   }
 }

@@ -3,19 +3,18 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>NRGX Labs — Invite-only institutional options research</title>
+    <title>NRGX Labs — Private Capital Research</title>
     <meta
       name="description"
-      content="NRGX Labs is an invite-only institutional options research platform. Quant engines decide; the model explains. Built by Joshua b. Smith."
+      content="NRGX Labs — proprietary options research desk for private capital. Regime-aware signals, conformal calibration, runtime-verified before they hit the desk."
     />
-    <meta name="theme-color" content="#fefefe" />
+    <meta name="theme-color" content="#0e1116" />
 
-    <!-- Open Graph / Twitter cards (link previews in iMessage, Slack, etc.) -->
     <meta property="og:type" content="website" />
     <meta property="og:title" content="NRGX Labs" />
     <meta
       property="og:description"
-      content="Invite-only institutional options research. Quant decides, the model explains."
+      content="Proprietary options research for private capital. Quant decides. The model explains."
     />
     <meta property="og:url" content="https://nrgxlabs.com" />
     <meta property="og:image" content="https://nrgxlabs.com/NRG-Logo.png" />
@@ -24,220 +23,164 @@
     <meta name="twitter:title" content="NRGX Labs" />
     <meta
       name="twitter:description"
-      content="Invite-only institutional options research. Quant decides, the model explains."
+      content="Proprietary options research for private capital. Quant decides. The model explains."
     />
     <meta name="twitter:image" content="https://nrgxlabs.com/NRG-Logo.png" />
 
-    <!-- Favicons — generated from the X-only mark so they read cleanly at 16px. -->
     <link rel="icon" href="favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
 
-    <link rel="stylesheet" href="tokens.css?v=2" />
-    <link rel="stylesheet" href="d-portal.css?v=2" />
+    <link rel="stylesheet" href="tokens.css?v=3" />
+    <link rel="stylesheet" href="b-terminal.css?v=3" />
   </head>
-  <body class="portal">
-    <main role="main">
-      <!-- Hero: first viewport calling card -->
-      <section class="pHero" id="top" aria-label="NRGX Labs">
-        <div class="pStage">
-          <header class="pHeader">
-            <span class="pCorner">NRGX/Labs</span>
-            <span class="pCorner pCornerRight">est. 2026</span>
-          </header>
+  <body class="terminal">
+    <header class="tTop" role="banner">
+      <a class="tBrand" href="/" aria-label="NRGX Labs home">
+        <img src="NRG-Logo.png" alt="NRGX Labs" />
+      </a>
+      <div class="tTopRight">
+        <span class="tTape" aria-label="market state">
+          <span class="tTapeDot" aria-hidden="true"></span>
+          <span class="tTapeKey">REGIME</span>
+          <span class="tTapeVal tGold">NEUTRAL-VOL</span>
+          <span class="tTapeSep">·</span>
+          <span class="tTapeKey">VIX</span>
+          <span class="tTapeVal">████</span>
+          <span class="tTapeSep">·</span>
+          <span class="tTapeKey">DESK</span>
+          <span class="tTapeVal tGold">LIVE</span>
+          <span class="tTapeSep">·</span>
+          <span class="tTapeKey">ET</span>
+          <span class="tTapeVal" data-stamp>17:21</span>
+        </span>
+        <a class="tEnter" href="https://app.nrgxlabs.com" rel="noopener">
+          Enter the desk
+          <span aria-hidden="true">→</span>
+        </a>
+      </div>
+    </header>
 
-          <div class="pCenter">
-            <a class="pLogoLink" href="/" aria-label="NRGX Labs — Private Capital Research">
-              <img class="pLogo" src="NRG-Logo.png" alt="NRGX Labs — Private Capital Research" />
-            </a>
-
-            <p class="pTagline">
-              <span class="srOnly">Signal research for private capital.</span>
-              <span class="pTaglineText" data-typed aria-hidden="true"
-                >Signal research for private capital</span
-              >
+    <main class="tMain" role="main">
+      <section class="tHero" id="top" aria-label="NRGX Labs research desk">
+        <div class="tHeroGrid">
+          <div class="tHeroCopy">
+            <span class="eyebrow tEyebrow">NRGX/Labs · Research Desk</span>
+            <h1 class="tHeadline">
+              Signal research for<br />
+              <span class="tGold">private capital.</span>
+            </h1>
+            <p class="tSubhead">
+              Proprietary options research infrastructure — conformal probabilities,
+              regime-aware engines, runtime-verified on a live shadow desk before
+              anything ships. Quant decides. The model explains.
             </p>
-
-            <section class="pLedger" aria-label="desk engines">
-              <header class="pLedgerHead">
-                <span class="pLedgerHeadLeft">
-                  <span class="pLedgerDot" aria-hidden="true"></span>
-                  <span class="pLedgerHeadTitle">desk · live</span>
-                </span>
-                <span class="pLedgerStamp" data-stamp>17:21 ET</span>
-              </header>
-              <ul class="pLedgerList">
-                <li class="pLedgerRow">
-                  <span class="pLedgerCode">E1</span>
-                  <span class="pLedgerName">Earnings IV crush</span>
-                  <span class="pLedgerVal">+1.8σ</span>
-                </li>
-                <li class="pLedgerRow">
-                  <span class="pLedgerCode">E2</span>
-                  <span class="pLedgerName">SPX iron condors</span>
-                  <span class="pLedgerVal pLedgerValMute">flat</span>
-                </li>
-                <li class="pLedgerRow">
-                  <span class="pLedgerCode">E14</span>
-                  <span class="pLedgerName">SPX scenario</span>
-                  <span class="pLedgerVal">+0.6σ</span>
-                </li>
-                <li class="pLedgerRow">
-                  <span class="pLedgerCode">MI</span>
-                  <span class="pLedgerName">Regime intelligence</span>
-                  <span class="pLedgerVal">neutral-vol</span>
-                </li>
-              </ul>
-            </section>
-
-            <a class="pDoor" href="https://app.nrgxlabs.com" rel="noopener">
-              <span class="pDoorLabel">Enter the desk</span>
-              <span class="pDoorArrow" aria-hidden="true">→</span>
-            </a>
-          </div>
-
-          <div class="pFoot">
-            <span class="pFootMeta">By invitation.</span>
-            <a class="pFootMail" href="mailto:desk@nrgxlabs.com">desk@nrgxlabs.com</a>
-          </div>
-        </div>
-      </section>
-
-      <!-- The Lab -->
-      <section class="pSection" id="lab" data-reveal>
-        <div class="pInner pInnerNarrow">
-          <p class="eyebrow">The lab</p>
-          <h2 class="pHeadline">Invite-only institutional options research.</h2>
-          <div class="pProse">
-            <p>
-              NRGX Labs is a private research desk for self-directed capital — quant
-              engines, live market-state analysis, structured AI explanations, and
-              production-grade research workflows behind an invite wall.
-            </p>
-            <p>
-              The operating philosophy is simple:
-              <em>quant decides, the model explains.</em>
-              Deterministic engines score the trade. Language models narrate the
-              judgment — they do not replace it.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <!-- The System -->
-      <section class="pSection pSectionAlt" id="system" data-reveal>
-        <div class="pInner">
-          <p class="eyebrow">The system</p>
-          <h2 class="pHeadline">Built like infrastructure, not a demo.</h2>
-          <p class="pLead">
-            Layered OpenAI systems explain deterministic research. They do not invent
-            the research.
-          </p>
-
-          <ul class="pSpec" aria-label="codebase proof">
-            <li class="pSpecItem">
-              <span class="pSpecStat">18</span>
-              <span class="pSpecLabel">quant engines</span>
-            </li>
-            <li class="pSpecItem">
-              <span class="pSpecStat">~190</span>
-              <span class="pSpecLabel">API routes</span>
-            </li>
-            <li class="pSpecItem">
-              <span class="pSpecStat">160K+</span>
-              <span class="pSpecLabel">lines Python / JS</span>
-            </li>
-            <li class="pSpecItem">
-              <span class="pSpecStat">1,200+</span>
-              <span class="pSpecLabel">tests</span>
-            </li>
-          </ul>
-
-          <ul class="pEngineStrip" aria-label="selected engines">
-            <li><span class="pEngineCode">E1</span> Earnings IV crush</li>
-            <li><span class="pEngineCode">E2</span> SPX iron condors</li>
-            <li><span class="pEngineCode">E14</span> SPX scenario</li>
-            <li><span class="pEngineCode">MI</span> Regime intelligence</li>
-          </ul>
-        </div>
-      </section>
-
-      <!-- From the builder -->
-      <section class="pSection" id="builder" data-reveal>
-        <div class="pInner pBuilder">
-          <div class="pBuilderCopy">
-            <p class="eyebrow">From the builder</p>
-            <h2 class="pHeadline">Built by a founder, not a product studio.</h2>
-            <div class="pProse">
-              <p>
-                NRGX Labs comes from twenty-five years of building and exiting
-                companies — ecommerce, manufacturing, subscription commerce — and
-                now owned systems: RavenOS, NRGX Labs, InjuryOS, and Versefold.
-              </p>
-              <p>
-                The pattern has not changed. Find the constraint. Learn the system.
-                Build the bridge. Make better decisions possible.
-              </p>
-              <p class="pGrace">Built by effort. Carried by grace.</p>
-              <p class="pMore">
-                More at
-                <a href="https://joshuabsmith.io" rel="noopener">joshuabsmith.io</a>.
-              </p>
+            <div class="tCtaRow">
+              <a class="tBtn tBtnPrimary" href="https://app.nrgxlabs.com" rel="noopener">
+                Enter the desk
+                <span aria-hidden="true">→</span>
+              </a>
+              <a class="tBtn tBtnGhost" href="#research">/research →</a>
             </div>
           </div>
 
-          <ul class="pProof" aria-label="founder proof points">
-            <li class="pProofItem">
-              <p class="pProofStat">25+ years</p>
-              <p class="pProofDetail">founder and operator — companies built, run, and sold</p>
-            </li>
-            <li class="pProofItem">
-              <p class="pProofStat">Multiple exits</p>
-              <p class="pProofDetail">
-                including a manufacturing company acquired by University of California,
-                Irvine
-              </p>
-            </li>
-            <li class="pProofItem">
-              <p class="pProofStat">Inc. 5000</p>
-              <p class="pProofDetail">three years running, among the fastest-growing U.S. companies</p>
-            </li>
-            <li class="pProofItem">
-              <p class="pProofStat">Systems today</p>
-              <p class="pProofDetail">RavenOS, NRGX Labs, InjuryOS, and Versefold — the same pattern</p>
-            </li>
-          </ul>
+          <aside class="tPanel tHeroPanel" aria-label="live engine state">
+            <div class="tPanelTop">
+              <span class="tPanelLabel">desk.engine_state</span>
+              <span class="tPanelStatus">
+                <span class="tPanelDot"></span>
+                live
+              </span>
+            </div>
+            <table class="tPanelTable">
+              <tbody>
+                <tr>
+                  <td class="tPanelKey">E1</td>
+                  <td class="tPanelName">Earnings IV crush</td>
+                  <td class="tPanelVal tPanelOk">edge · +1.8σ</td>
+                </tr>
+                <tr>
+                  <td class="tPanelKey">E2</td>
+                  <td class="tPanelName">SPX iron condors</td>
+                  <td class="tPanelVal tPanelMute">flat · ███</td>
+                </tr>
+                <tr>
+                  <td class="tPanelKey">E14</td>
+                  <td class="tPanelName">SPX scenario</td>
+                  <td class="tPanelVal tPanelOk">edge · +0.6σ</td>
+                </tr>
+                <tr>
+                  <td class="tPanelKey">MI</td>
+                  <td class="tPanelName">Regime intelligence</td>
+                  <td class="tPanelVal tPanelMute">██████</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="tPanelFoot">
+              full state behind the door &nbsp; · &nbsp;
+              <a href="https://app.nrgxlabs.com" rel="noopener">app.nrgxlabs.com</a>
+            </div>
+          </aside>
         </div>
       </section>
 
-      <!-- CTA -->
-      <section class="pSection pCta" id="enter" data-reveal>
-        <div class="pInner pInnerNarrow pCtaInner">
-          <p class="eyebrow">The desk</p>
-          <h2 class="pHeadline">By invitation only.</h2>
-          <p class="pLead">
-            Access is limited. If you have an invite, enter the desk. Otherwise, write
-            the desk.
-          </p>
-          <div class="pCtaActions">
-            <a class="pDoor" href="https://app.nrgxlabs.com" rel="noopener">
-              <span class="pDoorLabel">Enter the desk</span>
-              <span class="pDoorArrow" aria-hidden="true">→</span>
-            </a>
-            <a class="pFootMail pCtaMail" href="mailto:desk@nrgxlabs.com">desk@nrgxlabs.com</a>
+      <section id="research" class="tCells" aria-label="Research, method, and access">
+        <article class="tPanel tCell">
+          <div class="tPanelTop">
+            <span class="tPanelLabel">/01</span>
+            <span class="tPanelStatus tPanelStatusGold">research</span>
           </div>
-        </div>
+          <h2 class="tCellTitle">What we research</h2>
+          <ul class="tCellList">
+            <li><span class="tCellTag">E1</span> Earnings IV crush</li>
+            <li><span class="tCellTag">E2</span> SPX iron condors</li>
+            <li><span class="tCellTag">E14</span> SPX scenario</li>
+            <li><span class="tCellTag">MI</span> Regime intelligence</li>
+          </ul>
+        </article>
+
+        <article class="tPanel tCell" id="method">
+          <div class="tPanelTop">
+            <span class="tPanelLabel">/02</span>
+            <span class="tPanelStatus tPanelStatusGold">method</span>
+          </div>
+          <h2 class="tCellTitle">How we work</h2>
+          <p class="tCellBody">
+            Conformal-calibrated probabilities. Regime-aware feature stacks.
+            Deterministic engines score the trade; language models narrate the
+            judgment — they do not replace it. Every signal is runtime-verified
+            against a live shadow desk. Research that fails replication does not
+            ship.
+          </p>
+        </article>
+
+        <article class="tPanel tCell" id="access">
+          <div class="tPanelTop">
+            <span class="tPanelLabel">/03</span>
+            <span class="tPanelStatus tPanelStatusGold">access</span>
+          </div>
+          <h2 class="tCellTitle">Who it's for</h2>
+          <p class="tCellBody">
+            Self-directed capital running real size. Single-LP funds and
+            family-office allocators who want the model behind the trade — not
+            a pitch deck. The desk is open by invitation. Have a code, enter.
+            Otherwise, write
+            <a href="mailto:desk@nrgxlabs.com">desk@nrgxlabs.com</a>.
+          </p>
+        </article>
       </section>
     </main>
 
-    <footer class="pColophon" role="contentinfo">
-      <div class="pColophonInner">
-        <p>
-          &copy; 2026 NRGX Labs. Built by
-          <a href="https://joshuabsmith.io" rel="noopener">Joshua b. Smith</a>.
-        </p>
-        <p class="pColophonMark">Signal research for private capital.</p>
+    <footer class="tFoot" role="contentinfo">
+      <div class="tFootInner">
+        <span class="tFootBrand">NRGX/Labs</span>
+        <span class="tFootMeta">Private Capital Research</span>
+        <span class="tFootMeta tFootRight">
+          <a href="https://app.nrgxlabs.com" rel="noopener">app.nrgxlabs.com</a>
+          <span aria-hidden="true"> · </span>
+          <a href="mailto:desk@nrgxlabs.com">desk@nrgxlabs.com</a>
+        </span>
       </div>
     </footer>
 
@@ -252,80 +195,9 @@
             minute: '2-digit',
             hour12: false,
           });
-          stamp.textContent = fmt.format(new Date()) + ' ET';
+          stamp.textContent = fmt.format(new Date());
         } catch (_) {
           /* keep fallback text */
-        }
-      })();
-
-      (function () {
-        var node = document.querySelector('.pTaglineText[data-typed]');
-        if (!node) return;
-        var host = node.parentElement;
-
-        var reduceMotion =
-          window.matchMedia &&
-          window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        if (reduceMotion) return;
-
-        var fullText = node.textContent;
-        node.textContent = '';
-        host.setAttribute('data-typing', 'active');
-
-        var i = 0;
-        var startDelay = 380;
-        var charInterval = 55;
-        var midSentencePause = 850;
-
-        function step() {
-          if (i >= fullText.length) {
-            setTimeout(function () {
-              host.setAttribute('data-typing', 'done');
-            }, 1100);
-            return;
-          }
-          var ch = fullText.charAt(i);
-          node.textContent += ch;
-          i++;
-          var nextDelay = charInterval;
-          var nextCh = fullText.charAt(i);
-          if (ch === '.' && (nextCh === ' ' || nextCh === '\n')) {
-            nextDelay += midSentencePause;
-          }
-          setTimeout(step, nextDelay);
-        }
-
-        setTimeout(step, startDelay);
-      })();
-
-      (function () {
-        var nodes = document.querySelectorAll('[data-reveal]');
-        if (!nodes.length) return;
-
-        var reduceMotion =
-          window.matchMedia &&
-          window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        if (reduceMotion || !('IntersectionObserver' in window)) {
-          for (var i = 0; i < nodes.length; i++) {
-            nodes[i].classList.add('is-visible');
-          }
-          return;
-        }
-
-        var observer = new IntersectionObserver(
-          function (entries) {
-            entries.forEach(function (entry) {
-              if (entry.isIntersecting) {
-                entry.target.classList.add('is-visible');
-                observer.unobserve(entry.target);
-              }
-            });
-          },
-          { rootMargin: '0px 0px -8% 0px', threshold: 0.12 }
-        );
-
-        for (var j = 0; j < nodes.length; j++) {
-          observer.observe(nodes[j]);
         }
       })();
     </script>
