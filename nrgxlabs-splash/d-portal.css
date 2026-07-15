@@ -1,8 +1,7 @@
-/* Direction D — "The Portal"
-   Single-screen calling card. No scroll. Brand → proof → door.
-   The page answers "so what do you do?" by showing the engines the
-   desk actually runs (instead of telling you about them in prose),
-   then offers entry. Nothing else.
+/* Direction D — "The Portal" → ecosystem project page
+   First viewport: brand → desk ledger → door (the calling card).
+   Below: The Lab / The System / From the builder / CTA / colophon —
+   quiet proof that this desk sits in the joshuabsmith.io ecosystem.
    Designed for the moment after someone hears about NRGX Labs at
    dinner and types the URL into their phone — they should feel like
    they arrived somewhere intentional, not a marketing site. */
@@ -14,7 +13,11 @@
   min-height: 100vh;
 }
 
-/* ---------- Stage: a single 100vh frame ---------- */
+/* ---------- Hero: first 100vh frame ---------- */
+.pHero {
+  min-height: 100vh;
+}
+
 .pStage {
   min-height: 100vh;
   display: grid;
@@ -167,11 +170,8 @@
 }
 
 /* ---------- Desk Ledger (the proof element) ----------
-   Replaces the prose tagline with a hairline-bordered card listing
-   the actual engines that run the desk, with a live header showing
-   "desk · live" + a gold pulse dot + the current ET timestamp.
-   Heavier than the old pulse strip, restrained enough to live on
-   D's cream surface — hairlines instead of dark cells.
+   Hairline-bordered list of the engines the desk runs, with a live
+   header showing "desk · live" + a gold pulse dot + ET timestamp.
    Status values are static placeholders today; trivially swappable
    for live values from /api/desk-state once the domain is wired up. */
 .pLedger {
@@ -319,7 +319,7 @@
   color: var(--gold);
 }
 
-/* ---------- Footer (colophon strip) ---------- */
+/* ---------- Hero foot strip ---------- */
 .pFoot {
   display: flex;
   justify-content: space-between;
@@ -349,7 +349,312 @@
   border-bottom-color: var(--gold);
 }
 
+/* ============================================================
+   Below-the-fold: project page sections
+   ============================================================ */
+
+.pSection {
+  padding: var(--s-9) var(--s-7);
+  border-top: 1px solid var(--hairline);
+}
+
+.pSectionAlt {
+  background: rgba(14, 17, 22, 0.015);
+}
+
+.pInner {
+  max-width: var(--maxw-wide);
+  margin: 0 auto;
+}
+
+.pInnerNarrow {
+  max-width: var(--maxw-narrow);
+}
+
+.pHeadline {
+  font-family: var(--font-serif);
+  font-size: clamp(var(--t-xl), 4vw, var(--t-3xl));
+  font-weight: 400;
+  letter-spacing: var(--track-display);
+  line-height: 1.15;
+  color: var(--ink);
+  margin: var(--s-4) 0 0;
+}
+
+.pLead {
+  font-size: var(--t-md);
+  line-height: 1.65;
+  color: var(--muted);
+  margin: var(--s-5) 0 0;
+  max-width: 38rem;
+}
+
+.pProse {
+  margin-top: var(--s-5);
+  max-width: 38rem;
+}
+
+.pProse p {
+  font-size: var(--t-md);
+  line-height: 1.7;
+  color: var(--ink);
+  opacity: 0.78;
+  margin: 0 0 var(--s-4);
+}
+
+.pProse p:last-child {
+  margin-bottom: 0;
+}
+
+.pProse em {
+  font-style: italic;
+  color: var(--ink);
+  opacity: 1;
+}
+
+.pGrace {
+  font-family: var(--font-serif);
+  font-style: italic;
+  opacity: 0.85 !important;
+}
+
+.pMore {
+  font-size: var(--t-sm) !important;
+  color: var(--muted) !important;
+  opacity: 1 !important;
+  margin-top: var(--s-5) !important;
+}
+
+.pMore a {
+  color: var(--navy);
+  border-bottom: 1px solid color-mix(in srgb, var(--gold) 55%, transparent);
+  padding-bottom: 1px;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+
+.pMore a:hover {
+  color: var(--navy-deep);
+  border-bottom-color: var(--ink);
+}
+
+/* Spec sheet — codebase proof */
+.pSpec {
+  list-style: none;
+  margin: var(--s-7) 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border: 1px solid var(--hairline);
+  background: var(--paper);
+}
+
+.pSpecItem {
+  padding: var(--s-5) var(--s-5);
+  border-left: 1px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.pSpecItem:first-child {
+  border-left: 0;
+}
+
+.pSpecStat {
+  font-family: var(--font-mono);
+  font-size: clamp(var(--t-lg), 2.4vw, var(--t-2xl));
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--navy);
+  font-variant-numeric: tabular-nums;
+}
+
+.pSpecLabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Engine strip — labels only */
+.pEngineStrip {
+  list-style: none;
+  margin: var(--s-6) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3) var(--s-6);
+}
+
+.pEngineStrip li {
+  font-family: var(--font-sans);
+  font-size: var(--t-sm);
+  color: var(--ink);
+  opacity: 0.72;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s-2);
+}
+
+.pEngineCode {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--gold);
+  font-weight: 600;
+}
+
+/* Builder: copy + proof grid */
+.pBuilder {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-8);
+  align-items: start;
+}
+
+.pProof {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-3);
+}
+
+.pProofItem {
+  border: 1px solid var(--hairline);
+  padding: var(--s-5);
+  background: rgba(14, 17, 22, 0.01);
+}
+
+.pProofStat {
+  font-family: var(--font-serif);
+  font-size: var(--t-xl);
+  color: var(--navy);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.pProofDetail {
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-sm);
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+/* CTA */
+.pCta {
+  text-align: left;
+}
+
+.pCtaInner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.pCtaActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-5) var(--s-7);
+  margin-top: var(--s-5);
+}
+
+.pCta .pDoor {
+  margin-top: 0;
+}
+
+.pCtaMail {
+  font-size: var(--t-sm);
+}
+
+/* Colophon footer */
+.pColophon {
+  border-top: 1px solid var(--hairline);
+  background: var(--ink);
+  color: rgba(254, 254, 254, 0.55);
+  padding: var(--s-6) var(--s-7);
+}
+
+.pColophonInner {
+  max-width: var(--maxw-wide);
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s-3) var(--s-6);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+}
+
+.pColophon a {
+  color: rgba(254, 254, 254, 0.82);
+  border-bottom: 1px solid rgba(181, 137, 74, 0.45);
+  padding-bottom: 1px;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+
+.pColophon a:hover {
+  color: #fefefe;
+  border-bottom-color: var(--gold-soft);
+}
+
+.pColophonMark {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: var(--t-sm);
+  color: rgba(254, 254, 254, 0.42);
+  margin: 0;
+}
+
+.pColophon p {
+  margin: 0;
+}
+
+/* Scroll reveal */
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 560ms var(--ease), transform 560ms var(--ease);
+}
+
+[data-reveal].is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
 /* ---------- Responsive ---------- */
+@media (max-width: 900px) {
+  .pSpec {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .pSpecItem:nth-child(3) {
+    border-left: 0;
+    border-top: 1px solid var(--hairline);
+  }
+
+  .pSpecItem:nth-child(4) {
+    border-top: 1px solid var(--hairline);
+  }
+
+  .pBuilder {
+    grid-template-columns: 1fr;
+    gap: var(--s-7);
+  }
+}
+
 @media (max-width: 720px) {
   .pStage {
     padding: var(--s-5) var(--s-5);
@@ -398,6 +703,42 @@
     gap: var(--s-3);
     align-items: flex-start;
   }
+
+  .pSection {
+    padding: var(--s-8) var(--s-5);
+  }
+
+  .pColophon {
+    padding: var(--s-5);
+  }
+
+  .pColophonInner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .pProof {
+    grid-template-columns: 1fr;
+  }
+
+  .pSpec {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .pSpec {
+    grid-template-columns: 1fr;
+  }
+
+  .pSpecItem {
+    border-left: 0;
+    border-top: 1px solid var(--hairline);
+  }
+
+  .pSpecItem:first-child {
+    border-top: 0;
+  }
 }
 
 /* Extra-narrow viewports (small phones held vertically): step the
@@ -416,7 +757,9 @@
   .pDoor,
   .pDoorArrow,
   .pLogoLink,
-  .pFootMail {
+  .pFootMail,
+  .pMore a,
+  .pColophon a {
     transition: none;
   }
 }

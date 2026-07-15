@@ -1,18 +1,20 @@
-# NRGX Labs — splash page
+# NRGX Labs — splash / project page
 
-The public face of NRGX Labs at `https://nrgxlabs.com`. A single-screen
-calling card: logo, tagline, live desk ledger, door to the app at
-`https://app.nrgxlabs.com`. Pure static HTML/CSS — no build step, no
-backend, no JS framework.
+The public face of NRGX Labs at `https://nrgxlabs.com`. A project page in
+the [joshuabsmith.io](https://joshuabsmith.io) ecosystem: portal hero
+(logo, tagline, desk ledger, door into the app), then scroll sections for
+the lab thesis, codebase proof, and builder — with quiet links back to
+Joshua’s founder page. Pure static HTML/CSS — no build step, no backend,
+no JS framework.
 
 ## Live page
 
 **`index.html`** is the live splash. It is identical to `d-portal.html`
-(the file we explored as "Direction D — The Portal" during design).
-The duplicate exists so the page loads cleanly on the bare domain
-(`nrgxlabs.com/` resolves to `index.html` by default) while the
-`d-portal.html` filename remains for back-reference against the other
-exploration directions in this folder.
+(the file we explored as "Direction D — The Portal" during design, now
+extended into a full project page). The duplicate exists so the page
+loads cleanly on the bare domain (`nrgxlabs.com/` resolves to
+`index.html` by default) while the `d-portal.html` filename remains for
+back-reference against the other exploration directions in this folder.
 
 The splash is served directly from this folder on the droplet — nginx
 points its `root` directive at `/opt/breach-algo/nrgxlabs-splash/`,
@@ -23,13 +25,23 @@ files in place).
 See **[`/deploy/nrgxlabs-migration.md`](../deploy/nrgxlabs-migration.md)**
 for the full domain migration runbook (DNS → nginx → certbot → cutover).
 
+## Page shape
+
+1. **Hero** — calling-card first viewport: corners, logo, typed tagline,
+   desk ledger, Enter the desk → `https://app.nrgxlabs.com`
+2. **The lab** — invite-only institutional options research; quant decides,
+   the model explains
+3. **The system** — codebase proof (engines, routes, lines, tests) + engine labels
+4. **From the builder** — founder proof points + link to joshuabsmith.io
+5. **CTA + colophon** — second desk door, desk@ email, Built by Joshua b. Smith
+
 ## What's in this folder
 
 | File | What it is |
 |---|---|
-| `index.html` | **Live splash** — what `nrgxlabs.com` serves |
+| `index.html` | **Live page** — what `nrgxlabs.com` serves |
 | `d-portal.html` | Identical to `index.html`; kept for design comparison |
-| `d-portal.css` | Styles for the splash (loaded by both `index.html` and `d-portal.html`) |
+| `d-portal.css` | Styles for the page (hero + below-the-fold sections) |
 | `tokens.css` | Brand palette, type, spacing — shared across all directions |
 | `NRG-Logo.png` | The wordmark + X-blade lockup (used as logo + OG image + favicon) |
 | `robots.txt` | Allows indexing of the splash, blocks the exploration-only files |
@@ -46,7 +58,7 @@ considered. They are explicitly disallowed in `robots.txt` so search
 engines don't index them, but they're still browsable directly if you
 want to compare moods.
 
-## How to open the live splash locally
+## How to open the live page locally
 
 From the workspace root:
 
@@ -62,18 +74,20 @@ open nrgxlabs-splash/b-terminal.html
 open nrgxlabs-splash/c-memo.html
 ```
 
-## Editing the splash
+## Editing the page
 
-Most copy edits live in `index.html`:
+Most copy edits live in `index.html` (keep `d-portal.html` in sync):
 
 - **Tagline** — single line, typed in via JS (see `<span class="pTaglineText" data-typed>`)
 - **Desk ledger rows** — `<li class="pLedgerRow">` blocks; engine codes/names/values
 - **Door label** — `<span class="pDoorLabel">Enter the desk</span>`
-- **Footer email** — `<a class="pFootMail" href="mailto:desk@nrgxlabs.com">`
+- **Lab / System / Builder / CTA** — sections `#lab`, `#system`, `#builder`, `#enter`
+- **Colophon** — footer link to `https://joshuabsmith.io`
+- **Footer email** — `mailto:desk@nrgxlabs.com`
 
-Style edits go in `d-portal.css` (logo sizing, ledger borders, type
-scale). Brand-level colors / fonts / spacing live in `tokens.css` and
-propagate everywhere.
+Style edits go in `d-portal.css` (logo sizing, ledger borders, section
+layout, proof grid). Brand-level colors / fonts / spacing live in
+`tokens.css` and propagate everywhere.
 
 After editing: `git push origin main`. The droplet picks up the change
 within ~90 seconds via the existing deploy workflow. nginx caches
