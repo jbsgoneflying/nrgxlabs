@@ -365,6 +365,21 @@ def earnings_drift_page():
     )
 
 
+@app.get("/equity-repricing")
+def equity_repricing_page():
+    """Equity Repricing Lab shadow scout — gated by REPRICING_LAB_ENABLED."""
+    fl = get_flags()
+    if not getattr(fl, "REPRICING_LAB_ENABLED", False):
+        return HTMLResponse(
+            "<!doctype html><title>Lab</title><p>Equity Repricing Lab is disabled.</p>",
+            status_code=404,
+        )
+    return FileResponse(
+        str(STATIC_DIR / "equity-repricing.html"),
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @app.get("/news-risk")
 def news_risk_page():
     return FileResponse(str(STATIC_DIR / "news-risk.html"))

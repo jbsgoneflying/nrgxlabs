@@ -673,7 +673,7 @@ class FeatureFlags:
     # All defaults are inert: no jobs, routes, or UI exist behind these until
     # the lab's own phases land. See docs/plans/nrgx_equity_repricing_lab_
     # implementation_plan.md for the full contract.
-    REPRICING_LAB_ENABLED: bool = False               # master switch for lab jobs/CLI wiring
+    REPRICING_LAB_ENABLED: bool = True                # master switch for lab jobs/CLI + shadow UI
     REPRICING_LAB_SQLITE_PATH: str = "data/repricing_lab.db"
     REPRICING_LAB_RAW_DIR: str = "data/lab_raw"       # bronze payload blobs (gzip JSON)
     REPRICING_LAB_RUNS_DIR: str = "data/lab_runs"     # research run artifacts
@@ -1190,7 +1190,7 @@ class FeatureFlags:
             ENGINE18_TRADE_MAX_INDEX=_get_int("ENGINE18_TRADE_MAX_INDEX", 200),
             ENGINE18_LLM_MAX_CALLS_PER_MINUTE=_get_int("ENGINE18_LLM_MAX_CALLS_PER_MINUTE", 20),
 
-            REPRICING_LAB_ENABLED=_get_bool("REPRICING_LAB_ENABLED", False),
+            REPRICING_LAB_ENABLED=_get_bool("REPRICING_LAB_ENABLED", True),
             REPRICING_LAB_SQLITE_PATH=os.getenv("REPRICING_LAB_SQLITE_PATH", "data/repricing_lab.db"),
             REPRICING_LAB_RAW_DIR=os.getenv("REPRICING_LAB_RAW_DIR", "data/lab_raw"),
             REPRICING_LAB_RUNS_DIR=os.getenv("REPRICING_LAB_RUNS_DIR", "data/lab_runs"),

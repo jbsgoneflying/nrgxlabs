@@ -13,7 +13,8 @@ def test_lab_flags_default_inert(monkeypatch):
     ):
         monkeypatch.delenv(name, raising=False)
     flags = get_flags()
-    assert flags.REPRICING_LAB_ENABLED is False
+    # Lab UI is on by default for shadow testing; short/LLM/intents stay off.
+    assert flags.REPRICING_LAB_ENABLED is True
     assert flags.REPRICING_LAB_SHORT_ENABLED is False
     assert flags.REPRICING_LAB_LLM_EXTRACTION_ENABLED is False
     assert flags.DESK_BRAIN_INTENTS_ENABLED is False

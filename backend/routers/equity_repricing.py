@@ -1,11 +1,10 @@
-"""Equity Repricing Lab — shadow command-surface API (post-promotion only).
+"""Equity Repricing Lab — shadow command-surface API.
 
-Routes are registered but return 404-style disabled payloads unless
-REPRICING_LAB_ENABLED=1. No ENGINE_REGISTRY entry; no live capital path.
+No ENGINE_REGISTRY entry; shadow-only by default (REPRICING_LAB_SHADOW_ONLY=1).
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 from backend.config import get_flags
@@ -35,48 +34,34 @@ def lab_health():
 
 
 @router.get("/scout")
-def scout():
+def scout(limit: int = Query(50, ge=1, le=200)):
     flags = _require_enabled()
     from backend.repricing_lab.signals import list_shadow_candidates
     return {
         "shadowOnly": bool(flags.REPRICING_LAB_SHADOW_ONLY),
-        "candidates": list_shadow_candidates(),
+        "candidates": list_shadow_candidates(limit=limit),
     }
+
+
+@router.post("/refresh")
+def refresh(lookback_days: int = Query(5, ge=1, le=14)):
+    """Rebuild shadow scout from recent EODHD earnings calendar."""
+    _require_enabled()
+    from backend.repricing_lab.signals import refresh_live_scout
+    try:
+        return refresh_live_scout(lookback_days=lookback_days)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"scout refresh failed: {exc}") from exc
 
 
 @router.get("/validation")
 def validation():
     _require_enabled()
-    from backend.repricing_lab.signals import decay_check
-    # Placeholder metrics until live shadow accumulates
+    from backend.repricing_lab.signals import decay_check, list_shadow_candidates
+    cands = list_shadow_candidates(limit=200)
     return {
         "decay": decay_check(expectancy_r=0.0, n=0),
-        "note": "Shadow validation populates after promotion + prospective period",
+        "candidateCount": len(cands),
+        "note": "Shadow validation — no live risk while shadow-only is on",
+        "shadowOnly": True,
     }
-
-
-@router.get("/page", response_class=HTMLResponse)
-def page():
-    """Minimal scout page — only meaningful when the lab flag is on."""
-    flags = get_flags()
-    if not flags.REPRICING_LAB_ENABLED:
-        return HTMLResponse(
-            "<!doctype html><title>Lab</title><p>Equity Repricing Lab is disabled.</p>",
-            status_code=404,
-        )
-    html = """<!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8"/>
-<title>NRGX Equity Repricing Lab (Shadow)</title>
-<link rel="stylesheet" href="/static/styles.css"/>
-<script defer src="/static/nav.js"></script>
-<script defer src="/static/equity-repricing.js"></script>
-</head><body>
-<main class="page">
-  <h1>Equity Repricing Lab</h1>
-  <p class="lede">Shadow command surface — research-promoted signals only. No live risk while shadow-only is on.</p>
-  <section id="scout"><h2>Scout</h2><div id="scout-list">Loading…</div></section>
-  <section id="validation"><h2>Validation</h2><pre id="validation-body"></pre></section>
-</main>
-</body></html>"""
-    return HTMLResponse(html)

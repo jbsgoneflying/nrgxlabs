@@ -18,8 +18,8 @@
     { href: "/compare",         label: "Engine 10", desc: "Multi-ticker side-by-side" },
     { href: "/ai-capex",        label: "Engine 17", desc: "AI Capex Reality Engine" },
     { href: "/earnings-drift",  label: "Engine 18", desc: "Earnings drift scanner (PEAD)" },
-    // Equity Repricing Lab shadow page — only useful when REPRICING_LAB_ENABLED=1
-    { href: "/api/equity-repricing/page", label: "Repricing Lab", desc: "Shadow equity-repricing scout (research)" },
+    // Equity Repricing Lab shadow page
+    { href: "/equity-repricing", label: "Repricing Lab", desc: "Shadow equity-repricing scout (research)" },
   ];
 
   /* Which nav item matches the current URL? */

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Equity Repricing Lab (Shadow) | NRGX Labs</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="/static/favicon.ico" sizes="any" />
+    <link rel="stylesheet" href="/static/styles.css?v=14" />
+    <style>
+      .erlBanner {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+        padding: 16px 18px; border-radius: var(--radius-card);
+        border: 1px solid var(--border); background: rgba(255,255,255,0.78);
+        margin-top: 14px;
+      }
+      .erlStat { display: flex; flex-direction: column; gap: 2px; min-width: 92px; }
+      .erlStatLabel { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: rgba(11,11,15,0.5); }
+      .erlStatValue { font-size: 20px; font-weight: 800; letter-spacing: -0.3px; }
+      .erlGrow { flex: 1; }
+      .erlBtn {
+        appearance: none; border: 1px solid var(--border); background: #fff;
+        border-radius: 10px; padding: 9px 16px; font-weight: 700; font-size: 13px; cursor: pointer;
+      }
+      .erlBtn:hover { background: rgba(11,11,15,0.03); }
+      .erlBtn:disabled { opacity: .55; cursor: default; }
+      .erlPill {
+        font-weight: 800; font-size: 11px; padding: 2px 9px; border-radius: 999px;
+        background: rgba(255,149,0,0.18); color: #9a5a00; text-transform: uppercase; letter-spacing: .04em;
+      }
+      .erlPill--on { background: rgba(52,199,89,0.18); color: #1f7a3d; }
+      .erlMuted { color: rgba(11,11,15,0.5); font-size: 12px; }
+      .erlEmpty { padding: 22px; text-align: center; color: rgba(11,11,15,0.5); }
+      .erlTable { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+      .erlTable th {
+        text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em;
+        color: rgba(11,11,15,0.5); padding: 8px 10px; border-bottom: 1px solid var(--border);
+      }
+      .erlTable td { padding: 10px; border-bottom: 1px solid rgba(11,11,15,0.06); vertical-align: top; }
+      .erlTicker { font-weight: 800; letter-spacing: -0.2px; }
+      .erlReasons { color: rgba(11,11,15,0.55); font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div id="nav-root"></div>
+    <main class="page">
+      <header>
+        <h1>Equity Repricing Lab</h1>
+        <p class="lede">Shadow scout for earnings-repricing continuation. Research surface only — no live capital while shadow-only is on.</p>
+      </header>
+
+      <div class="erlBanner">
+        <div class="erlStat">
+          <span class="erlStatLabel">Status</span>
+          <span class="erlStatValue" id="erl-status">…</span>
+        </div>
+        <div class="erlStat">
+          <span class="erlStatLabel">Candidates</span>
+          <span class="erlStatValue" id="erl-count">—</span>
+        </div>
+        <div class="erlGrow"></div>
+        <span class="erlPill" id="erl-shadow-pill">Shadow</span>
+        <button class="erlBtn" id="erl-refresh" type="button">Refresh scout</button>
+      </div>
+      <p class="erlMuted" id="erl-msg" style="margin-top:8px"></p>
+
+      <section style="margin-top:22px">
+        <h2 style="font-size:15px;font-weight:800;margin:0">Scout</h2>
+        <div id="scout-list" class="erlEmpty">Loading…</div>
+      </section>
+
+      <section style="margin-top:22px">
+        <h2 style="font-size:15px;font-weight:800;margin:0">Validation</h2>
+        <pre id="validation-body" class="erlMuted" style="white-space:pre-wrap;margin-top:10px"></pre>
+      </section>
+    </main>
+    <script defer src="/static/nav.js?v=14"></script>
+    <script defer src="/static/equity-repricing.js?v=2"></script>
+  </body>
+</html>
