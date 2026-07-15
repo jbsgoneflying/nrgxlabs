@@ -84,6 +84,54 @@ def _universe_symbols() -> Set[str]:
     return out
 
 
+def _surprise_from_row(raw: dict) -> Optional[float]:
+    """Prefer vendor percent when present; else (actual-estimate)/|estimate|."""
+    pct = raw.get("percent")
+    try:
+        if pct is not None and str(pct).strip() != "":
+            p = float(pct)
+            # EODHD percent is already in %-points (e.g. 5.2 = +5.2%)
+            return p / 100.0
+    except (TypeError, ValueError):
+        pass
+    actual, estimate = raw.get("actual"), raw.get("estimate")
+    try:
+        if actual is None or estimate in (None, 0, 0.0):
+            return None
+        return (float(actual) - float(estimate)) / abs(float(estimate))
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def _last_price(client, symbol: str) -> Optional[float]:
+    """Best-effort last price: live quote, else recent EOD bar."""
+    eod_sym = f"{symbol}.US"
+    try:
+        q = client.get_live_quote(eod_sym)
+        rows = q.rows or []
+        if rows:
+            px = rows[0].get("close") or rows[0].get("previousClose")
+            if px is not None:
+                return float(px)
+    except Exception as exc:  # noqa: BLE001
+        LOG.debug("live quote miss %s: %s", eod_sym, exc)
+    try:
+        end = dt.date.today().isoformat()
+        start = (dt.date.today() - dt.timedelta(days=14)).isoformat()
+        resp = client.get_eod(eod_sym, from_date=start, to_date=end)
+        rows = list(resp.rows or [])
+        if not rows:
+            return None
+        last = rows[-1]
+        px = last.get("adjusted_close")
+        if px is None:
+            px = last.get("close")
+        return float(px) if px is not None else None
+    except Exception as exc:  # noqa: BLE001
+        LOG.warning("eod price miss %s: %s", eod_sym, exc)
+        return None
+
+
 def refresh_live_scout(
     *,
     lookback_days: int = 5,
@@ -93,7 +141,8 @@ def refresh_live_scout(
     """Build Candidate-A style shadow scout rows from recent EODHD earnings.
 
     Lightweight live path for the desk UI — does not require the full
-    historical SQLite backfill on the droplet.
+    historical SQLite backfill on the droplet. Fetches a last price per
+    kept name so entry/stop are populated even on a cold store.
     """
     flags = get_flags()
     if not flags.REPRICING_LAB_ENABLED:
@@ -119,22 +168,12 @@ def refresh_live_scout(
         try:
             for raw in rows:
                 code = str(raw.get("code") or raw.get("Code") or "")
-                # EODHD uses AAPL.US
                 sym = code.split(".")[0].upper() if code else ""
                 if not sym or (allowed and sym not in allowed):
                     skipped += 1
                     continue
-                actual = raw.get("actual")
-                estimate = raw.get("estimate")
-                try:
-                    if actual is None or estimate in (None, 0, 0.0):
-                        skipped += 1
-                        continue
-                    surprise = (float(actual) - float(estimate)) / abs(float(estimate))
-                except (TypeError, ValueError, ZeroDivisionError):
-                    skipped += 1
-                    continue
-                if surprise < min_surprise:
+                surprise = _surprise_from_row(raw)
+                if surprise is None or surprise < min_surprise:
                     skipped += 1
                     continue
 
@@ -150,23 +189,21 @@ def refresh_live_scout(
                     skipped += 1
                     continue
 
-                # Soft entry/stop plan for scout display (ATR stub until bars warm)
                 timing = e.get("timing") or "unknown"
                 decision = e["decision_session"]
-                # Use estimate*something as placeholder price if no bars — prefer last bar
                 bars = store.read_rows(
                     conn, "daily_bar",
                     where="instrument_id = ?", params=(iid,),
-                    order_by="session_date DESC", limit=30,
+                    order_by="session_date DESC", limit=5,
                 )
                 last_px = None
                 if bars:
                     last_px = bars[0].get("adjusted_close") or bars[0].get("close")
                 if last_px is None:
-                    # still show the candidate; entry TBD
-                    entry_px = None
-                    stop_px = None
-                    risk = None
+                    last_px = _last_price(client, sym)
+
+                if last_px is None:
+                    entry_px = stop_px = risk = None
                 else:
                     entry_px = float(last_px)
                     atr = entry_px * 0.02
@@ -199,7 +236,7 @@ def refresh_live_scout(
                     }),
                     "reason_codes": json.dumps([
                         "earnings_beat",
-                        f"surprise={surprise:.3f}",
+                        f"surprise={surprise * 100:.1f}%",
                         f"timing={timing}",
                         "shadow_scout",
                     ]),
