@@ -47,3 +47,17 @@ class CostModel:
     def frictionless(cls) -> "CostModel":
         """For isolating gross edge from cost drag (diagnostics only)."""
         return cls(per_side_bps=0.0)
+
+    @classmethod
+    def for_adv(cls, adv20_usd: float | None) -> "CostModel":
+        """Liquidity-tiered model used by the Equity Repricing Lab simulator.
+
+        Backward-compatible additive helper — existing classmethods unchanged.
+        """
+        if adv20_usd is None:
+            return cls.mid_cap()
+        if adv20_usd >= 10_000_000:
+            return cls.liquid_large_cap()
+        if adv20_usd >= 2_000_000:
+            return cls.mid_cap()
+        return cls.small_cap()

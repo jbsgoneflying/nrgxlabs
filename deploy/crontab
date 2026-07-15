@@ -34,6 +34,12 @@
 # Daily trade archive (weekdays after market close — shrinks data loss window to ~1 day)
 0 22 * * 1-5 cd /app && python3 scripts/archive_trades.py >> /var/log/cron.log 2>&1
 
+# Equity Repricing Lab: incremental bars/CA/universe ingest (after archive). No-op unless REPRICING_LAB_ENABLED=1
+30 23 * * 1-5 cd /app && python3 scripts/lab_backfill.py >> /var/log/cron.log 2>&1
+
+# Equity Repricing Lab: weekly data-QA report (Saturday morning)
+0 11 * * 6 cd /app && python3 -m backend.repricing_lab.cli qa >> /var/log/cron.log 2>&1
+
 # Weekly trade review: Sunday evening (generates LLM trade learning review + trade archive backup)
 30 22 * * 0  curl -sf -X POST http://localhost:8000/api/trade-review/weekly/generate >> /var/log/cron.log 2>&1
 45 22 * * 0  cd /app && python3 scripts/archive_trades.py >> /var/log/cron.log 2>&1

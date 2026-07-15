@@ -239,6 +239,20 @@ def allocate(
     if edges is None:
         edges = sleeves.all_engine_edges()
 
+    # Phase-4 PositionIntent netting (flag-gated). When off, behaviour is
+    # byte-identical to the legacy path. When on, duplicate (ticker, side)
+    # opportunities collapse to one exposure before sizing.
+    intent_notes: List[str] = []
+    try:
+        from backend.config import get_flags
+        if bool(getattr(get_flags(), "DESK_BRAIN_INTENTS_ENABLED", False)):
+            from backend.desk_brain.intents import collapse_opportunities_for_allocator
+            opportunities, intent_notes = collapse_opportunities_for_allocator(
+                opportunities, default_risk_pct=cfg.per_trade_risk_pct,
+            )
+    except Exception:
+        intent_notes = []
+
     tilt = clamp_tilt(sleeve_tilt, tilt_max_pct=cfg.tilt_max_pct)
     base_weights = sleeves.regime_sleeve_weights(regime_label)
     tilted = _tilted_weights(base_weights, tilt)
@@ -361,6 +375,11 @@ def allocate(
         notes.append(f"{dropped_for_total} lower-ranked candidate(s) dropped at the {cfg.max_concurrent_total}-position cap")
     if not positions:
         notes.append("No actionable opportunities cleared the gate — book is flat (full reserve)")
+    if intent_notes:
+        notes.extend(intent_notes)
+        for n in intent_notes:
+            if "opposing" in n.lower() and n not in conflicts:
+                conflicts.append(n)
 
     return TargetBook(
         as_of=as_of,

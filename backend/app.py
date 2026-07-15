@@ -38,6 +38,7 @@ from backend.routers import (
     desk_brain,
     ai_capex,
     engine18_pead,
+    equity_repricing,
 )
 
 try:
@@ -457,6 +458,7 @@ app.include_router(desk_insight.router)
 app.include_router(desk_brain.router)
 app.include_router(ai_capex.router)
 app.include_router(engine18_pead.router)
+app.include_router(equity_repricing.router)
 
 
 # ── Startup: rebuild trade indexes if they expired while the app was down ──
