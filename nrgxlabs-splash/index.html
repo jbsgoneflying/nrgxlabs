@@ -3,27 +3,28 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>NRGX Labs — Private Capital Research</title>
+    <title>NRGX Labs | Quantitative Market Research Infrastructure</title>
     <meta
       name="description"
-      content="NRGX Labs — proprietary options research desk for private capital. Regime-aware signals, conformal calibration, runtime-verified before they hit the desk."
+      content="NRGX Labs is a founder-built quantitative research platform combining options intelligence, volatility analysis, market structure, independent analytical engines, and AI-assisted research. Built by Joshua B. Smith."
     />
-    <meta name="theme-color" content="#0e1116" />
+    <meta name="theme-color" content="#0b0e13" />
+    <link rel="canonical" href="https://nrgxlabs.com/" />
 
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="NRGX Labs" />
+    <meta property="og:title" content="NRGX Labs | Quantitative Market Research Infrastructure" />
     <meta
       property="og:description"
-      content="Proprietary options research for private capital. Quant decides. The model explains."
+      content="A private research platform built around 18 independent analytical engines, options intelligence, volatility analysis, and AI-assisted synthesis. Built by Joshua B. Smith."
     />
     <meta property="og:url" content="https://nrgxlabs.com" />
     <meta property="og:image" content="https://nrgxlabs.com/NRG-Logo.png" />
     <meta property="og:site_name" content="NRGX Labs" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="NRGX Labs" />
+    <meta name="twitter:title" content="NRGX Labs | Quantitative Market Research Infrastructure" />
     <meta
       name="twitter:description"
-      content="Proprietary options research for private capital. Quant decides. The model explains."
+      content="A private research platform built around 18 independent analytical engines, options intelligence, volatility analysis, and AI-assisted synthesis. Built by Joshua B. Smith."
     />
     <meta name="twitter:image" content="https://nrgxlabs.com/NRG-Logo.png" />
 
@@ -33,171 +34,838 @@
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
 
     <link rel="stylesheet" href="tokens.css?v=3" />
-    <link rel="stylesheet" href="b-terminal.css?v=3" />
+    <link rel="stylesheet" href="home.css?v=1" />
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "NRGX Labs",
+      "url": "https://nrgxlabs.com",
+      "logo": "https://nrgxlabs.com/NRG-Logo.png",
+      "description": "NRGX Labs is a private quantitative research and market-intelligence platform built around independent analytical engines, options intelligence, volatility analysis, and AI-assisted research synthesis.",
+      "founder": {
+        "@type": "Person",
+        "name": "Joshua B. Smith",
+        "url": "https://joshuabsmith.io",
+        "sameAs": [
+          "https://joshuabsmith.io",
+          "https://ravenos.io",
+          "https://injuryos.io",
+          "https://versefold.app"
+        ]
+      }
+    }
+    </script>
   </head>
-  <body class="terminal">
-    <header class="tTop" role="banner">
-      <a class="tBrand" href="/" aria-label="NRGX Labs home">
-        <img src="NRG-Logo.png" alt="NRGX Labs" />
-      </a>
-      <div class="tTopRight">
-        <span class="tTape" aria-label="market state">
-          <span class="tTapeDot" aria-hidden="true"></span>
-          <span class="tTapeKey">REGIME</span>
-          <span class="tTapeVal tGold">NEUTRAL-VOL</span>
-          <span class="tTapeSep">·</span>
-          <span class="tTapeKey">VIX</span>
-          <span class="tTapeVal">████</span>
-          <span class="tTapeSep">·</span>
-          <span class="tTapeKey">DESK</span>
-          <span class="tTapeVal tGold">LIVE</span>
-          <span class="tTapeSep">·</span>
-          <span class="tTapeKey">ET</span>
-          <span class="tTapeVal" data-stamp>17:21</span>
-        </span>
-        <a class="tEnter" href="https://app.nrgxlabs.com" rel="noopener">
-          Enter the desk
-          <span aria-hidden="true">→</span>
+  <body class="home">
+    <!-- ================= Navigation ================= -->
+    <header class="nav" role="banner">
+      <div class="navInner">
+        <a class="navBrand" href="#top" aria-label="NRGX Labs home">
+          <span class="navBrandMark">NRGX<span>/Labs</span></span>
+          <span class="navBrandTag">Research</span>
         </a>
+        <nav class="navLinks" aria-label="Page sections">
+          <a href="#platform">Platform</a>
+          <a href="#architecture">Architecture</a>
+          <a href="#research">Research</a>
+          <a href="#founder">Founder</a>
+          <a href="https://joshuabsmith.io" rel="noopener">Joshua B. Smith</a>
+        </nav>
+        <div class="navRight">
+          <span class="navStatus"><span class="navStatusDot" aria-hidden="true"></span>Private Research Platform</span>
+          <a class="navEnter" href="https://app.nrgxlabs.com" rel="noopener">Enter the desk</a>
+        </div>
       </div>
     </header>
 
-    <main class="tMain" role="main">
-      <section class="tHero" id="top" aria-label="NRGX Labs research desk">
-        <div class="tHeroGrid">
-          <div class="tHeroCopy">
-            <span class="eyebrow tEyebrow">NRGX/Labs · Research Desk</span>
-            <h1 class="tHeadline">
-              Signal research for<br />
-              <span class="tGold">private capital.</span>
+    <main id="top" role="main">
+      <!-- ================= Hero ================= -->
+      <section class="hero" aria-label="NRGX Labs overview">
+        <div class="wrap heroGrid">
+          <div class="rv">
+            <span class="eyebrowLight">NRGX/Labs · Quantitative Research Infrastructure</span>
+            <h1 class="heroH1">
+              Research infrastructure for markets that refuse to <em>behave simply.</em>
             </h1>
-            <p class="tSubhead">
-              Proprietary options research infrastructure — conformal probabilities,
-              regime-aware engines, runtime-verified on a live shadow desk before
-              anything ships. Quant decides. The model explains.
+            <p class="heroSub">
+              NRGX Labs is a founder-built market research platform that brings independent
+              quantitative engines, options intelligence, volatility analysis, market structure,
+              and AI-assisted synthesis into one connected system.
             </p>
-            <div class="tCtaRow">
-              <a class="tBtn tBtnPrimary" href="https://app.nrgxlabs.com" rel="noopener">
-                Enter the desk
-                <span aria-hidden="true">→</span>
-              </a>
-              <a class="tBtn tBtnGhost" href="#research">/research →</a>
+            <p class="heroProof">
+              <strong>18</strong> analytical engines &nbsp;·&nbsp;
+              <strong>190+</strong> API routes &nbsp;·&nbsp;
+              <strong>160,000+</strong> lines of Python and JavaScript<br />
+              One continuously evolving research environment.
+            </p>
+            <div class="ctaRow">
+              <a class="btn btnPrimary" href="#platform">Explore the platform <span aria-hidden="true">&darr;</span></a>
+              <a class="btn btnGhost" href="#founder">Meet the builder</a>
             </div>
           </div>
 
-          <aside class="tPanel tHeroPanel" aria-label="live engine state">
-            <div class="tPanelTop">
-              <span class="tPanelLabel">desk.engine_state</span>
-              <span class="tPanelStatus">
-                <span class="tPanelDot"></span>
-                live
-              </span>
+          <aside class="sysPanel rv rv-d2 drawable" aria-label="System map">
+            <div class="sysPanelHead">
+              <span class="sysPanelTitle">nrgx.system_map</span>
+              <span class="sysPanelState">live</span>
             </div>
-            <table class="tPanelTable">
-              <tbody>
-                <tr>
-                  <td class="tPanelKey">E1</td>
-                  <td class="tPanelName">Earnings IV crush</td>
-                  <td class="tPanelVal tPanelOk">edge · +1.8σ</td>
-                </tr>
-                <tr>
-                  <td class="tPanelKey">E2</td>
-                  <td class="tPanelName">SPX iron condors</td>
-                  <td class="tPanelVal tPanelMute">flat · ███</td>
-                </tr>
-                <tr>
-                  <td class="tPanelKey">E14</td>
-                  <td class="tPanelName">SPX scenario</td>
-                  <td class="tPanelVal tPanelOk">edge · +0.6σ</td>
-                </tr>
-                <tr>
-                  <td class="tPanelKey">MI</td>
-                  <td class="tPanelName">Regime intelligence</td>
-                  <td class="tPanelVal tPanelMute">██████</td>
-                </tr>
-              </tbody>
-            </table>
-            <div class="tPanelFoot">
-              full state behind the door &nbsp; · &nbsp;
-              <a href="https://app.nrgxlabs.com" rel="noopener">app.nrgxlabs.com</a>
-            </div>
+            <svg viewBox="0 0 520 400" role="img" aria-label="Diagram of research domains feeding independent engines, synthesis, and human judgment">
+              <!-- domain nodes -->
+              <g>
+                <rect class="dBox" x="18" y="24" width="150" height="34" />
+                <text class="dLabel" x="30" y="45">VOLATILITY SURFACE</text>
+                <rect class="dBox" x="18" y="80" width="150" height="34" />
+                <text class="dLabel" x="30" y="101">OPTIONS FLOW</text>
+                <rect class="dBox" x="18" y="136" width="150" height="34" />
+                <text class="dLabel" x="30" y="157">DEALER POSITIONING</text>
+                <rect class="dBox" x="18" y="192" width="150" height="34" />
+                <text class="dLabel" x="30" y="213">MARKET REGIME</text>
+                <rect class="dBox" x="18" y="248" width="150" height="34" />
+                <text class="dLabel" x="30" y="269">MACRO / EVENTS</text>
+                <rect class="dBox" x="18" y="304" width="150" height="34" />
+                <text class="dLabel" x="30" y="325">LIQUIDITY</text>
+              </g>
+              <!-- converge lines -->
+              <g>
+                <path class="dFlow" d="M168 41 H200 L232 156" />
+                <path class="dFlow" d="M168 97 H204 L232 168" />
+                <path class="dFlow" d="M168 153 H208 L232 180" />
+                <path class="dFlow" d="M168 209 H208 L232 192" />
+                <path class="dFlow" d="M168 265 H204 L232 204" />
+                <path class="dFlow" d="M168 321 H200 L232 216" />
+              </g>
+              <!-- engine core -->
+              <g>
+                <rect class="dBox dBoxAccent" x="232" y="138" width="128" height="96" />
+                <text class="dLabelAccent" x="252" y="176">18 ENGINES</text>
+                <text class="dLabelDim dLabel" x="252" y="196">independent</text>
+                <text class="dLabelDim dLabel" x="252" y="212">analysis</text>
+              </g>
+              <!-- out lines -->
+              <path class="dFlow dFlowAccent" d="M360 168 H392 L392 132 H396" />
+              <path class="dFlow dFlowAccent" d="M360 204 H392 L392 240 H396" />
+              <!-- synthesis + judgment -->
+              <g>
+                <rect class="dBox" x="396" y="104" width="110" height="56" />
+                <text class="dLabel dLabelStrong" x="412" y="128">SYNTHESIS</text>
+                <text class="dLabelDim dLabel" x="412" y="146">cross-engine</text>
+                <rect class="dBox" x="396" y="212" width="110" height="56" />
+                <text class="dLabel dLabelStrong" x="412" y="236">JUDGMENT</text>
+                <text class="dLabelDim dLabel" x="412" y="254">human layer</text>
+              </g>
+              <!-- footer caption -->
+              <text class="dTier" x="18" y="378">SIX RESEARCH DOMAINS &#183; ONE DECISION LAYER &#183; NO MASTER SIGNAL</text>
+            </svg>
           </aside>
         </div>
       </section>
 
-      <section id="research" class="tCells" aria-label="Research, method, and access">
-        <article class="tPanel tCell">
-          <div class="tPanelTop">
-            <span class="tPanelLabel">/01</span>
-            <span class="tPanelStatus tPanelStatusGold">research</span>
+      <!-- ================= /01 Research problem ================= -->
+      <section class="sec" id="problem" aria-label="The research problem">
+        <div class="wrap">
+          <div class="secHead rv">
+            <span class="secNum">/01 · The research problem</span>
+            <h2 class="secH2">No single market model deserves complete trust.</h2>
+            <p class="secLede">
+              Market conditions are nonlinear. The same price path can carry very different
+              meanings depending on volatility, positioning, liquidity, and the macro calendar
+              behind it. A single indicator, however sophisticated, creates blind spots.
+            </p>
           </div>
-          <h2 class="tCellTitle">What we research</h2>
-          <ul class="tCellList">
-            <li><span class="tCellTag">E1</span> Earnings IV crush</li>
-            <li><span class="tCellTag">E2</span> SPX iron condors</li>
-            <li><span class="tCellTag">E14</span> SPX scenario</li>
-            <li><span class="tCellTag">MI</span> Regime intelligence</li>
+          <div class="problemGrid rv rv-d1">
+            <div class="problemCell">
+              <span class="mono">OBSERVATION 01</span>
+              <p>
+                Options data regularly contradicts spot-price narratives. Implied volatility,
+                skew, and open interest often reprice risk hours or days before the underlying
+                confirms it.
+              </p>
+            </div>
+            <div class="problemCell">
+              <span class="mono">OBSERVATION 02</span>
+              <p>
+                Volatility, dealer positioning, flow, macro conditions, and market structure
+                interact. Examined in isolation, each one tells a partial and sometimes
+                misleading story.
+              </p>
+            </div>
+            <div class="problemCell">
+              <span class="mono">OBSERVATION 03</span>
+              <p>
+                Regimes change faster than models retrain. A signal that worked in a compressed
+                volatility environment can invert quietly when the regime shifts underneath it.
+              </p>
+            </div>
+            <div class="problemCell">
+              <span class="mono">OBSERVATION 04</span>
+              <p>
+                One master signal concentrates model risk. Independent engines that can agree,
+                disagree, and abstain distribute it, and disagreement itself becomes information.
+              </p>
+            </div>
+          </div>
+          <p class="problemClose rv rv-d2">
+            NRGX Labs is built around multiple independent engines rather than one master signal.
+            <strong>When the engines disagree, that disagreement is the finding.</strong>
+          </p>
+        </div>
+      </section>
+
+      <!-- ================= /02 Platform overview ================= -->
+      <section class="sec" id="platform" aria-label="Platform overview">
+        <div class="wrap">
+          <div class="secHead rv">
+            <span class="secNum">/02 · Platform</span>
+            <h2 class="secH2">A research operating system, not a dashboard with charts.</h2>
+            <p class="secLede">
+              The platform is organized as connected layers. Each layer observes, transforms,
+              scores, or synthesizes a specific slice of market information, and every layer is
+              inspectable from the desk.
+            </p>
+          </div>
+          <div class="layerGrid rv rv-d1">
+            <div class="layerCard">
+              <span class="layerKey">L/01</span>
+              <h3>Market Structure</h3>
+              <p>
+                Tracks index and single-name structure: expected move, open-interest clusters,
+                support and resistance formed by positioning rather than price memory.
+              </p>
+            </div>
+            <div class="layerCard">
+              <span class="layerKey">L/02</span>
+              <h3>Options and Volatility</h3>
+              <p>
+                Builds volatility surfaces, monitors skew and term structure, and measures how
+                implied risk pricing changes across strikes and expirations.
+              </p>
+            </div>
+            <div class="layerCard">
+              <span class="layerKey">L/03</span>
+              <h3>Flow and Positioning</h3>
+              <p>
+                Reads dealer gamma context, open-interest migration, and flow concentration to
+                estimate where hedging pressure amplifies or dampens moves.
+              </p>
+            </div>
+            <div class="layerCard">
+              <span class="layerKey">L/04</span>
+              <h3>Regime Detection</h3>
+              <p>
+                Classifies the prevailing volatility and trend regime, and flags transitions
+                where historical relationships are most likely to break.
+              </p>
+            </div>
+            <div class="layerCard">
+              <span class="layerKey">L/05</span>
+              <h3>Risk and Scenario Analysis</h3>
+              <p>
+                Runs Monte Carlo simulation, cross-asset stress, and gap analysis to map how a
+                position or thesis behaves across paths, not just the expected one.
+              </p>
+            </div>
+            <div class="layerCard">
+              <span class="layerKey">L/06</span>
+              <h3>Event and Macro Risk</h3>
+              <p>
+                Maintains earnings and macro calendars, scores event risk against historical
+                distributions, and overlays scheduled catalysts onto open research.
+              </p>
+            </div>
+            <div class="layerCard">
+              <span class="layerKey">L/07</span>
+              <h3>Signal Validation</h3>
+              <p>
+                Gates every engine output through agreement checks, historical review, and
+                go/no-go logic before it reaches the desk as a research candidate.
+              </p>
+            </div>
+            <div class="layerCard">
+              <span class="layerKey">L/08</span>
+              <h3>AI-Assisted Synthesis</h3>
+              <p>
+                Language models narrate and cross-examine deterministic engine output. They
+                explain the research. They do not generate the numbers.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= /03 Architecture ================= -->
+      <section class="sec" id="architecture" aria-label="Multi-engine research architecture">
+        <div class="wrap">
+          <div class="secHead rv">
+            <span class="secNum">/03 · Architecture</span>
+            <h2 class="secH2">Multi-engine research architecture.</h2>
+            <p class="secLede">
+              Data flows through shared ingestion and normalization, then fans out to independent
+              engines. Their outputs are compared, challenged, and synthesized before a human
+              makes the call.
+            </p>
+          </div>
+
+          <blockquote class="archQuote rv rv-d1">
+            Each engine is designed to answer a narrower question. NRGX becomes valuable when
+            those answers are compared, challenged, and synthesized.
+          </blockquote>
+
+          <div class="archPanel rv rv-d2 drawable">
+            <svg class="archSvg" viewBox="0 0 960 660" role="img" aria-label="Layered architecture: data ingestion, normalization, eighteen independent engines, cross-engine validation, research synthesis, and a human decision layer">
+              <!-- Tier 1: ingestion -->
+              <text class="dTier" x="20" y="18">T/01 &#183; DATA INGESTION</text>
+              <g>
+                <rect class="dBox" x="20" y="30" width="215" height="52" />
+                <text class="dLabel" x="36" y="52">OPTIONS SURFACES</text>
+                <text class="dLabelDim dLabel" x="36" y="70">greeks &#183; iv &#183; oi</text>
+                <rect class="dBox" x="255" y="30" width="215" height="52" />
+                <text class="dLabel" x="271" y="52">EQUITIES + FUNDAMENTALS</text>
+                <text class="dLabelDim dLabel" x="271" y="70">prices &#183; earnings &#183; estimates</text>
+                <rect class="dBox" x="490" y="30" width="215" height="52" />
+                <text class="dLabel" x="506" y="52">NEWS + EVENT FEEDS</text>
+                <text class="dLabelDim dLabel" x="506" y="70">headlines &#183; calendars</text>
+                <rect class="dBox" x="725" y="30" width="215" height="52" />
+                <text class="dLabel" x="741" y="52">MACRO SERIES</text>
+                <text class="dLabelDim dLabel" x="741" y="70">rates &#183; inflation &#183; releases</text>
+              </g>
+              <g>
+                <path class="dFlow" d="M127 82 V118" />
+                <path class="dFlow" d="M362 82 V118" />
+                <path class="dFlow" d="M597 82 V118" />
+                <path class="dFlow" d="M832 82 V118" />
+              </g>
+
+              <!-- Tier 2: normalization -->
+              <text class="dTier" x="20" y="112">T/02 &#183; NORMALIZATION + ENRICHMENT</text>
+              <rect class="dBox" x="20" y="118" width="920" height="52" />
+              <text class="dLabel dLabelStrong" x="36" y="140">SHARED SCHEMAS &#183; VALIDATION &#183; CACHING &#183; MARKET CALENDAR</text>
+              <text class="dLabelDim dLabel" x="36" y="158">every engine reads the same cleaned, session-aware view of the market</text>
+              <g>
+                <path class="dFlow" d="M240 170 V206" />
+                <path class="dFlow" d="M480 170 V206" />
+                <path class="dFlow" d="M720 170 V206" />
+              </g>
+
+              <!-- Tier 3: engines -->
+              <text class="dTier" x="20" y="200">T/03 &#183; 18 INDEPENDENT ENGINES</text>
+              <g>
+                <rect class="dBox dBoxAccent" x="20" y="206" width="145" height="48" />
+                <text class="dLabel" x="32" y="234">EARNINGS VOL</text>
+                <rect class="dBox dBoxAccent" x="175" y="206" width="145" height="48" />
+                <text class="dLabel" x="187" y="234">INDEX STRUCTURE</text>
+                <rect class="dBox dBoxAccent" x="330" y="206" width="145" height="48" />
+                <text class="dLabel" x="342" y="234">TREND</text>
+                <rect class="dBox dBoxAccent" x="485" y="206" width="145" height="48" />
+                <text class="dLabel" x="497" y="234">POST-EVENT DRIFT</text>
+                <rect class="dBox dBoxAccent" x="640" y="206" width="145" height="48" />
+                <text class="dLabel" x="652" y="234">CREDIT SPREADS</text>
+                <rect class="dBox dBoxAccent" x="795" y="206" width="145" height="48" />
+                <text class="dLabel" x="807" y="234">VOL REVERSION</text>
+
+                <rect class="dBox dBoxAccent" x="20" y="264" width="145" height="48" />
+                <text class="dLabel" x="32" y="292">GAP REGIME</text>
+                <rect class="dBox dBoxAccent" x="175" y="264" width="145" height="48" />
+                <text class="dLabel" x="187" y="292">SCENARIO SIM</text>
+                <rect class="dBox dBoxAccent" x="330" y="264" width="145" height="48" />
+                <text class="dLabel" x="342" y="292">RELATIVE VALUE</text>
+                <rect class="dBox dBoxAccent" x="485" y="264" width="145" height="48" />
+                <text class="dLabel" x="497" y="292">POSITIONING</text>
+                <rect class="dBox dBoxAccent" x="640" y="264" width="145" height="48" />
+                <text class="dLabel" x="652" y="292">EVENT RISK</text>
+                <rect class="dBox dBoxAccent" x="795" y="264" width="145" height="48" />
+                <text class="dLabel" x="807" y="292">REPRICING LAB</text>
+              </g>
+              <text class="dLabelDim dLabel" x="20" y="336">+ six additional engines running against the same normalized layer</text>
+              <g>
+                <path class="dFlow" d="M240 312 V368" />
+                <path class="dFlow" d="M480 312 V368" />
+                <path class="dFlow" d="M720 312 V368" />
+              </g>
+
+              <!-- Tier 4: validation -->
+              <text class="dTier" x="20" y="362">T/04 &#183; CROSS-ENGINE VALIDATION</text>
+              <rect class="dBox" x="20" y="368" width="920" height="52" />
+              <text class="dLabel dLabelStrong" x="36" y="390">AGREEMENT &#183; CONFLICT &#183; GATING &#183; GO / NO-GO</text>
+              <text class="dLabelDim dLabel" x="36" y="408">engines that disagree are surfaced, not averaged away</text>
+              <path class="dFlow" d="M480 420 V456" />
+
+              <!-- Tier 5: synthesis -->
+              <text class="dTier" x="20" y="450">T/05 &#183; RESEARCH SYNTHESIS</text>
+              <rect class="dBox" x="20" y="456" width="920" height="52" />
+              <text class="dLabel dLabelStrong" x="36" y="478">DETERMINISTIC SCORES &#183; AI-ASSISTED NARRATION &#183; STRUCTURED RESEARCH MEMOS</text>
+              <text class="dLabelDim dLabel" x="36" y="496">the model explains the evidence &#183; it does not replace the logic</text>
+              <path class="dFlow dFlowAccent" d="M480 508 V544" />
+
+              <!-- Tier 6: decision -->
+              <text class="dTier" x="20" y="538">T/06 &#183; DECISION LAYER</text>
+              <rect class="dBox dBoxAccent" x="330" y="544" width="300" height="56" />
+              <text class="dLabelAccent" x="404" y="568">HUMAN JUDGMENT</text>
+              <text class="dLabelDim dLabel" x="404" y="586">quant decides &#183; the model explains</text>
+
+              <text class="dTier" x="20" y="644">NRGX RESEARCH TOPOLOGY &#183; SIMPLIFIED PUBLIC VIEW</text>
+            </svg>
+
+            <!-- Mobile stacked flow -->
+            <div class="archStack" aria-hidden="false">
+              <div class="archTier">
+                <span class="archTierKey">T/01</span>
+                <span class="archTierName">Data ingestion</span>
+                <span class="archTierDesc">options surfaces &#183; equities + fundamentals &#183; news + events &#183; macro series</span>
+              </div>
+              <span class="archTierLink" aria-hidden="true"></span>
+              <div class="archTier">
+                <span class="archTierKey">T/02</span>
+                <span class="archTierName">Normalization + enrichment</span>
+                <span class="archTierDesc">shared schemas &#183; validation &#183; caching &#183; market calendar</span>
+              </div>
+              <span class="archTierLink" aria-hidden="true"></span>
+              <div class="archTier">
+                <span class="archTierKey">T/03</span>
+                <span class="archTierName">18 independent engines</span>
+                <span class="archTierDesc">earnings vol &#183; index structure &#183; trend &#183; drift &#183; credit &#183; regime &#183; scenario sim &#183; positioning &#183; more</span>
+              </div>
+              <span class="archTierLink" aria-hidden="true"></span>
+              <div class="archTier">
+                <span class="archTierKey">T/04</span>
+                <span class="archTierName">Cross-engine validation</span>
+                <span class="archTierDesc">agreement &#183; conflict &#183; gating &#183; go / no-go</span>
+              </div>
+              <span class="archTierLink" aria-hidden="true"></span>
+              <div class="archTier">
+                <span class="archTierKey">T/05</span>
+                <span class="archTierName">Research synthesis</span>
+                <span class="archTierDesc">deterministic scores &#183; AI-assisted narration &#183; structured memos</span>
+              </div>
+              <span class="archTierLink" aria-hidden="true"></span>
+              <div class="archTier">
+                <span class="archTierKey">T/06</span>
+                <span class="archTierName">Human judgment</span>
+                <span class="archTierDesc">quant decides &#183; the model explains</span>
+              </div>
+            </div>
+
+            <p class="archNote">
+              Simplified public view. Engine internals, scoring methods, and thresholds stay
+              behind the door.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= /04 Engineering depth ================= -->
+      <section class="sec" id="engineering" aria-label="Codebase and engineering depth">
+        <div class="wrap">
+          <div class="secHead rv">
+            <span class="secNum">/04 · Engineering</span>
+            <h2 class="secH2">Built as infrastructure, not a collection of indicators.</h2>
+            <p class="secLede">
+              NRGX Labs is a production software system before it is a research product. The
+              figures below are measured directly from the repository.
+            </p>
+          </div>
+
+          <div class="statRow rv rv-d1">
+            <div class="stat">
+              <span class="statVal"><span data-count="18">18</span></span>
+              <span class="statKey">Analytical engines</span>
+            </div>
+            <div class="stat">
+              <span class="statVal"><span data-count="190">190</span><span class="statSuffix">+</span></span>
+              <span class="statKey">API routes</span>
+            </div>
+            <div class="stat">
+              <span class="statVal"><span data-count="160">160</span><span class="statSuffix">K+</span></span>
+              <span class="statKey">Lines of Python + JS</span>
+            </div>
+            <div class="stat">
+              <span class="statVal"><span data-count="1400" data-format="comma">1,400</span><span class="statSuffix">+</span></span>
+              <span class="statKey">Automated tests</span>
+            </div>
+            <div class="stat">
+              <span class="statVal"><span data-count="6">6</span></span>
+              <span class="statKey">Market-data integrations</span>
+            </div>
+          </div>
+
+          <div class="engGrid rv rv-d2">
+            <div class="engItem">
+              <span class="mono">E/01</span>
+              <p>
+                <strong>Modular service architecture.</strong> Each engine lives in its own
+                module with isolated scoring, screening, and review logic, registered through
+                22 routed service modules on a shared FastAPI core.
+              </p>
+            </div>
+            <div class="engItem">
+              <span class="mono">E/02</span>
+              <p>
+                <strong>Shared schemas and normalization.</strong> Every engine reads the same
+                validated, session-aware view of prices, surfaces, calendars, and events.
+              </p>
+            </div>
+            <div class="engItem">
+              <span class="mono">E/03</span>
+              <p>
+                <strong>Six market-data integrations.</strong> Independent feeds across options
+                analytics, equities, fundamentals, news, and macroeconomic series, so no single
+                vendor defines the view.
+              </p>
+            </div>
+            <div class="engItem">
+              <span class="mono">E/04</span>
+              <p>
+                <strong>Simulation and backtesting.</strong> Monte Carlo path simulation,
+                historical replay, and stress harnesses sit beside the live engines, not in a
+                separate research notebook.
+              </p>
+            </div>
+            <div class="engItem">
+              <span class="mono">E/05</span>
+              <p>
+                <strong>Caching and state.</strong> Redis carries session state, engine caches,
+                and market snapshots so research stays fast without re-fetching the world.
+              </p>
+            </div>
+            <div class="engItem">
+              <span class="mono">E/06</span>
+              <p>
+                <strong>Scheduled research jobs.</strong> Cron-driven pipelines build calendars,
+                pre-open snapshots, and weekly reviews before the desk sits down.
+              </p>
+            </div>
+            <div class="engItem">
+              <span class="mono">E/07</span>
+              <p>
+                <strong>Tested continuously.</strong> More than 1,400 automated tests across
+                125+ test files cover engines, gating, schemas, and simulators.
+              </p>
+            </div>
+            <div class="engItem">
+              <span class="mono">E/08</span>
+              <p>
+                <strong>AI kept in its lane.</strong> OpenAI models narrate and cross-examine
+                deterministic output through a separate front layer. The numbers never come
+                from the language model.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= /05 Research domains ================= -->
+      <section class="sec" id="research" aria-label="Selected research domains">
+        <div class="wrap">
+          <div class="secHead rv">
+            <span class="secNum">/05 · Research domains</span>
+            <h2 class="secH2">Selected research domains.</h2>
+            <p class="secLede">
+              Each domain is framed as a research question. None of them promises an outcome.
+            </p>
+          </div>
+          <div class="domainGrid rv rv-d1">
+            <div class="domainCard">
+              <h3>Volatility Surface</h3>
+              <p>
+                Examines how implied volatility is distributed across strikes and expirations to
+                identify changes in risk pricing, convexity, and market expectations.
+              </p>
+            </div>
+            <div class="domainCard">
+              <h3>Gamma and Dealer Exposure</h3>
+              <p>
+                Estimates where dealer hedging pressure sits relative to spot, and how that
+                positioning is likely to amplify or absorb directional moves.
+              </p>
+            </div>
+            <div class="domainCard">
+              <h3>Options Flow and Open Interest</h3>
+              <p>
+                Tracks open-interest clusters and flow concentration to locate the strikes where
+                positioning, not narrative, is defining the field.
+              </p>
+            </div>
+            <div class="domainCard">
+              <h3>Skew and Term Structure</h3>
+              <p>
+                Watches how the market prices downside protection and time, and flags when those
+                relationships depart from their own history.
+              </p>
+            </div>
+            <div class="domainCard">
+              <h3>Market Regime</h3>
+              <p>
+                Classifies the prevailing volatility and trend environment, and asks the harder
+                question: which relationships stop working when it changes.
+              </p>
+            </div>
+            <div class="domainCard">
+              <h3>Event and Macro Risk</h3>
+              <p>
+                Scores scheduled catalysts, earnings, and macro releases against historical
+                outcome distributions rather than headline sentiment.
+              </p>
+            </div>
+            <div class="domainCard">
+              <h3>Earnings Volatility</h3>
+              <p>
+                Studies how implied volatility builds and resolves around earnings, and when the
+                market has over- or under-priced the event.
+              </p>
+            </div>
+            <div class="domainCard">
+              <h3>Scenario Analysis</h3>
+              <p>
+                Simulates thousands of paths across price, volatility, and time to map how a
+                structure behaves away from the expected case.
+              </p>
+            </div>
+            <div class="domainCard">
+              <h3>Signal Agreement and Conflict</h3>
+              <p>
+                Compares independent engine outputs on the same underlying question, treating
+                disagreement as evidence rather than noise.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= /06 Discipline ================= -->
+      <section class="sec discipline" id="discipline" aria-label="Research discipline">
+        <div class="wrap discGrid">
+          <div class="rv">
+            <span class="secNum">/06 · Discipline</span>
+            <h2 class="secH2">Research should reduce uncertainty, not manufacture confidence.</h2>
+            <p class="discQuote">
+              The system is designed to surface evidence, conflict, risk, and conditional
+              opportunity. <strong>Human judgment remains central.</strong>
+            </p>
+          </div>
+          <ul class="discList rv rv-d1">
+            <li>No guaranteed outcomes, and no pretense of them.</li>
+            <li>No single magic score. Every engine answer carries its context.</li>
+            <li>No black-box claims of certainty. Inputs and logic stay inspectable.</li>
+            <li>Signals remain conditional on regime, liquidity, and the calendar.</li>
+            <li>Models are most useful when they disagree, so disagreement is preserved.</li>
+            <li>Research that fails historical review does not reach the desk.</li>
           </ul>
-        </article>
+        </div>
+      </section>
 
-        <article class="tPanel tCell" id="method">
-          <div class="tPanelTop">
-            <span class="tPanelLabel">/02</span>
-            <span class="tPanelStatus tPanelStatusGold">method</span>
+      <!-- ================= /07 Founder ================= -->
+      <section class="sec" id="founder" aria-label="Founder">
+        <div class="wrap">
+          <div class="secHead rv">
+            <span class="secNum">/07 · Founder</span>
+            <h2 class="secH2">
+              Built by a founder who has spent his career turning complex systems into operating
+              companies.
+            </h2>
           </div>
-          <h2 class="tCellTitle">How we work</h2>
-          <p class="tCellBody">
-            Conformal-calibrated probabilities. Regime-aware feature stacks.
-            Deterministic engines score the trade; language models narrate the
-            judgment — they do not replace it. Every signal is runtime-verified
-            against a live shadow desk. Research that fails replication does not
-            ship.
-          </p>
-        </article>
+          <div class="founderGrid">
+            <div class="founderBody rv rv-d1">
+              <p>
+                NRGX Labs was created by <strong>Joshua B. Smith</strong>, a six-time founder and
+                operator whose work has crossed ecommerce, consumer products, supplements,
+                manufacturing, subscription commerce, artificial intelligence, and financial
+                research.
+              </p>
+              <p>
+                After more than 25 years building and operating companies, Joshua began
+                developing NRGX as a private research environment for examining markets through
+                software, data, and multiple independent analytical models.
+              </p>
+              <p>
+                The platform reflects the same operating philosophy behind his other systems:
+                build the infrastructure, connect the data, expose the blind spots, and make
+                better decisions.
+              </p>
+              <a class="founderLink" href="https://joshuabsmith.io" rel="noopener">
+                Explore Joshua B. Smith <span aria-hidden="true">&rarr;</span>
+              </a>
+            </div>
+            <aside class="founderProof rv rv-d2" aria-label="Founder proof points">
+              <div class="founderProofHead">Operator record</div>
+              <ul>
+                <li><strong>25+ years</strong>Founder and operator across six companies, with multiple exits.</li>
+                <li><strong>$587M+</strong>Gross retail sales across founder-led brands.</li>
+                <li><strong>4 systems</strong>Builder of RavenOS, InjuryOS, Versefold, and NRGX Labs.</li>
+                <li><strong>Full stack</strong>Ecommerce, AI, software, manufacturing, consumer products, and quantitative research.</li>
+              </ul>
+            </aside>
+          </div>
+        </div>
+      </section>
 
-        <article class="tPanel tCell" id="access">
-          <div class="tPanelTop">
-            <span class="tPanelLabel">/03</span>
-            <span class="tPanelStatus tPanelStatusGold">access</span>
+      <!-- ================= /08 Ecosystem ================= -->
+      <section class="sec" id="ecosystem" aria-label="Ecosystem">
+        <div class="wrap">
+          <div class="secHead rv">
+            <span class="secNum">/08 · Ecosystem</span>
+            <h2 class="secH2">One system inside a broader body of work.</h2>
+            <p class="secLede">
+              NRGX Labs is one expression of a broader body of founder-built software spanning
+              ecommerce intelligence, healthcare, Scripture, and quantitative market research.
+            </p>
           </div>
-          <h2 class="tCellTitle">Who it's for</h2>
-          <p class="tCellBody">
-            Self-directed capital running real size. Single-LP funds and
-            family-office allocators who want the model behind the trade — not
-            a pitch deck. The desk is open by invitation. Have a code, enter.
-            Otherwise, write
-            <a href="mailto:desk@nrgxlabs.com">desk@nrgxlabs.com</a>.
+          <div class="ecoGrid rv rv-d1">
+            <a class="ecoCard" href="https://ravenos.io" rel="noopener">
+              <h3>RavenOS <span class="mono">GROWTH</span></h3>
+              <p>AI-assisted growth intelligence for ecommerce operators, built to surface the revenue leaks dashboards miss.</p>
+              <span class="ecoUrl">ravenos.io &rarr;</span>
+            </a>
+            <a class="ecoCard" href="https://injuryos.io" rel="noopener">
+              <h3>InjuryOS <span class="mono">LEGAL</span></h3>
+              <p>AI-native signed-case acquisition infrastructure for plaintiff injury firms, from first touch to signed case.</p>
+              <span class="ecoUrl">injuryos.io &rarr;</span>
+            </a>
+            <a class="ecoCard" href="https://versefold.app" rel="noopener">
+              <h3>Versefold <span class="mono">SCRIPTURE</span></h3>
+              <p>A quiet Scripture-first Bible app for iPhone, designed around less phone and more Word.</p>
+              <span class="ecoUrl">versefold.app &rarr;</span>
+            </a>
+            <a class="ecoCard" href="https://joshuabsmith.io" rel="noopener">
+              <h3>Joshua B. Smith <span class="mono">FOUNDER</span></h3>
+              <p>The founder arc behind the ecosystem: 25+ years of companies, exits, systems, and operating judgment.</p>
+              <span class="ecoUrl">joshuabsmith.io &rarr;</span>
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= /09 Closing ================= -->
+      <section class="close" aria-label="Closing">
+        <div class="wrap rv">
+          <h2 class="closeH2">Build enough independent intelligence to see what one model misses.</h2>
+          <p class="closeSub">
+            NRGX Labs is an active research and engineering project. The system continues to
+            expand as new engines, datasets, validation methods, and analytical workflows are
+            developed.
           </p>
-        </article>
+          <div class="ctaRow">
+            <a class="btn btnPrimary" href="https://joshuabsmith.io" rel="noopener">Explore Joshua B. Smith <span aria-hidden="true">&rarr;</span></a>
+            <a class="btn btnGhost" href="#architecture">View the architecture</a>
+          </div>
+        </div>
       </section>
     </main>
 
-    <footer class="tFoot" role="contentinfo">
-      <div class="tFootInner">
-        <span class="tFootBrand">NRGX/Labs</span>
-        <span class="tFootMeta">Private Capital Research</span>
-        <span class="tFootMeta tFootRight">
-          <a href="https://app.nrgxlabs.com" rel="noopener">app.nrgxlabs.com</a>
-          <span aria-hidden="true"> · </span>
-          <a href="mailto:desk@nrgxlabs.com">desk@nrgxlabs.com</a>
-        </span>
+    <!-- ================= Footer ================= -->
+    <footer class="foot" role="contentinfo">
+      <div class="wrap">
+        <div class="footGrid">
+          <div class="footBrand">
+            <span class="navBrandMark">NRGX<span>/Labs</span></span>
+            <p>
+              A private quantitative research and market-intelligence platform.
+              A Joshua B. Smith project.
+            </p>
+          </div>
+          <div class="footCol">
+            <h4>Platform</h4>
+            <ul>
+              <li><a href="#platform">Overview</a></li>
+              <li><a href="#architecture">Architecture</a></li>
+              <li><a href="#research">Research domains</a></li>
+              <li><a href="https://app.nrgxlabs.com" rel="noopener">Enter the desk</a></li>
+            </ul>
+          </div>
+          <div class="footCol">
+            <h4>Ecosystem</h4>
+            <ul>
+              <li><a href="https://joshuabsmith.io" rel="noopener">Joshua B. Smith</a></li>
+              <li><a href="https://ravenos.io" rel="noopener">RavenOS</a></li>
+              <li><a href="https://injuryos.io" rel="noopener">InjuryOS</a></li>
+              <li><a href="https://versefold.app" rel="noopener">Versefold</a></li>
+            </ul>
+          </div>
+          <div class="footCol">
+            <h4>Contact</h4>
+            <ul>
+              <li><a href="mailto:desk@nrgxlabs.com">desk@nrgxlabs.com</a></li>
+              <li><a href="https://app.nrgxlabs.com" rel="noopener">app.nrgxlabs.com</a></li>
+            </ul>
+          </div>
+        </div>
+        <div class="footLegal">
+          <p class="footDisclaimer">
+            NRGX Labs is a research and software platform. Nothing presented on this site
+            constitutes investment advice, a recommendation, an offer to buy or sell securities,
+            or a guarantee of future results. Markets involve risk, including the possible loss
+            of principal. All system statistics describe the software platform itself and are
+            not representations of trading performance.
+          </p>
+          <div class="footMeta">
+            <span>&copy; <span data-year>2026</span> NRGX Labs &#183; Private Research Platform</span>
+            <span>Built by <a href="https://joshuabsmith.io" rel="noopener">Joshua B. Smith</a></span>
+          </div>
+        </div>
       </div>
     </footer>
 
     <script>
       (function () {
-        var stamp = document.querySelector('[data-stamp]');
-        if (!stamp) return;
-        try {
-          var fmt = new Intl.DateTimeFormat('en-US', {
-            timeZone: 'America/New_York',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false,
-          });
-          stamp.textContent = fmt.format(new Date());
-        } catch (_) {
-          /* keep fallback text */
+        "use strict";
+
+        var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+        /* Footer year */
+        var yr = document.querySelector("[data-year]");
+        if (yr) yr.textContent = String(new Date().getFullYear());
+
+        /* Scroll reveal (adds .in to .rv and .drawable) */
+        var targets = document.querySelectorAll(".rv, .drawable");
+        if (!("IntersectionObserver" in window) || reduced) {
+          targets.forEach(function (el) { el.classList.add("in"); });
+        } else {
+          var io = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (entry) {
+                if (entry.isIntersecting) {
+                  entry.target.classList.add("in");
+                  io.unobserve(entry.target);
+                }
+              });
+            },
+            { threshold: 0.15, rootMargin: "0px 0px -6% 0px" }
+          );
+          targets.forEach(function (el) { io.observe(el); });
+        }
+
+        /* Stat counters */
+        var counters = document.querySelectorAll("[data-count]");
+        function fmt(n, mode) {
+          return mode === "comma" ? n.toLocaleString("en-US") : String(n);
+        }
+        function animate(el) {
+          var end = parseInt(el.getAttribute("data-count"), 10);
+          var mode = el.getAttribute("data-format");
+          var dur = 1100;
+          var start = null;
+          function step(ts) {
+            if (start === null) start = ts;
+            var p = Math.min((ts - start) / dur, 1);
+            var eased = 1 - Math.pow(1 - p, 3);
+            el.textContent = fmt(Math.round(end * eased), mode);
+            if (p < 1) requestAnimationFrame(step);
+          }
+          requestAnimationFrame(step);
+        }
+        if (counters.length && "IntersectionObserver" in window && !reduced) {
+          var cio = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (entry) {
+                if (entry.isIntersecting) {
+                  animate(entry.target);
+                  cio.unobserve(entry.target);
+                }
+              });
+            },
+            { threshold: 0.5 }
+          );
+          counters.forEach(function (el) { cio.observe(el); });
         }
       })();
     </script>
