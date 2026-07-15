@@ -33,7 +33,8 @@ for the full domain migration runbook.
 4. **/02 Platform** — eight platform layers
 5. **/03 Architecture** — six-tier topology SVG (mobile gets a stacked flow)
 6. **/04 Engineering** — measured repo stats + engineering characteristics
-7. **/05 Research domains** — nine research-question cards
+7. **/05 Research domains** — three featured domains with technical
+   SVG visuals + a compact index of six more
 8. **/06 Discipline** — research philosophy
 9. **/07 Founder** — Joshua B. Smith + operator record panel
 10. **/08 Ecosystem** — RavenOS · InjuryOS · Versefold · joshuabsmith.io

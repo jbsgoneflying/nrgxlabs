@@ -34,7 +34,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
 
     <link rel="stylesheet" href="tokens.css?v=3" />
-    <link rel="stylesheet" href="home.css?v=1" />
+    <link rel="stylesheet" href="home.css?v=2" />
 
     <script type="application/ld+json">
     {
@@ -71,7 +71,7 @@
           <a href="#architecture">Architecture</a>
           <a href="#research">Research</a>
           <a href="#founder">Founder</a>
-          <a href="https://joshuabsmith.io" rel="noopener">Joshua B. Smith</a>
+          <a class="navJbs" href="https://joshuabsmith.io" rel="noopener">Joshua B. Smith</a>
         </nav>
         <div class="navRight">
           <span class="navStatus"><span class="navStatusDot" aria-hidden="true"></span>Private Research Platform</span>
@@ -85,7 +85,7 @@
       <section class="hero" aria-label="NRGX Labs overview">
         <div class="wrap heroGrid">
           <div class="rv">
-            <span class="eyebrowLight">NRGX/Labs · Quantitative Research Infrastructure</span>
+            <span class="eyebrowLight">NRGX/Labs · <span class="eyebrowJbs">A Joshua B. Smith Research System</span></span>
             <h1 class="heroH1">
               Research infrastructure for markets that refuse to <em>behave simply.</em>
             </h1>
@@ -106,57 +106,70 @@
             </div>
           </div>
 
-          <aside class="sysPanel rv rv-d2 drawable" aria-label="System map">
+          <aside class="sysPanel rv rv-d2 drawable" aria-label="Engine graph">
             <div class="sysPanelHead">
-              <span class="sysPanelTitle">nrgx.system_map</span>
+              <span class="sysPanelTitle">nrgx.engine_graph</span>
               <span class="sysPanelState">live</span>
             </div>
-            <svg viewBox="0 0 520 400" role="img" aria-label="Diagram of research domains feeding independent engines, synthesis, and human judgment">
-              <!-- domain nodes -->
+            <svg viewBox="0 0 560 430" role="img" aria-label="Graph of NRGX engines feeding cross-engine gating, desk synthesis, and human judgment">
+              <!-- engine nodes (real engine IDs) -->
               <g>
-                <rect class="dBox" x="18" y="24" width="150" height="34" />
-                <text class="dLabel" x="30" y="45">VOLATILITY SURFACE</text>
-                <rect class="dBox" x="18" y="80" width="150" height="34" />
-                <text class="dLabel" x="30" y="101">OPTIONS FLOW</text>
-                <rect class="dBox" x="18" y="136" width="150" height="34" />
-                <text class="dLabel" x="30" y="157">DEALER POSITIONING</text>
-                <rect class="dBox" x="18" y="192" width="150" height="34" />
-                <text class="dLabel" x="30" y="213">MARKET REGIME</text>
-                <rect class="dBox" x="18" y="248" width="150" height="34" />
-                <text class="dLabel" x="30" y="269">MACRO / EVENTS</text>
-                <rect class="dBox" x="18" y="304" width="150" height="34" />
-                <text class="dLabel" x="30" y="325">LIQUIDITY</text>
+                <rect class="dBox" x="16" y="22" width="184" height="32" />
+                <text class="dLabelAccent" x="28" y="42">E1</text>
+                <text class="dLabel" x="52" y="42">EARNINGS IV CRUSH</text>
+                <rect class="dBox" x="16" y="66" width="184" height="32" />
+                <text class="dLabelAccent" x="28" y="86">E2</text>
+                <text class="dLabel" x="52" y="86">SPX IRON CONDORS</text>
+                <rect class="dBox" x="16" y="110" width="184" height="32" />
+                <text class="dLabelAccent" x="28" y="130">E12</text>
+                <text class="dLabel" x="58" y="130">VIX MEAN REVERSION</text>
+                <rect class="dBox" x="16" y="154" width="184" height="32" />
+                <text class="dLabelAccent" x="28" y="174">E13</text>
+                <text class="dLabel" x="58" y="174">GAP REGIME</text>
+                <rect class="dBox" x="16" y="198" width="184" height="32" />
+                <text class="dLabelAccent" x="28" y="218">E14</text>
+                <text class="dLabel" x="58" y="218">SPX SCENARIO</text>
+                <rect class="dBox" x="16" y="242" width="184" height="32" />
+                <text class="dLabelAccent" x="28" y="262">E18</text>
+                <text class="dLabel" x="58" y="262">EARNINGS DRIFT</text>
+                <rect class="dBox" x="16" y="286" width="184" height="32" />
+                <text class="dLabelAccent" x="28" y="306">MI</text>
+                <text class="dLabel" x="52" y="306">REGIME INTELLIGENCE</text>
               </g>
-              <!-- converge lines -->
+              <!-- converge lines into gating -->
               <g>
-                <path class="dFlow" d="M168 41 H200 L232 156" />
-                <path class="dFlow" d="M168 97 H204 L232 168" />
-                <path class="dFlow" d="M168 153 H208 L232 180" />
-                <path class="dFlow" d="M168 209 H208 L232 192" />
-                <path class="dFlow" d="M168 265 H204 L232 204" />
-                <path class="dFlow" d="M168 321 H200 L232 216" />
+                <path class="dFlow" d="M200 38 H230 L262 158" />
+                <path class="dFlow" d="M200 82 H234 L262 170" />
+                <path class="dFlow" d="M200 126 H238 L262 182" />
+                <path class="dFlow" d="M200 170 H240 L262 194" />
+                <path class="dFlow" d="M200 214 H238 L262 206" />
+                <path class="dFlow" d="M200 258 H234 L262 218" />
+                <path class="dFlow" d="M200 302 H230 L262 230" />
               </g>
-              <!-- engine core -->
+              <!-- gating core -->
               <g>
-                <rect class="dBox dBoxAccent" x="232" y="138" width="128" height="96" />
-                <text class="dLabelAccent" x="252" y="176">18 ENGINES</text>
-                <text class="dLabelDim dLabel" x="252" y="196">independent</text>
-                <text class="dLabelDim dLabel" x="252" y="212">analysis</text>
+                <rect class="dBox dBoxAccent" x="262" y="140" width="132" height="108" />
+                <text class="dLabelAccent" x="280" y="176">GATING</text>
+                <text class="dLabelDim dLabel" x="280" y="196">go / no-go</text>
+                <text class="dLabelDim dLabel" x="280" y="212">agreement &#183;</text>
+                <text class="dLabelDim dLabel" x="280" y="228">conflict</text>
               </g>
               <!-- out lines -->
-              <path class="dFlow dFlowAccent" d="M360 168 H392 L392 132 H396" />
-              <path class="dFlow dFlowAccent" d="M360 204 H392 L392 240 H396" />
+              <path class="dFlow dFlowAccent" d="M394 176 H426 L426 140 H432" />
+              <path class="dFlow dFlowAccent" d="M394 212 H426 L426 248 H432" />
               <!-- synthesis + judgment -->
               <g>
-                <rect class="dBox" x="396" y="104" width="110" height="56" />
-                <text class="dLabel dLabelStrong" x="412" y="128">SYNTHESIS</text>
-                <text class="dLabelDim dLabel" x="412" y="146">cross-engine</text>
-                <rect class="dBox" x="396" y="212" width="110" height="56" />
-                <text class="dLabel dLabelStrong" x="412" y="236">JUDGMENT</text>
-                <text class="dLabelDim dLabel" x="412" y="254">human layer</text>
+                <rect class="dBox" x="432" y="112" width="116" height="56" />
+                <text class="dLabel dLabelStrong" x="446" y="136">DESK INSIGHT</text>
+                <text class="dLabelDim dLabel" x="446" y="154">AI narration</text>
+                <rect class="dBox" x="432" y="220" width="116" height="56" />
+                <text class="dLabel dLabelStrong" x="446" y="244">JUDGMENT</text>
+                <text class="dLabelDim dLabel" x="446" y="262">human layer</text>
               </g>
-              <!-- footer caption -->
-              <text class="dTier" x="18" y="378">SIX RESEARCH DOMAINS &#183; ONE DECISION LAYER &#183; NO MASTER SIGNAL</text>
+              <!-- footer captions -->
+              <text class="dTier" x="16" y="366">7 OF 18 ENGINES SHOWN &#183; NO MASTER SIGNAL</text>
+              <text class="dTier" x="16" y="392">VALIDATION: GO_NO_GO &#183; SYNTHESIS: DESK_INSIGHT</text>
+              <text class="dTier" x="16" y="418">QUANT DECIDES &#183; THE MODEL EXPLAINS</text>
             </svg>
           </aside>
         </div>
@@ -352,32 +365,44 @@
               <text class="dTier" x="20" y="200">T/03 &#183; 18 INDEPENDENT ENGINES</text>
               <g>
                 <rect class="dBox dBoxAccent" x="20" y="206" width="145" height="48" />
-                <text class="dLabel" x="32" y="234">EARNINGS VOL</text>
+                <text class="dLabel" x="32" y="228">E1</text>
+                <text class="dLabelDim dLabel" x="32" y="244">EARNINGS IV</text>
                 <rect class="dBox dBoxAccent" x="175" y="206" width="145" height="48" />
-                <text class="dLabel" x="187" y="234">INDEX STRUCTURE</text>
+                <text class="dLabel" x="187" y="228">E2</text>
+                <text class="dLabelDim dLabel" x="187" y="244">SPX CONDORS</text>
                 <rect class="dBox dBoxAccent" x="330" y="206" width="145" height="48" />
-                <text class="dLabel" x="342" y="234">TREND</text>
+                <text class="dLabel" x="342" y="228">E4</text>
+                <text class="dLabelDim dLabel" x="342" y="244">TREND SCAN</text>
                 <rect class="dBox dBoxAccent" x="485" y="206" width="145" height="48" />
-                <text class="dLabel" x="497" y="234">POST-EVENT DRIFT</text>
+                <text class="dLabel" x="497" y="228">E5</text>
+                <text class="dLabelDim dLabel" x="497" y="244">LEAD-LAG</text>
                 <rect class="dBox dBoxAccent" x="640" y="206" width="145" height="48" />
-                <text class="dLabel" x="652" y="234">CREDIT SPREADS</text>
+                <text class="dLabel" x="652" y="228">E8</text>
+                <text class="dLabelDim dLabel" x="652" y="244">POST-EVENT</text>
                 <rect class="dBox dBoxAccent" x="795" y="206" width="145" height="48" />
-                <text class="dLabel" x="807" y="234">VOL REVERSION</text>
+                <text class="dLabel" x="807" y="228">E9</text>
+                <text class="dLabelDim dLabel" x="807" y="244">CREDIT STRESS</text>
 
                 <rect class="dBox dBoxAccent" x="20" y="264" width="145" height="48" />
-                <text class="dLabel" x="32" y="292">GAP REGIME</text>
+                <text class="dLabel" x="32" y="286">E12</text>
+                <text class="dLabelDim dLabel" x="32" y="302">VIX FADE</text>
                 <rect class="dBox dBoxAccent" x="175" y="264" width="145" height="48" />
-                <text class="dLabel" x="187" y="292">SCENARIO SIM</text>
+                <text class="dLabel" x="187" y="286">E13</text>
+                <text class="dLabelDim dLabel" x="187" y="302">GAP REGIME</text>
                 <rect class="dBox dBoxAccent" x="330" y="264" width="145" height="48" />
-                <text class="dLabel" x="342" y="292">RELATIVE VALUE</text>
+                <text class="dLabel" x="342" y="286">E14</text>
+                <text class="dLabelDim dLabel" x="342" y="302">SPX SCENARIO</text>
                 <rect class="dBox dBoxAccent" x="485" y="264" width="145" height="48" />
-                <text class="dLabel" x="497" y="292">POSITIONING</text>
+                <text class="dLabel" x="497" y="286">E15</text>
+                <text class="dLabelDim dLabel" x="497" y="302">EARNINGS IC</text>
                 <rect class="dBox dBoxAccent" x="640" y="264" width="145" height="48" />
-                <text class="dLabel" x="652" y="292">EVENT RISK</text>
+                <text class="dLabel" x="652" y="286">E18</text>
+                <text class="dLabelDim dLabel" x="652" y="302">PEAD DRIFT</text>
                 <rect class="dBox dBoxAccent" x="795" y="264" width="145" height="48" />
-                <text class="dLabel" x="807" y="292">REPRICING LAB</text>
+                <text class="dLabel" x="807" y="286">MI</text>
+                <text class="dLabelDim dLabel" x="807" y="302">REGIME INTEL</text>
               </g>
-              <text class="dLabelDim dLabel" x="20" y="336">+ six additional engines running against the same normalized layer</text>
+              <text class="dLabelDim dLabel" x="20" y="336">+ six additional engines and the equity repricing lab run against the same normalized layer</text>
               <g>
                 <path class="dFlow" d="M240 312 V368" />
                 <path class="dFlow" d="M480 312 V368" />
@@ -424,7 +449,7 @@
               <div class="archTier">
                 <span class="archTierKey">T/03</span>
                 <span class="archTierName">18 independent engines</span>
-                <span class="archTierDesc">earnings vol &#183; index structure &#183; trend &#183; drift &#183; credit &#183; regime &#183; scenario sim &#183; positioning &#183; more</span>
+                <span class="archTierDesc">E1 earnings IV &#183; E2 SPX condors &#183; E12 VIX fade &#183; E13 gap regime &#183; E14 scenario &#183; E18 drift &#183; MI regime intel &#183; more</span>
               </div>
               <span class="archTierLink" aria-hidden="true"></span>
               <div class="archTier">
@@ -461,8 +486,8 @@
             <span class="secNum">/04 · Engineering</span>
             <h2 class="secH2">Built as infrastructure, not a collection of indicators.</h2>
             <p class="secLede">
-              NRGX Labs is a production software system before it is a research product. The
-              figures below are measured directly from the repository.
+              NRGX Labs is a production software system before it is a research product. Every
+              figure below has a concrete source in the codebase.
             </p>
           </div>
 
@@ -470,24 +495,30 @@
             <div class="stat">
               <span class="statVal"><span data-count="18">18</span></span>
               <span class="statKey">Analytical engines</span>
+              <span class="statSub">independent scoring and screening modules</span>
             </div>
             <div class="stat">
               <span class="statVal"><span data-count="190">190</span><span class="statSuffix">+</span></span>
               <span class="statKey">API routes</span>
+              <span class="statSub">FastAPI endpoints across 22 service routers</span>
             </div>
             <div class="stat">
               <span class="statVal"><span data-count="160">160</span><span class="statSuffix">K+</span></span>
-              <span class="statKey">Lines of Python + JS</span>
+              <span class="statKey">Lines of code</span>
+              <span class="statSub">Python and JavaScript, excluding tests</span>
             </div>
             <div class="stat">
               <span class="statVal"><span data-count="1400" data-format="comma">1,400</span><span class="statSuffix">+</span></span>
               <span class="statKey">Automated tests</span>
+              <span class="statSub">collected by pytest across 125+ test files</span>
             </div>
             <div class="stat">
               <span class="statVal"><span data-count="6">6</span></span>
-              <span class="statKey">Market-data integrations</span>
+              <span class="statKey">Market-data feeds</span>
+              <span class="statSub">options, equities, fundamentals, news, macro</span>
             </div>
           </div>
+          <p class="statNote">Measured directly from this repository &#183; July 2026 &#183; no trading or performance figures appear on this page.</p>
 
           <div class="engGrid rv rv-d2">
             <div class="engItem">
@@ -564,69 +595,97 @@
               Each domain is framed as a research question. None of them promises an outcome.
             </p>
           </div>
-          <div class="domainGrid rv rv-d1">
-            <div class="domainCard">
-              <h3>Volatility Surface</h3>
+          <div class="featGrid rv rv-d1">
+            <div class="featCard">
+              <div class="featViz" aria-hidden="true">
+                <svg viewBox="0 0 340 150">
+                  <line class="vizAxis" x1="16" y1="126" x2="324" y2="126" />
+                  <line class="vizAxis" x1="170" y1="18" x2="170" y2="126" stroke-dasharray="2 4" />
+                  <path class="vizLineDim" d="M16 52 C 90 96, 130 104, 170 106 C 210 104, 260 92, 324 66" />
+                  <path class="vizLineDim" d="M16 66 C 90 102, 130 110, 170 112 C 210 110, 260 100, 324 80" />
+                  <path class="vizLine" d="M16 34 C 90 88, 130 98, 170 100 C 210 98, 260 82, 324 48" />
+                  <text class="vizTick" x="16" y="142">-2&#963;</text>
+                  <text class="vizTick" x="160" y="142">ATM</text>
+                  <text class="vizTick" x="306" y="142">+2&#963;</text>
+                  <text class="vizTick" x="16" y="26">IV</text>
+                </svg>
+              </div>
+              <h3><span class="mono">RD/01 &#183; VOL_SURFACE_ENGINE</span>Volatility Surface</h3>
               <p>
                 Examines how implied volatility is distributed across strikes and expirations to
                 identify changes in risk pricing, convexity, and market expectations.
               </p>
             </div>
-            <div class="domainCard">
-              <h3>Gamma and Dealer Exposure</h3>
+            <div class="featCard">
+              <div class="featViz" aria-hidden="true">
+                <svg viewBox="0 0 340 150">
+                  <line class="vizAxis" x1="16" y1="72" x2="324" y2="72" />
+                  <rect class="vizBarNeg" x="26" y="72" width="16" height="34" />
+                  <rect class="vizBarNeg" x="52" y="72" width="16" height="46" />
+                  <rect class="vizBarNeg" x="78" y="72" width="16" height="28" />
+                  <rect class="vizBarNeg" x="104" y="72" width="16" height="40" />
+                  <rect class="vizBarNeg" x="130" y="72" width="16" height="18" />
+                  <rect class="vizBarPos" x="182" y="40" width="16" height="32" />
+                  <rect class="vizBarPos" x="208" y="26" width="16" height="46" />
+                  <rect class="vizBarPos" x="234" y="34" width="16" height="38" />
+                  <rect class="vizBarPos" x="260" y="48" width="16" height="24" />
+                  <rect class="vizBarPos" x="286" y="56" width="16" height="16" />
+                  <line class="vizAxis" x1="164" y1="18" x2="164" y2="126" stroke-dasharray="2 4" />
+                  <text class="vizTick" x="140" y="142">FLIP</text>
+                  <text class="vizTick" x="16" y="142">SHORT &#947;</text>
+                  <text class="vizTick" x="276" y="142">LONG &#947;</text>
+                </svg>
+              </div>
+              <h3><span class="mono">RD/02 &#183; DEALER_GAMMA_CONTEXT</span>Gamma and Dealer Exposure</h3>
               <p>
                 Estimates where dealer hedging pressure sits relative to spot, and how that
                 positioning is likely to amplify or absorb directional moves.
               </p>
             </div>
-            <div class="domainCard">
-              <h3>Options Flow and Open Interest</h3>
-              <p>
-                Tracks open-interest clusters and flow concentration to locate the strikes where
-                positioning, not narrative, is defining the field.
-              </p>
-            </div>
-            <div class="domainCard">
-              <h3>Skew and Term Structure</h3>
-              <p>
-                Watches how the market prices downside protection and time, and flags when those
-                relationships depart from their own history.
-              </p>
-            </div>
-            <div class="domainCard">
-              <h3>Market Regime</h3>
+            <div class="featCard">
+              <div class="featViz" aria-hidden="true">
+                <svg viewBox="0 0 340 150">
+                  <line class="vizAxis" x1="16" y1="126" x2="324" y2="126" />
+                  <rect class="vizFill" x="120" y="18" width="86" height="108" />
+                  <path class="vizLine" d="M16 96 H70 V60 H120 V108 H206 V44 H262 V78 H324" />
+                  <text class="vizTick" x="16" y="142">CALM</text>
+                  <text class="vizTick" x="136" y="142">STRESS</text>
+                  <text class="vizTick" x="272" y="142">RESET</text>
+                  <text class="vizTick" x="16" y="26">REGIME</text>
+                </svg>
+              </div>
+              <h3><span class="mono">RD/03 &#183; REGIME_MODEL</span>Market Regime</h3>
               <p>
                 Classifies the prevailing volatility and trend environment, and asks the harder
                 question: which relationships stop working when it changes.
               </p>
             </div>
-            <div class="domainCard">
-              <h3>Event and Macro Risk</h3>
-              <p>
-                Scores scheduled catalysts, earnings, and macro releases against historical
-                outcome distributions rather than headline sentiment.
-              </p>
+          </div>
+
+          <div class="domainIndex rv rv-d2">
+            <div class="domainRow">
+              <span class="mono">RD/04</span>
+              <p><strong>Options Flow and Open Interest.</strong> Tracks open-interest clusters and flow concentration to locate the strikes where positioning, not narrative, is defining the field.</p>
             </div>
-            <div class="domainCard">
-              <h3>Earnings Volatility</h3>
-              <p>
-                Studies how implied volatility builds and resolves around earnings, and when the
-                market has over- or under-priced the event.
-              </p>
+            <div class="domainRow">
+              <span class="mono">RD/05</span>
+              <p><strong>Skew and Term Structure.</strong> Watches how the market prices downside protection and time, and flags when those relationships depart from their own history.</p>
             </div>
-            <div class="domainCard">
-              <h3>Scenario Analysis</h3>
-              <p>
-                Simulates thousands of paths across price, volatility, and time to map how a
-                structure behaves away from the expected case.
-              </p>
+            <div class="domainRow">
+              <span class="mono">RD/06</span>
+              <p><strong>Event and Macro Risk.</strong> Scores scheduled catalysts, earnings, and macro releases against historical outcome distributions rather than headline sentiment.</p>
             </div>
-            <div class="domainCard">
-              <h3>Signal Agreement and Conflict</h3>
-              <p>
-                Compares independent engine outputs on the same underlying question, treating
-                disagreement as evidence rather than noise.
-              </p>
+            <div class="domainRow">
+              <span class="mono">RD/07</span>
+              <p><strong>Earnings Volatility.</strong> Studies how implied volatility builds and resolves around earnings, and when the market has over- or under-priced the event.</p>
+            </div>
+            <div class="domainRow">
+              <span class="mono">RD/08</span>
+              <p><strong>Scenario Analysis.</strong> Simulates thousands of paths across price, volatility, and time to map how a structure behaves away from the expected case.</p>
+            </div>
+            <div class="domainRow">
+              <span class="mono">RD/09</span>
+              <p><strong>Signal Agreement and Conflict.</strong> Compares independent engine outputs on the same underlying question, treating disagreement as evidence rather than noise.</p>
             </div>
           </div>
         </div>
@@ -659,23 +718,24 @@
         <div class="wrap">
           <div class="secHead rv">
             <span class="secNum">/07 · Founder</span>
-            <h2 class="secH2">
-              Built by a founder who has spent his career turning complex systems into operating
-              companies.
-            </h2>
+            <h2 class="secH2">Built by Joshua B. Smith.</h2>
+            <p class="secLede">
+              A founder who has spent his career turning complex systems into operating
+              companies, and then applied that discipline to markets.
+            </p>
           </div>
           <div class="founderGrid">
             <div class="founderBody rv rv-d1">
               <p>
-                NRGX Labs was created by <strong>Joshua B. Smith</strong>, a six-time founder and
-                operator whose work has crossed ecommerce, consumer products, supplements,
-                manufacturing, subscription commerce, artificial intelligence, and financial
-                research.
+                <strong>Joshua B. Smith</strong> is a six-time founder and operator whose work
+                has crossed ecommerce, consumer products, supplements, manufacturing,
+                subscription commerce, artificial intelligence, and financial research.
               </p>
               <p>
-                After more than 25 years building and operating companies, Joshua began
-                developing NRGX as a private research environment for examining markets through
-                software, data, and multiple independent analytical models.
+                After more than 25 years building and operating companies, he began developing
+                NRGX Labs as a private research environment for examining markets through
+                software, data, and multiple independent analytical models. He conceived the
+                system, directed the architecture, and built it.
               </p>
               <p>
                 The platform reflects the same operating philosophy behind his other systems:
@@ -760,7 +820,7 @@
             <span class="navBrandMark">NRGX<span>/Labs</span></span>
             <p>
               A private quantitative research and market-intelligence platform.
-              A Joshua B. Smith project.
+              A Joshua B. Smith research system, conceived, directed, and built by its founder.
             </p>
           </div>
           <div class="footCol">
