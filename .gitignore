@@ -46,4 +46,10 @@ data/engine14_chains.db-*
 # Edge Bake-Off research harness — generated reports/scorecards (reproducible)
 backend/research/reports/
 
+# Equity Repricing Lab — durable PIT store + raw/run artifacts (rebuilt via backfill)
+data/repricing_lab.db
+data/repricing_lab.db-*
+data/lab_raw/
+data/lab_runs/
+
 

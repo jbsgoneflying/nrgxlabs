@@ -669,6 +669,28 @@ class FeatureFlags:
     ENGINE18_TRADE_MAX_INDEX: int = 200               # tracked trades index cap
     ENGINE18_LLM_MAX_CALLS_PER_MINUTE: int = 20       # grader rate limit
 
+    # --- Equity Repricing Lab (shared PIT research infra — NOT an engine) ---
+    # All defaults are inert: no jobs, routes, or UI exist behind these until
+    # the lab's own phases land. See docs/plans/nrgx_equity_repricing_lab_
+    # implementation_plan.md for the full contract.
+    REPRICING_LAB_ENABLED: bool = False               # master switch for lab jobs/CLI wiring
+    REPRICING_LAB_SQLITE_PATH: str = "data/repricing_lab.db"
+    REPRICING_LAB_RAW_DIR: str = "data/lab_raw"       # bronze payload blobs (gzip JSON)
+    REPRICING_LAB_RUNS_DIR: str = "data/lab_runs"     # research run artifacts
+    REPRICING_LAB_UNIVERSE_MIN_PRICE: float = 5.0     # tier eligibility floor ($)
+    REPRICING_LAB_T1_MIN_ADV_USD: float = 10_000_000.0   # liquid core tier
+    REPRICING_LAB_T2_MIN_ADV_USD: float = 2_000_000.0    # asymmetric satellite tier
+    REPRICING_LAB_RISK_PCT: float = 0.25              # account risk % per position (research norm)
+    REPRICING_LAB_GAP_STRESS_Q: float = 0.90          # adverse-gap quantile for sizing
+    REPRICING_LAB_ADV_PARTICIPATION_PCT: float = 2.0  # max % of ADV20 per position
+    REPRICING_LAB_MAX_POSITIONS: int = 20             # simulator concurrency cap
+    REPRICING_LAB_SECTOR_CAP_PCT: float = 25.0        # max % of gross per sector
+    REPRICING_LAB_SHORT_ENABLED: bool = False         # hard-blocked until borrow data exists
+    REPRICING_LAB_LLM_EXTRACTION_ENABLED: bool = False
+    REPRICING_LAB_SHADOW_ONLY: bool = True            # production phase ships shadow-first
+    # Desk Brain position-intent aggregation (Phase 4; legacy path when off)
+    DESK_BRAIN_INTENTS_ENABLED: bool = False
+
     # --- LLM Integration ---
     ENABLE_LLM_NARRATIVE: bool = True
     LLM_NARRATIVE_CACHE_TTL_S: int = 1800         # 30 minutes
@@ -1167,6 +1189,23 @@ class FeatureFlags:
             ENGINE18_TRADE_TTL_S=_get_int("ENGINE18_TRADE_TTL_S", 180 * 86400),
             ENGINE18_TRADE_MAX_INDEX=_get_int("ENGINE18_TRADE_MAX_INDEX", 200),
             ENGINE18_LLM_MAX_CALLS_PER_MINUTE=_get_int("ENGINE18_LLM_MAX_CALLS_PER_MINUTE", 20),
+
+            REPRICING_LAB_ENABLED=_get_bool("REPRICING_LAB_ENABLED", False),
+            REPRICING_LAB_SQLITE_PATH=os.getenv("REPRICING_LAB_SQLITE_PATH", "data/repricing_lab.db"),
+            REPRICING_LAB_RAW_DIR=os.getenv("REPRICING_LAB_RAW_DIR", "data/lab_raw"),
+            REPRICING_LAB_RUNS_DIR=os.getenv("REPRICING_LAB_RUNS_DIR", "data/lab_runs"),
+            REPRICING_LAB_UNIVERSE_MIN_PRICE=_get_float("REPRICING_LAB_UNIVERSE_MIN_PRICE", 5.0),
+            REPRICING_LAB_T1_MIN_ADV_USD=_get_float("REPRICING_LAB_T1_MIN_ADV_USD", 10_000_000.0),
+            REPRICING_LAB_T2_MIN_ADV_USD=_get_float("REPRICING_LAB_T2_MIN_ADV_USD", 2_000_000.0),
+            REPRICING_LAB_RISK_PCT=_get_float("REPRICING_LAB_RISK_PCT", 0.25),
+            REPRICING_LAB_GAP_STRESS_Q=_get_float("REPRICING_LAB_GAP_STRESS_Q", 0.90),
+            REPRICING_LAB_ADV_PARTICIPATION_PCT=_get_float("REPRICING_LAB_ADV_PARTICIPATION_PCT", 2.0),
+            REPRICING_LAB_MAX_POSITIONS=_get_int("REPRICING_LAB_MAX_POSITIONS", 20),
+            REPRICING_LAB_SECTOR_CAP_PCT=_get_float("REPRICING_LAB_SECTOR_CAP_PCT", 25.0),
+            REPRICING_LAB_SHORT_ENABLED=_get_bool("REPRICING_LAB_SHORT_ENABLED", False),
+            REPRICING_LAB_LLM_EXTRACTION_ENABLED=_get_bool("REPRICING_LAB_LLM_EXTRACTION_ENABLED", False),
+            REPRICING_LAB_SHADOW_ONLY=_get_bool("REPRICING_LAB_SHADOW_ONLY", True),
+            DESK_BRAIN_INTENTS_ENABLED=_get_bool("DESK_BRAIN_INTENTS_ENABLED", False),
 
             ENABLE_LLM_NARRATIVE=_get_bool("ENABLE_LLM_NARRATIVE", False),
             LLM_NARRATIVE_CACHE_TTL_S=_get_int("LLM_NARRATIVE_CACHE_TTL_S", 1800),

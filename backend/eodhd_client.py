@@ -364,6 +364,80 @@ class EodhdClient:
         return self._get(url, params)
 
     # -----------------------------------------------------------------------
+    # Public API: Corporate Actions (splits / dividends)
+    # -----------------------------------------------------------------------
+
+    def get_splits(
+        self,
+        symbol: str,
+        *,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> EodhdResponse:
+        """Historical stock splits for a single ticker.
+
+        GET /api/splits/{SYMBOL}?from=YYYY-MM-DD&to=YYYY-MM-DD&fmt=json
+        Each row: date, split (e.g. "10.000000/1.000000").
+        1 API call per request.
+        """
+        url = f"{self._base_url}/splits/{symbol}"
+        params: Dict[str, Any] = {"fmt": "json"}
+        if from_date:
+            params["from"] = from_date
+        if to_date:
+            params["to"] = to_date
+        return self._get(url, params)
+
+    def get_dividends(
+        self,
+        symbol: str,
+        *,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> EodhdResponse:
+        """Historical dividends for a single ticker.
+
+        GET /api/div/{SYMBOL}?from=YYYY-MM-DD&to=YYYY-MM-DD&fmt=json
+        Each row: date (ex-date), declarationDate, recordDate, paymentDate,
+        period, value, unadjustedValue, currency.
+        1 API call per request.
+        """
+        url = f"{self._base_url}/div/{symbol}"
+        params: Dict[str, Any] = {"fmt": "json"}
+        if from_date:
+            params["from"] = from_date
+        if to_date:
+            params["to"] = to_date
+        return self._get(url, params)
+
+    # -----------------------------------------------------------------------
+    # Public API: Exchange Symbol Lists (incl. delisted)
+    # -----------------------------------------------------------------------
+
+    def get_exchange_symbols(
+        self,
+        exchange: str = "US",
+        *,
+        delisted: bool = False,
+        security_type: Optional[str] = None,
+    ) -> EodhdResponse:
+        """List all tickers on an exchange — active or delisted.
+
+        GET /api/exchange-symbol-list/{EXCHANGE}?fmt=json[&delisted=1][&type=...]
+        Each row: Code, Name, Country, Exchange, Currency, Type, Isin.
+        ``delisted=True`` returns the delisted set (survivorship-safe universe
+        construction depends on this endpoint's entitlement — probe before
+        relying on it). 1 API call per request.
+        """
+        url = f"{self._base_url}/exchange-symbol-list/{exchange}"
+        params: Dict[str, Any] = {"fmt": "json"}
+        if delisted:
+            params["delisted"] = 1
+        if security_type:
+            params["type"] = security_type
+        return self._get(url, params)
+
+    # -----------------------------------------------------------------------
     # Public API: US Treasury Rates
     # -----------------------------------------------------------------------
 
