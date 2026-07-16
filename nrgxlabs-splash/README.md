@@ -8,7 +8,7 @@ backend, no JS framework.
 
 Founder narrative lives on [joshuabsmith.io](https://joshuabsmith.io).
 This page speaks as quantitative research infrastructure built by
-Joshua B. Smith — part product site, part quiet founder proof.
+Joshua b Smith — part product site, part quiet founder proof.
 
 ## Live page
 
@@ -36,7 +36,7 @@ for the full domain migration runbook.
 7. **/05 Research domains** — three featured domains with technical
    SVG visuals + a compact index of six more
 8. **/06 Discipline** — research philosophy
-9. **/07 Founder** — Joshua B. Smith + operator record panel
+9. **/07 Founder** — Joshua b Smith + operator record panel
 10. **/08 Ecosystem** — RavenOS · InjuryOS · Versefold · joshuabsmith.io
 11. **Closing + footer** — editorial close, disclaimer, ecosystem links
 

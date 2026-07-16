@@ -600,6 +600,13 @@
   height: auto;
 }
 
+/* Cap the topology diagram so its mono labels stay crisp on wide
+   monitors instead of scaling up with the container. */
+.archPanel .archSvg {
+  max-width: 1060px;
+  margin: 0 auto;
+}
+
 /* Mobile fallback flow (hidden on desktop) */
 .archStack {
   display: none;
@@ -612,6 +619,9 @@
   letter-spacing: 0.05em;
   color: var(--txt-mute);
   line-height: 1.8;
+  max-width: 1060px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 /* ---------- /04 Engineering depth ---------- */
