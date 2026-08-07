@@ -848,9 +848,13 @@ class TestBacktestHarness:
         assert "byGrade" in result
         assert "byBucket" in result
         assert "byPlaybook" in result
+        assert "byDow" in result
+        assert "byPlaybookDow" in result
         assert result["params"]["tickersTested"] == 2
+        assert result["params"]["entryModel"] == "trigger"
         # Overall must always carry the standard stat keys.
-        for k in ("signals", "triggered", "winRate", "avgR", "expectancy"):
+        for k in ("signals", "triggered", "winRate", "avgR", "expectancy",
+                  "avgHoldBars", "avgHoldWin", "avgHoldLoss", "avgPctReturn"):
             assert k in result["overall"]
         # Every playbook cohort that fired must carry the same stat keys, and
         # only known playbooks may appear.
@@ -858,6 +862,98 @@ class TestBacktestHarness:
             assert pb in ("kijun_pullback", "tk_cross", "kumo_breakout")
             for k in ("signals", "triggered", "winRate", "avgR", "expectancy"):
                 assert k in stats
+
+    def test_close_entry_model_actionable_only(self):
+        """entry_model=close: every signal is entered (no expiry-by-trigger),
+        buckets contain only 'actionable', and the entry model is reported."""
+        bars_by_ticker = {
+            "UP": make_bars(160, trend="up"),
+            "DOWN": make_bars(160, trend="down"),
+        }
+        result = backtest_from_bars(
+            bars_by_ticker, min_score=0.0, warmup=80, entry_model="close"
+        )
+        assert result["params"]["entryModel"] == "close"
+        assert set(result["byBucket"]).issubset({"actionable"})
+        o = result["overall"]
+        # Close entry has no trigger window: entered == signals.
+        assert o["triggered"] == o["signals"]
+        if o["signals"]:
+            assert o["avgPctReturn"] is not None
+            for dow in result["byDow"]:
+                assert dow in ("Mon", "Tue", "Wed", "Thu", "Fri")
+
+
+class TestCloseEntryOutcome:
+    """Close-of-candle entry: risk anchored to the actual fill (the close)."""
+
+    def _fwd(self, specs):
+        """specs: list of (high, low, close) forward bars."""
+        return [
+            DailyBar(trade_date=f"2024-06-{i+3:02d}", open=c, high=h, low=l,
+                     close=c, volume=1e6, vwap=None)
+            for i, (h, l, c) in enumerate(specs)
+        ]
+
+    def test_target_hit_r_and_pct(self):
+        from backend.engine4_backtest import evaluate_close_entry_outcome
+        out = evaluate_close_entry_outcome(
+            direction="bullish", entry_price=100.0, stop_loss=95.0, target_1=110.0,
+            forward_bars=self._fwd([(104, 99, 103), (111, 102, 110)]),
+        )
+        assert out["status"] == "target_hit"
+        assert out["rMultiple"] == pytest.approx(2.0)   # 10 gain / 5 risk
+        assert out["pctReturn"] == pytest.approx(10.0)
+        assert out["barsHeld"] == 2
+
+    def test_stop_and_pct(self):
+        from backend.engine4_backtest import evaluate_close_entry_outcome
+        out = evaluate_close_entry_outcome(
+            direction="bullish", entry_price=100.0, stop_loss=95.0, target_1=110.0,
+            forward_bars=self._fwd([(101, 94.5, 96)]),
+        )
+        assert out["status"] == "stopped"
+        assert out["rMultiple"] == -1.0
+        assert out["pctReturn"] == pytest.approx(-5.0)
+        assert out["barsHeld"] == 1
+
+    def test_same_bar_conflict_assumes_stop_first(self):
+        from backend.engine4_backtest import evaluate_close_entry_outcome
+        out = evaluate_close_entry_outcome(
+            direction="bullish", entry_price=100.0, stop_loss=95.0, target_1=110.0,
+            forward_bars=self._fwd([(111, 94, 105)]),  # hits both — stop wins
+        )
+        assert out["status"] == "stopped"
+
+    def test_time_stop_marks_to_close(self):
+        from backend.engine4_backtest import evaluate_close_entry_outcome
+        fwd = self._fwd([(102, 98, 101)] * 12)  # never resolves
+        out = evaluate_close_entry_outcome(
+            direction="bullish", entry_price=100.0, stop_loss=95.0, target_1=110.0,
+            forward_bars=fwd, max_hold=10,
+        )
+        assert out["status"] == "triggered"
+        assert out["barsHeld"] == 10
+        assert out["rMultiple"] == pytest.approx(0.2)   # +1.0 close / 5 risk
+        assert out["pctReturn"] == pytest.approx(1.0)
+
+    def test_bearish_mirror(self):
+        from backend.engine4_backtest import evaluate_close_entry_outcome
+        out = evaluate_close_entry_outcome(
+            direction="bearish", entry_price=100.0, stop_loss=105.0, target_1=90.0,
+            forward_bars=self._fwd([(101, 89.5, 91)]),
+        )
+        assert out["status"] == "target_hit"
+        assert out["rMultiple"] == pytest.approx(2.0)
+        assert out["pctReturn"] == pytest.approx(10.0)
+
+    def test_degenerate_risk_not_entered(self):
+        from backend.engine4_backtest import evaluate_close_entry_outcome
+        out = evaluate_close_entry_outcome(
+            direction="bullish", entry_price=100.0, stop_loss=100.0, target_1=110.0,
+            forward_bars=self._fwd([(111, 99, 110)]),
+        )
+        assert out["triggered"] is False
 
 
 class TestDeskTracker:

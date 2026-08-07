@@ -390,11 +390,14 @@ def engine4_ichimoku_backtest(
     min_score: float = Query(75.0, ge=0, le=100, description="Min score to include"),
     max_tickers: int = Query(40, ge=1, le=120, description="Universe cap (runtime)"),
     tickers: Optional[str] = Query(None, description="Comma-separated tickers (defaults to universe sample)"),
+    entry_model: str = Query("trigger", description="Entry model: 'trigger' (stop order at trigger) or 'close' (filled at signal-bar close, actionable-only — the Close Preview workflow)"),
 ):
     """Engine 4: walk-forward continuation backtest (measured edge).
 
-    Win-rate / R / expectancy / MAE-MFE broken out by grade AND by freshness
-    bucket — so the desk can see whether 'structure' actually pays.
+    Win-rate / R / expectancy / MAE-MFE broken out by grade, freshness
+    bucket, playbook, AND entry day-of-week — plus average hold duration —
+    so the desk can see whether 'structure' actually pays and whether a
+    Friday close-entry is a good idea.
     """
     import datetime as _dt
 
@@ -412,6 +415,7 @@ def engine4_ichimoku_backtest(
             from backend.universe import load_universe_sp500_and_nasdaq100
             universe = load_universe_sp500_and_nasdaq100()
 
+        em = "close" if str(entry_model).strip().lower() == "close" else "trigger"
         from backend.engine4_backtest import backtest_ichimoku
         result = backtest_ichimoku(
             tickers=universe,
@@ -419,6 +423,7 @@ def engine4_ichimoku_backtest(
             end=end_d,
             min_score=min_score,
             max_tickers=max_tickers,
+            entry_model=em,
         )
         return result
     except HTTPException:
