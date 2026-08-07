@@ -296,9 +296,11 @@ function renderSignalCard(signal, isStructure = false) {
       freshnessHtml += `<span class="freshBadge positive">${fmt2(kijunDist)} ATR from Kijun</span>`;
     }
   } else {
-    // Structure - lead with distance-to-actionable, then the reasons
+    // Structure - lead with distance-to-actionable, then the reasons.
+    // The distance is an internal ranking score (bars + ATR past the limits);
+    // beyond ~5 it stops meaning "approaching", so don't render it.
     const dist = freshness.distanceToActionable;
-    if (dist !== null && dist !== undefined) {
+    if (dist !== null && dist !== undefined && dist <= 5) {
       freshnessHtml += `<span class="freshBadge positive">≈${fmt2(dist)} to actionable</span>`;
     }
     const reasons = freshness.reasons || [];
@@ -405,8 +407,8 @@ function renderSignalCard(signal, isStructure = false) {
           <span class="value">${fmt2(ichimoku.kijun)}</span>
         </div>
         <div class="ichimokuValue">
-          <span class="label">Cloud</span>
-          <span class="value">${ichimoku.cloudBias || "—"}</span>
+          <span class="label">${playbook === "kumo_breakout" ? "Cloud (fwd)" : "Cloud"}</span>
+          <span class="value">${(playbook === "kumo_breakout" ? ichimoku.futureCloudBias : ichimoku.cloudBias) || ichimoku.cloudBias || "—"}</span>
         </div>
       </div>
       ${renderContextRow(signal)}

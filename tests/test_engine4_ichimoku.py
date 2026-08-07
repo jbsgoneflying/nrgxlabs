@@ -1330,6 +1330,31 @@ class TestTkCrossDetector:
         assert fresh["bucket"] == "structure"
         assert any("TK cross" in r for r in fresh["reasons"])
 
+    def test_ancient_cross_is_dropped(self):
+        """CRL regression (2026-08-07): a 43-bar-old cross is just a trending
+        stock, not a setup approaching actionability — reject, don't surface."""
+        bars = make_bars(80)
+        ctx = make_context(
+            tenkan_series=[105.0] * 36 + [106.5] * 44,  # cross 43 bars ago
+        )
+        det = detect_tk_cross_setup(bars, ticker="TEST", context=ctx)
+        assert det["hasSignal"] is True
+        fresh = det["freshnessOverride"]
+        assert fresh["bucket"] == "rejected"
+        assert any("stale beyond watch window" in r for r in fresh["reasons"])
+
+    def test_ancient_cross_stays_dropped_when_also_extended(self):
+        """The extension check must not downgrade a stale-event rejection
+        back to structure."""
+        bars = make_bars(80)
+        ctx = make_context(
+            closes=[110.0] * 80,  # 4 ATR from Kijun → extended too
+            tenkan_series=[105.0] * 36 + [106.5] * 44,
+        )
+        det = detect_tk_cross_setup(bars, ticker="TEST", context=ctx)
+        fresh = det["freshnessOverride"]
+        assert fresh["bucket"] == "rejected"
+
     def test_wrong_side_of_cloud_rejected(self):
         """Price inside the cloud → trend regime invalid → no strong cross."""
         bars = make_bars(80)
@@ -1388,6 +1413,18 @@ class TestKumoBreakoutDetector:
         fresh = det["freshnessOverride"]
         assert fresh["bucket"] == "actionable"
         assert fresh["barsSinceReclaim"] == 1  # bars since the breakout
+
+    def test_forward_cloud_bias_carried_on_signal(self):
+        """Inception cards display the forward twist, not the lagging current
+        cloud bias — the signal must carry both."""
+        bars = make_bars(80)
+        det = detect_kumo_breakout_setup(bars, ticker="TEST", context=self._ctx())
+        sig = det["signal"]
+        assert sig["cloudBias"] == "bearish"        # current cloud lags
+        assert sig["futureCloudBias"] == "bullish"  # forward twist agrees with breakout
+        built = build_ichimoku_signal(ticker="TEST", detection=det, bars=bars)
+        d = signal_to_dict(built)
+        assert d["ichimoku"]["futureCloudBias"] == "bullish"
 
     def test_stop_rides_far_cloud_edge(self):
         """Bull breakout stop anchors below Senkou B (cloud bottom), not Kijun."""

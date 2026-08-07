@@ -65,6 +65,7 @@ RESEARCH_PLAYBOOKS = (PLAYBOOK_TK_CROSS, PLAYBOOK_KUMO_BREAKOUT)
 # must be recent for the setup to be actionable, and price must not already
 # be extended past the trigger.
 PLAYBOOK_EVENT_MAX_AGE_BARS = 3      # cross/breakout <= 3 bars ago = actionable
+PLAYBOOK_EVENT_STRUCTURE_MAX_BARS = 10  # older than this the event is dead — drop, not "approaching"
 KUMO_FRESH_LOOKBACK = 10             # bars before breakout that must be non-breakout
 PLAYBOOK_EXTENSION_MAX_ATR = 1.5     # mirror of FRESHNESS_KIJUN_DISTANCE_ATR
 
@@ -219,6 +220,7 @@ class IchimokuSignal:
 
     # --- Playbook expansion (2026-08) ---
     playbook: str = PLAYBOOK_KIJUN_PULLBACK        # which Ichimoku playbook fired
+    future_cloud_bias: Optional[str] = None        # 26-bar-forward cloud bias (inception context)
 
 
 def _ramp(x: Optional[float], lo: float, hi: float) -> float:
@@ -1720,13 +1722,22 @@ def _playbook_freshness(
         if event_age is None:
             bucket = "structure"
             reasons.append(f"No {event_name} found")
+        elif event_age > PLAYBOOK_EVENT_STRUCTURE_MAX_BARS:
+            # The trigger event is ancient — this is just a trending stock,
+            # not a setup "approaching" actionability. Drop it from the page.
+            bucket = "rejected"
+            reasons.append(
+                f"{event_name} {event_age} bars ago — stale beyond watch window "
+                f"({PLAYBOOK_EVENT_STRUCTURE_MAX_BARS})"
+            )
         elif event_age > PLAYBOOK_EVENT_MAX_AGE_BARS:
             bucket = "structure"
             reasons.append(
                 f"{event_name} {event_age} bars ago (max {PLAYBOOK_EVENT_MAX_AGE_BARS})"
             )
         if extension_atr is not None and extension_atr > PLAYBOOK_EXTENSION_MAX_ATR:
-            bucket = "structure"
+            if bucket != "rejected":
+                bucket = "structure"
             reasons.append(
                 f"Extended {extension_atr:.1f} ATR {extension_name} (max {PLAYBOOK_EXTENSION_MAX_ATR})"
             )
@@ -1863,6 +1874,7 @@ def detect_tk_cross_setup(
         "cloudTop": cloud.get("cloudTop"),
         "cloudBottom": cloud.get("cloudBottom"),
         "cloudBias": cloud.get("cloudBias"),
+        "futureCloudBias": (context["cloud_future"] or {}).get("cloudBias"),
         "cloudThickness": cloud.get("thickness"),
         "close": close,
         "closePosition": _current_close_position(bars[-1]),
@@ -2031,6 +2043,7 @@ def detect_kumo_breakout_setup(
         "cloudTop": cloud_top,
         "cloudBottom": cloud_bottom,
         "cloudBias": cloud.get("cloudBias"),
+        "futureCloudBias": future_bias,
         "cloudThickness": cloud.get("thickness"),
         "close": close,
         "closePosition": _current_close_position(bars[-1]),
@@ -2606,6 +2619,7 @@ def build_ichimoku_signal(
         beta=beta,
         corr=corr,
         playbook=playbook,
+        future_cloud_bias=signal_data.get("futureCloudBias"),
     )
 
 
@@ -2625,6 +2639,7 @@ def signal_to_dict(signal: IchimokuSignal) -> Dict[str, Any]:
             "cloudTop": signal.cloud_top,
             "cloudBottom": signal.cloud_bottom,
             "cloudBias": signal.cloud_bias,
+            "futureCloudBias": signal.future_cloud_bias,
             "cloudThickness": signal.cloud_thickness,
         },
         "pattern": {
