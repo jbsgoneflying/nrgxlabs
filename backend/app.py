@@ -10,35 +10,21 @@ import time
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Form
+from fastapi import FastAPI, Request, Form
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.config import get_flags
-
+# Ichimoku-only desk (2026-08-07): every other engine is offline in full.
+# Only the routers the /ichimoku page needs are imported and mounted:
+#   - engine4_ichimoku : the scanner itself (EODHD-backed)
+#   - front_layer      : card-insight LLM commentary (OpenAI)
+#   - desk_insight     : desk insight panel (OpenAI)
+#   - raven_chat       : /api/chat advisor (OpenAI)
 from backend.routers import (
-    engine1_breach,
-    engine2_spx_ic,
-    engine2b_flex_ic,
-    engine3_red_dog,
     engine4_ichimoku,
-    engine5_lead_lag,
-    engine7_pairs,
-    engine8_post_event,
-    engine9_credit,
-    engine12_vix_fade,
-    engine13_gap_regime,
-    engine14_ic_scenario,
-    engine15_earnings_ic,
-    calendar,
-    market_intel,
     front_layer,
     raven_chat,
     desk_insight,
-    desk_brain,
-    ai_capex,
-    engine18_pead,
-    equity_repricing,
 )
 
 try:
@@ -134,8 +120,6 @@ def _path_is_public(path: str) -> bool:
         return True
     if p.startswith("/.well-known/acme-challenge/"):
         return True
-    if p == "/api/engine7-pairs/nightly-review":
-        return True
     return False
 
 
@@ -167,7 +151,7 @@ async def invite_gate(request: Request, call_next):
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(next: str | None = None):
-    nxt = str(next or "/")
+    nxt = str(next or "/ichimoku")
     return HTMLResponse(
         f"""
 <!doctype html>
@@ -223,15 +207,15 @@ def login_page(next: str | None = None):
 
 
 @app.post("/login")
-def login_submit(code: str = Form(...), next: str = Form("/")):
+def login_submit(code: str = Form(...), next: str = Form("/ichimoku")):
     if not _auth_enabled():
-        return RedirectResponse(url=str(next or "/"), status_code=302)
+        return RedirectResponse(url=str(next or "/ichimoku"), status_code=302)
     if str(code or "").strip() != INVITE_CODE:
         return RedirectResponse(url="/login?error=1", status_code=302)
 
     now = time.time()
     token = _sign_token({"v": 1, "exp": now + float(AUTH_COOKIE_TTL_S)})
-    resp = RedirectResponse(url=str(next or "/"), status_code=302)
+    resp = RedirectResponse(url=str(next or "/ichimoku"), status_code=302)
     secure = str(os.getenv("COOKIE_SECURE") or "").strip().lower() in ("1", "true", "yes", "y", "on")
     resp.set_cookie(
         AUTH_COOKIE_NAME,
@@ -263,21 +247,41 @@ if STATIC_DIR.exists():
 
 @app.get("/")
 def index():
-    """Serve Market Intelligence as the home page."""
-    mi_path = STATIC_DIR / "market-intelligence.html"
-    if not mi_path.exists():
-        raise HTTPException(status_code=500, detail="Missing static/market-intelligence.html")
-    return FileResponse(str(mi_path))
+    """The desk is Ichimoku-only: the app root lands on the scanner."""
+    return RedirectResponse(url="/ichimoku", status_code=302)
 
 
-@app.get("/breach")
-def breach_page():
-    return FileResponse(str(STATIC_DIR / "index.html"))
+# Retired engine pages (Ichimoku-only desk). Old bookmarks and deep links
+# land on the scanner instead of a 404. The API routers behind these pages
+# are no longer mounted, so the engines are offline in full.
+_RETIRED_PAGES = (
+    "/breach",
+    "/calendar",
+    "/spx",
+    "/red-dog",
+    "/desk-brain",
+    "/ai-capex",
+    "/earnings-drift",
+    "/equity-repricing",
+    "/news-risk",
+    "/lead-lag",
+    "/pairs",
+    "/post-event",
+    "/credit-stress",
+    "/vix-fade",
+    "/gap-regime",
+    "/ic-scenario",
+    "/compare",
+    "/market-intelligence",
+)
 
 
-@app.get("/calendar")
-def calendar_page():
-    return FileResponse(str(STATIC_DIR / "earnings-calendar.html"))
+def _redirect_to_desk():
+    return RedirectResponse(url="/ichimoku", status_code=302)
+
+
+for _page in _RETIRED_PAGES:
+    app.add_api_route(_page, _redirect_to_desk, methods=["GET"], include_in_schema=False)
 
 
 @app.get("/api/health")
@@ -297,22 +301,6 @@ def robots_txt() -> str:
     return _ROBOTS_TXT
 
 
-@app.get("/api/flags")
-def flags():
-    f = get_flags()
-    return {
-        "ENABLE_BENZINGA": bool(f.ENABLE_BENZINGA),
-        "BENZINGA_ENABLE_EVENT_RISK": bool(f.BENZINGA_ENABLE_EVENT_RISK),
-        "ENABLE_ENGINE2_SPX_IC": bool(f.ENABLE_ENGINE2_SPX_IC),
-        "ENABLE_E2B_FLEX_EXPIRY": bool(getattr(f, "ENABLE_E2B_FLEX_EXPIRY", False)),
-        "ENGINE2_DEFAULT_YEARS": int(f.ENGINE2_LOOKBACK_YEARS_DEFAULT),
-        "ENGINE2_DEFAULT_EM_MULTS": str(f.ENGINE2_EM_MULTS),
-        "ENGINE2_DEFAULT_WING_PTS": str(f.ENGINE2_WING_WIDTH_PTS),
-        "ENGINE2_MACRO_MULTIPLIER_CAP": float(f.ENGINE2_MACRO_MULTIPLIER_CAP),
-        "ENGINE2_REQUIRE_ORATS_DAILY_VWAP": bool(getattr(f, "ENGINE2_REQUIRE_ORATS_DAILY_VWAP", False)),
-    }
-
-
 @app.get("/privacy-policy")
 def privacy_policy_page():
     return FileResponse(str(STATIC_DIR / "privacy-policy.html"))
@@ -323,169 +311,14 @@ def fasting_guide_support_page():
     return FileResponse(str(STATIC_DIR / "support-fasting-guide.html"))
 
 
-@app.get("/spx")
-def spx_page():
-    return FileResponse(str(STATIC_DIR / "spx.html"))
-
-
-@app.get("/red-dog")
-def red_dog_page():
-    return FileResponse(str(STATIC_DIR / "red-dog.html"))
-
-
 @app.get("/ichimoku")
 def ichimoku_page():
     return FileResponse(str(STATIC_DIR / "ichimoku.html"))
 
 
-@app.get("/desk-brain")
-def desk_brain_page():
-    return FileResponse(str(STATIC_DIR / "desk-brain.html"))
+# ── Include API routers (Ichimoku-only desk) ──
 
-
-@app.get("/ai-capex")
-def ai_capex_page():
-    # no-cache (not no-store): the browser still caches but must revalidate via
-    # ETag on each load, so inline-CSS/markup changes ship immediately (cheap
-    # 304 when unchanged) instead of being pinned to a heuristically-cached copy.
-    return FileResponse(
-        str(STATIC_DIR / "ai-capex.html"),
-        headers={"Cache-Control": "no-cache"},
-    )
-
-
-@app.get("/earnings-drift")
-def earnings_drift_page():
-    fl = get_flags()
-    if not getattr(fl, "ENABLE_ENGINE18", True):
-        raise HTTPException(status_code=404, detail="Engine 18 disabled")
-    return FileResponse(
-        str(STATIC_DIR / "earnings-drift.html"),
-        headers={"Cache-Control": "no-cache"},
-    )
-
-
-@app.get("/equity-repricing")
-def equity_repricing_page():
-    """Equity Repricing Lab shadow scout — gated by REPRICING_LAB_ENABLED."""
-    fl = get_flags()
-    if not getattr(fl, "REPRICING_LAB_ENABLED", False):
-        return HTMLResponse(
-            "<!doctype html><title>Lab</title><p>Equity Repricing Lab is disabled.</p>",
-            status_code=404,
-        )
-    return FileResponse(
-        str(STATIC_DIR / "equity-repricing.html"),
-        headers={"Cache-Control": "no-cache"},
-    )
-
-
-@app.get("/news-risk")
-def news_risk_page():
-    return FileResponse(str(STATIC_DIR / "news-risk.html"))
-
-
-@app.get("/lead-lag")
-def lead_lag_page():
-    return FileResponse(str(STATIC_DIR / "engine5.html"))
-
-
-@app.get("/pairs")
-def pairs_page():
-    return FileResponse(str(STATIC_DIR / "pairs.html"))
-
-
-@app.get("/post-event")
-def post_event_page():
-    return FileResponse(str(STATIC_DIR / "post-event.html"))
-
-
-@app.get("/credit-stress")
-def credit_stress_page():
-    fl = get_flags()
-    if not getattr(fl, "ENABLE_ENGINE9_CREDIT_STRESS", True):
-        raise HTTPException(status_code=404, detail="Engine 9 disabled")
-    return FileResponse(str(STATIC_DIR / "engine9.html"))
-
-
-@app.get("/vix-fade")
-def vix_fade_page():
-    fl = get_flags()
-    if not getattr(fl, "ENABLE_ENGINE12_VIX_FADE", True):
-        raise HTTPException(status_code=404, detail="Engine 12 disabled")
-    return FileResponse(str(STATIC_DIR / "vix-fade.html"))
-
-
-@app.get("/gap-regime")
-def gap_regime_page():
-    fl = get_flags()
-    if not getattr(fl, "ENABLE_ENGINE13_GAP_REGIME", True):
-        raise HTTPException(status_code=404, detail="Engine 13 disabled")
-    return FileResponse(str(STATIC_DIR / "gap-regime.html"))
-
-
-@app.get("/ic-scenario")
-def ic_scenario_page():
-    # E2/E14 single-surface desk migration:
-    # keep Engine 14 APIs available, but retire the standalone /ic-scenario page UX.
-    return RedirectResponse(url="/spx", status_code=302)
-
-
-# NOTE: The /earnings-ic page was retired 2026-05-20 alongside the
-# Wing Decision Console refactor. The /api/earnings-ic/* routes
-# (registered via include_router(engine15_earnings_ic)) stay alive
-# because the simulator powers E1 Live Review's projection panel
-# server-side and we want existing deep-link integrations and any
-# external callers to keep working. The static HTML/JS no longer
-# exists, so the page route would 500 if we tried to serve it.
-
-
-@app.get("/compare")
-def serve_compare():
-    return FileResponse(str(STATIC_DIR / "compare.html"))
-
-
-@app.get("/market-intelligence")
-def market_intelligence_page():
-    return FileResponse(str(STATIC_DIR / "market-intelligence.html"))
-
-
-# ── Include API routers ──
-
-app.include_router(engine1_breach.router)
-app.include_router(engine2_spx_ic.router)
-app.include_router(engine2b_flex_ic.router)
-app.include_router(engine3_red_dog.router)
 app.include_router(engine4_ichimoku.router)
-app.include_router(engine5_lead_lag.router)
-app.include_router(engine7_pairs.router)
-app.include_router(engine8_post_event.router)
-app.include_router(engine9_credit.router)
-app.include_router(engine12_vix_fade.router)
-app.include_router(engine13_gap_regime.router)
-app.include_router(engine14_ic_scenario.router)
-app.include_router(engine15_earnings_ic.router)
-app.include_router(calendar.router)
-app.include_router(market_intel.router)
 app.include_router(front_layer.router)
 app.include_router(raven_chat.router)
 app.include_router(desk_insight.router)
-app.include_router(desk_brain.router)
-app.include_router(ai_capex.router)
-app.include_router(engine18_pead.router)
-app.include_router(equity_repricing.router)
-
-
-# ── Startup: rebuild trade indexes if they expired while the app was down ──
-
-@app.on_event("startup")
-def _rebuild_trade_indexes():
-    try:
-        from backend.engine2_trades import rebuild_index_if_missing as e2_rebuild
-        from backend.e1_earnings_trades import rebuild_index_if_missing as e1_rebuild
-        from backend.engine18.trades import rebuild_index_if_missing as e18_rebuild
-        e2_rebuild()
-        e1_rebuild()
-        e18_rebuild()
-    except Exception:
-        pass

@@ -22,23 +22,12 @@ STATIC_DIR = REPO_ROOT / "static"
 # Map each page HTML to the engine its data-insight slugs should resolve
 # against. Entries are ("html_filename", "engine_id"). Pages missing from
 # this map are ignored (they're expected not to have data-insight markers).
+#
+# Ichimoku-only desk (2026-08-07): the other engine pages are no longer
+# served (their routes redirect to /ichimoku), so only the live page is
+# held to parity here.
 PAGE_TO_ENGINE: Dict[str, str] = {
-    "index.html":              "e1",
-    "spx.html":                "e2",
-    "red-dog.html":            "e3",
-    "ichimoku.html":           "e4",
-    "engine5.html":            "e5",
-    "pairs.html":              "e7",
-    "post-event.html":         "e8",
-    "engine9.html":            "e9",
-    "news-risk.html":          "e11",
-    "vix-fade.html":           "e12",
-    "gap-regime.html":         "e13",
-    "ic-scenario.html":        "e14",
-    "earnings-ic.html":        "e15",
-    "calendar.html":           "calendar",
-    "compare.html":            "compare",
-    "market-intelligence.html": "market-intel",
+    "ichimoku.html": "e4",
 }
 
 
@@ -89,17 +78,16 @@ def test_every_page_in_registry_has_html():
         assert (STATIC_DIR / page).exists(), f"missing {page}"
 
 
-def test_at_least_seven_engine_pages_have_markers():
-    """After this follow-up PR, the bulk of engine pages should carry markers.
-    Regression guard: if a refactor strips all markers, this trips."""
+def test_live_pages_have_markers():
+    """Regression guard: if a refactor strips all markers, this trips."""
     pages_with_markers = 0
     for page in PAGE_TO_ENGINE:
         slugs = _extract_slugs(STATIC_DIR / page)
         if slugs:
             pages_with_markers += 1
-    assert pages_with_markers >= 12, (
-        f"expected >=12 pages with data-insight markers; got {pages_with_markers}. "
-        "Did a refactor strip them?"
+    assert pages_with_markers >= 1, (
+        f"expected every live desk page to carry data-insight markers; "
+        f"got {pages_with_markers}. Did a refactor strip them?"
     )
 
 
