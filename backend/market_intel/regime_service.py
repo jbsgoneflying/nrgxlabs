@@ -33,6 +33,7 @@ from backend.market_intel.factors import (
     FACTOR_KEYS,
     build_factor_snapshot,
     MISSING as FACTOR_MISSING,
+    OK as FACTOR_OK,
 )
 from backend.market_intel.regime_model import (
     MODEL_VERSION,
@@ -81,6 +82,34 @@ def _insufficient_floor() -> int:
 
 def _factor_stale_days() -> int:
     return _cfg_int("MI_FACTOR_STALE_DAYS", 1)
+
+
+def _stress_composite_floor() -> float:
+    """Signed-composite floor for the 'Stressed' label sanity guard.
+
+    The HMM's diagonal-Gaussian states key on observation *magnitude*: a
+    large factor move in the FAVORABLE direction (e.g. credit spreads
+    tightening 2.5 sigma) can land in the fat-variance 'Stressed' state at
+    high confidence. Factor z's are sign-normalised (higher = more stress),
+    so a genuine stress day has a positive composite. If the model says
+    'Stressed' while the composite is at/below this floor, the label is
+    demoted to 'Transitional'.
+    """
+    try:
+        return float(os.getenv("MI_STRESS_COMPOSITE_FLOOR", "0.25"))
+    except (TypeError, ValueError):
+        return 0.25
+
+
+def _model_max_age_days() -> int:
+    """Calibrated models older than this are ignored (<=0 disables).
+
+    With the desk running Ichimoku-only, the recalibration surfaces
+    (calibrate endpoint / DMS cron) are offline — a model persisted in
+    Redis would otherwise be served forever, drifting further from the
+    live factor distribution.
+    """
+    return _cfg_int("MI_MODEL_MAX_AGE_DAYS", 30)
 
 
 # ---------------------------------------------------------------------------
@@ -139,8 +168,25 @@ def clear_cache() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _model_is_fresh(model: CalibratedModel) -> bool:
+    """False when a persisted model is older than ``MI_MODEL_MAX_AGE_DAYS``."""
+    max_age = _model_max_age_days()
+    if max_age <= 0:
+        return True
+    raw = str(getattr(model, "calibrated_at", "") or "").strip().rstrip("Z")
+    if not raw:
+        return False
+    try:
+        cal = dt.datetime.fromisoformat(raw)
+    except ValueError:
+        return False
+    if cal.tzinfo is None:
+        cal = cal.replace(tzinfo=dt.timezone.utc)
+    return (dt.datetime.now(dt.timezone.utc) - cal) <= dt.timedelta(days=max_age)
+
+
 def _load_calibrated_model() -> tuple[CalibratedModel, str]:
-    """Return (model, provenance) tuple."""
+    """Return (model, provenance) tuple. Stale persisted models are skipped."""
     global _model_cache, _model_cache_at
     with _model_lock:
         if _model_cache and (time.time() - _model_cache_at) < _MODEL_MEMO_TTL_S:
@@ -153,20 +199,30 @@ def _load_calibrated_model() -> tuple[CalibratedModel, str]:
         if store is not None:
             rmodel = model_from_redis(store, _redis_key())
             if rmodel:
-                with _model_lock:
-                    _model_cache = rmodel
-                    _model_cache_at = time.time()
-                return rmodel, "redis"
+                if _model_is_fresh(rmodel):
+                    with _model_lock:
+                        _model_cache = rmodel
+                        _model_cache_at = time.time()
+                    return rmodel, "redis"
+                LOG.warning(
+                    "market_intel: ignoring stale Redis model (calibrated_at=%s, max_age=%dd)",
+                    rmodel.calibrated_at, _model_max_age_days(),
+                )
     except Exception as e:
         LOG.debug("market_intel: redis model load failed: %s", e)
 
     # Disk fallback.
     dmodel = load_model(_model_path())
     if dmodel:
-        with _model_lock:
-            _model_cache = dmodel
-            _model_cache_at = time.time()
-        return dmodel, "disk"
+        if _model_is_fresh(dmodel):
+            with _model_lock:
+                _model_cache = dmodel
+                _model_cache_at = time.time()
+            return dmodel, "disk"
+        LOG.warning(
+            "market_intel: ignoring stale disk model (calibrated_at=%s, max_age=%dd)",
+            dmodel.calibrated_at, _model_max_age_days(),
+        )
 
     # Final fallback: sticky default (cold start).
     default = _default_sticky_model()
@@ -302,6 +358,57 @@ def _maybe_inject_dealer_gamma(factor_snap: FactorSnapshot, *, today: dt.date) -
 
 
 # ---------------------------------------------------------------------------
+# Stressed-label sanity guard
+# ---------------------------------------------------------------------------
+
+
+def stressed_label_guard(
+    label: str,
+    factor_snap: FactorSnapshot,
+) -> tuple[str, Optional[Dict[str, Any]]]:
+    """Sign-aware sanity check on an HMM 'Stressed' call.
+
+    Factor z's are sign-normalised so higher = more stress. A genuine
+    stress day therefore has a positive signed composite (mean of the OK
+    factor z's). When the model says 'Stressed' but the composite is at or
+    below ``MI_STRESS_COMPOSITE_FLOOR``, the observation is an extreme
+    move in the *favorable* direction that landed in the fat-variance
+    stressed state — demote to 'Transitional' and report the override.
+
+    Returns (possibly-demoted label, override-info dict or None).
+    """
+    if label != "Stressed":
+        return label, None
+    ok_zs = [
+        r.z for r in factor_snap.readings.values()
+        if r.quality == FACTOR_OK and isinstance(r.z, (int, float))
+    ]
+    if not ok_zs:
+        return label, None
+    composite = sum(ok_zs) / len(ok_zs)
+    floor = _stress_composite_floor()
+    if composite > floor:
+        return label, None
+    override = {
+        "original_label": "Stressed",
+        "demoted_to": "Transitional",
+        "signed_composite": round(composite, 4),
+        "composite_floor": floor,
+        "reason": (
+            "HMM assigned 'Stressed' but the signed factor composite is "
+            "benign; extreme favorable moves can land in the fat-variance "
+            "stressed state."
+        ),
+    }
+    LOG.warning(
+        "market_intel: demoting 'Stressed' -> 'Transitional' "
+        "(signed composite %.2f <= floor %.2f)",
+        composite, floor,
+    )
+    return "Transitional", override
+
+
+# ---------------------------------------------------------------------------
 # Main entrypoint
 # ---------------------------------------------------------------------------
 
@@ -395,6 +502,9 @@ def regime_snapshot(
     inf_result = infer(model, vector)
     band = bootstrap_confidence(model, vector, n_samples=min(200, 500))
 
+    # Sign-aware sanity guard on the 'Stressed' call.
+    label, stress_override = stressed_label_guard(inf_result.label, factor_snap)
+
     # Vol state.
     vol_state = canonical_vol_state(
         factor_snap=factor_snap,
@@ -407,7 +517,7 @@ def regime_snapshot(
     snap = RegimeSnapshot(
         as_of=today.isoformat(),
         probs=inf_result.probs,
-        label=inf_result.label,
+        label=label,
         confidence=inf_result.confidence,
         transition_risk_1d=inf_result.transition_risk_1d,
         factor_readings={k: v.to_dict() for k, v in factor_snap.readings.items()},
@@ -421,6 +531,7 @@ def regime_snapshot(
             "missing": list(factor_snap.missing),
             "insufficient": False,
             "model_source": model_provenance,
+            **({"stressed_label_override": stress_override} if stress_override else {}),
         },
         model_version=model.model_version,
         calibrated_at=model.calibrated_at,
