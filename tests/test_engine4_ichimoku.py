@@ -957,6 +957,127 @@ class TestCloseEntryOutcome:
         assert out["triggered"] is False
 
 
+class TestSystemExitOutcome:
+    """Ichimoku-system trade sim: gap-aware stop entry, BE at +1R, Kijun exit."""
+
+    def _bars(self, specs, start_day=1):
+        """specs: list of (open, high, low, close)."""
+        return [
+            DailyBar(trade_date=f"2024-07-{start_day + i:02d}", open=o, high=h,
+                     low=l, close=c, volume=1e6, vwap=None)
+            for i, (o, h, l, c) in enumerate(specs)
+        ]
+
+    def test_gap_beyond_limit_cancels_order(self):
+        from backend.engine4_backtest import evaluate_system_outcome
+        # Signal bar, then day 1 opens +1.5R beyond the 10.0 trigger (risk0=1).
+        bars = self._bars([(9.5, 9.9, 9.4, 9.8), (11.5, 11.8, 11.3, 11.6)])
+        out = evaluate_system_outcome(
+            direction="bullish", entry_trigger=10.0, stop_loss=9.0,
+            bars=bars, signal_idx=0,
+        )
+        assert out["triggered"] is False
+        assert out["gapSkipped"] is True
+
+    def test_gap_within_limit_fills_at_open(self):
+        from backend.engine4_backtest import evaluate_system_outcome
+        # Day 1 opens at 10.5 (+0.5R gap): stop order fills at the OPEN, and
+        # risk re-anchors to the actual fill (10.5 - 9.0 = 1.5). Day 2 gaps
+        # under the stop -> exit at day-2 open, not at the untouched stop.
+        bars = self._bars([
+            (9.5, 9.9, 9.4, 9.8),
+            (10.5, 10.8, 10.2, 10.4),
+            (8.8, 9.1, 8.6, 8.9),
+        ])
+        out = evaluate_system_outcome(
+            direction="bullish", entry_trigger=10.0, stop_loss=9.0,
+            bars=bars, signal_idx=0,
+        )
+        assert out["triggered"] is True
+        assert out["entryFill"] == pytest.approx(10.5)
+        assert out["status"] == "stopped"
+        assert out["exitPrice"] == pytest.approx(8.8)  # gap-through fill at open
+        assert out["rMultiple"] == pytest.approx((8.8 - 10.5) / 1.5, abs=1e-3)
+
+    def test_breakeven_stop_after_one_r(self):
+        from backend.engine4_backtest import evaluate_system_outcome
+        # Fill at trigger 10.0 (risk 1). Day 1 tags +1.2R intrabar -> BE arms,
+        # effective day 2. Day 2 pulls back through the entry -> scratch at BE.
+        bars = self._bars([
+            (9.5, 9.9, 9.4, 9.8),
+            (9.8, 11.2, 9.7, 11.0),
+            (10.8, 10.9, 9.9, 10.1),
+        ])
+        out = evaluate_system_outcome(
+            direction="bullish", entry_trigger=10.0, stop_loss=9.0,
+            bars=bars, signal_idx=0,
+        )
+        assert out["status"] == "be_stop"
+        assert out["beMoved"] is True
+        assert out["exitPrice"] == pytest.approx(10.0)
+        assert out["rMultiple"] == pytest.approx(0.0, abs=1e-3)
+
+    def test_kijun_cross_exit_lets_winner_run(self):
+        from backend.engine4_backtest import evaluate_system_outcome, _kijun_at
+        # 30 warmup bars grinding up, entry, strong run, then a close under
+        # the (risen) Kijun well above the entry -> system exit in profit.
+        warm = [(10 + 0.1 * i, 10.25 + 0.1 * i, 9.9 + 0.1 * i, 10.2 + 0.1 * i) for i in range(30)]
+        run = [(13.4 + 0.5 * k, 13.9 + 0.5 * k, 13.3 + 0.5 * k, 13.8 + 0.5 * k) for k in range(8)]
+        # Drift down to a close below Kijun but far above the 12.0 stop
+        # (and above the breakeven stop at the 13.4 fill).
+        fade = [(17.0, 17.1, 15.4, 15.5), (15.4, 15.6, 14.6, 14.7), (14.5, 14.6, 13.8, 13.9)]
+        specs = warm + run + fade
+        bars = [
+            DailyBar(trade_date=f"2024-{3 + i // 28:02d}-{1 + i % 28:02d}", open=o,
+                     high=h, low=l, close=c, volume=1e6, vwap=None)
+            for i, (o, h, l, c) in enumerate(specs)
+        ]
+        signal_idx = 29
+        trigger = 13.35  # just above the signal bar's 13.25 high
+        out = evaluate_system_outcome(
+            direction="bullish", entry_trigger=trigger, stop_loss=12.0,
+            bars=bars, signal_idx=signal_idx,
+        )
+        assert out["triggered"] is True
+        assert out["status"] == "system_exit"
+        assert out["exitReason"] == "kijun_cross"
+        assert out["rMultiple"] > 0  # exited in profit, not at a fixed target
+        # Sanity: the exit bar's close really is below its live Kijun.
+        exit_idx = next(i for i, b in enumerate(bars) if b.close == out["exitPrice"])
+        assert float(bars[exit_idx].close) < _kijun_at(bars, exit_idx)
+
+    def test_never_triggered_expires(self):
+        from backend.engine4_backtest import evaluate_system_outcome
+        bars = self._bars([
+            (9.5, 9.9, 9.4, 9.8),
+            (9.7, 9.9, 9.5, 9.6),
+            (9.6, 9.8, 9.4, 9.5),
+            (9.5, 9.7, 9.3, 9.4),
+        ])
+        out = evaluate_system_outcome(
+            direction="bullish", entry_trigger=10.0, stop_loss=9.0,
+            bars=bars, signal_idx=0,
+        )
+        assert out["triggered"] is False
+        assert out["gapSkipped"] is False
+
+    def test_backtest_harness_system_model(self):
+        bars_by_ticker = {
+            "UP": make_bars(160, trend="up"),
+            "DOWN": make_bars(160, trend="down"),
+        }
+        result = backtest_from_bars(
+            bars_by_ticker, min_score=0.0, warmup=80, entry_model="system", max_hold=60
+        )
+        assert result["params"]["entryModel"] == "system"
+        assert set(result["byBucket"]).issubset({"actionable"})
+        o = result["overall"]
+        for k in ("systemExit", "beStop", "gapSkipped", "beMoved", "avgWinR", "avgLossR"):
+            assert k in o
+        # No fixed target in this model — every resolution is stop/BE/system.
+        assert o["targetHit"] == 0
+
+
 class TestDeskTracker:
     def test_set_desk_status_persists(self):
         from backend import engine4_screener as scr

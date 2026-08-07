@@ -61,6 +61,15 @@ def _blank_stats() -> Dict[str, Any]:
         "_hold_loss_sum": 0,
         "_pct_sum": 0.0,
         "_pct_n": 0,
+        # System-exit model extras (stay zero for trigger/close models).
+        "systemExit": 0,
+        "beStop": 0,
+        "gapSkipped": 0,
+        "beMoved": 0,
+        "wins": 0,
+        "losses": 0,
+        "_r_win_sum": 0.0,
+        "_r_loss_sum": 0.0,
     }
 
 
@@ -69,9 +78,12 @@ def _record(stats: Dict[str, Any], outcome: Dict[str, Any]) -> None:
     status = outcome["status"]
     if status == "expired" or not outcome.get("triggered"):
         stats["expired"] += 1
+        if outcome.get("gapSkipped"):
+            stats["gapSkipped"] += 1
         return
     stats["triggered"] += 1
-    stats["_r_sum"] += float(outcome.get("rMultiple") or 0.0)
+    r = float(outcome.get("rMultiple") or 0.0)
+    stats["_r_sum"] += r
     stats["_mae_sum"] += float(outcome.get("mae") or 0.0)
     stats["_mfe_sum"] += float(outcome.get("mfe") or 0.0)
     bars_held = int(outcome.get("barsHeld") or 0)
@@ -80,19 +92,46 @@ def _record(stats: Dict[str, Any], outcome: Dict[str, Any]) -> None:
     if pct is not None:
         stats["_pct_sum"] += float(pct)
         stats["_pct_n"] += 1
+    if outcome.get("beMoved"):
+        stats["beMoved"] += 1
     if status == "target_hit":
         stats["targetHit"] += 1
         stats["_hold_win_sum"] += bars_held
     elif status == "stopped":
         stats["stopped"] += 1
         stats["_hold_loss_sum"] += bars_held
+    elif status == "system_exit":
+        stats["systemExit"] += 1
+    elif status == "be_stop":
+        stats["beStop"] += 1
     elif status == "triggered":
         stats["openAtEnd"] += 1
+    # System-model win/loss ledger: every closed trade (stop, BE stop, or
+    # Kijun-cross exit) resolves by the SIGN of its R — there is no fixed
+    # target, so "win" means the trade closed positive. Breakeven scratches
+    # (|R| ~ 0) count as neither.
+    if outcome.get("exitReason") in ("stopped", "be_stop", "kijun_cross"):
+        if r > 1e-9:
+            stats["wins"] += 1
+            stats["_r_win_sum"] += r
+            stats["_hold_win_sum"] += bars_held
+        elif r < -1e-9:
+            stats["losses"] += 1
+            stats["_r_loss_sum"] += r
+            if status != "stopped":  # plain stops were already summed above
+                stats["_hold_loss_sum"] += bars_held
 
 
 def _finalize(stats: Dict[str, Any]) -> Dict[str, Any]:
     triggered = stats["triggered"]
     resolved = stats["targetHit"] + stats["stopped"]
+    sys_resolved = stats["wins"] + stats["losses"]
+    if sys_resolved:
+        win_rate = round(100.0 * stats["wins"] / sys_resolved, 1)
+        hold_win_n, hold_loss_n = stats["wins"], stats["losses"]
+    else:
+        win_rate = round(100.0 * stats["targetHit"] / resolved, 1) if resolved else None
+        hold_win_n, hold_loss_n = stats["targetHit"], stats["stopped"]
     return {
         "signals": stats["signals"],
         "triggered": triggered,
@@ -100,15 +139,21 @@ def _finalize(stats: Dict[str, Any]) -> Dict[str, Any]:
         "stopped": stats["stopped"],
         "expired": stats["expired"],
         "openAtEnd": stats["openAtEnd"],
+        "systemExit": stats["systemExit"],
+        "beStop": stats["beStop"],
+        "gapSkipped": stats["gapSkipped"],
+        "beMoved": stats["beMoved"],
         "triggerRate": round(100.0 * triggered / stats["signals"], 1) if stats["signals"] else None,
-        "winRate": round(100.0 * stats["targetHit"] / resolved, 1) if resolved else None,
+        "winRate": win_rate,
         "avgR": round(stats["_r_sum"] / triggered, 3) if triggered else None,
         "expectancy": round(stats["_r_sum"] / triggered, 3) if triggered else None,
+        "avgWinR": round(stats["_r_win_sum"] / stats["wins"], 3) if stats["wins"] else None,
+        "avgLossR": round(stats["_r_loss_sum"] / stats["losses"], 3) if stats["losses"] else None,
         "avgMae": round(stats["_mae_sum"] / triggered, 3) if triggered else None,
         "avgMfe": round(stats["_mfe_sum"] / triggered, 3) if triggered else None,
         "avgHoldBars": round(stats["_hold_sum"] / triggered, 1) if triggered else None,
-        "avgHoldWin": round(stats["_hold_win_sum"] / stats["targetHit"], 1) if stats["targetHit"] else None,
-        "avgHoldLoss": round(stats["_hold_loss_sum"] / stats["stopped"], 1) if stats["stopped"] else None,
+        "avgHoldWin": round(stats["_hold_win_sum"] / hold_win_n, 1) if hold_win_n else None,
+        "avgHoldLoss": round(stats["_hold_loss_sum"] / hold_loss_n, 1) if hold_loss_n else None,
         "avgPctReturn": round(stats["_pct_sum"] / stats["_pct_n"], 3) if stats["_pct_n"] else None,
     }
 
@@ -203,6 +248,180 @@ def evaluate_close_entry_outcome(
     return out
 
 
+_KIJUN_PERIOD = 26  # standard Ichimoku 9/26/52 — must match the engine
+
+
+def _kijun_at(bars: List[DailyBar], idx: int, period: int = _KIJUN_PERIOD) -> Optional[float]:
+    """Kijun-sen at bar `idx`: midpoint of the high/low range over `period` bars."""
+    lo = idx - period + 1
+    if lo < 0:
+        return None
+    highs = [float(b.high) for b in bars[lo: idx + 1] if b.high is not None]
+    lows = [float(b.low) for b in bars[lo: idx + 1] if b.low is not None]
+    if len(highs) < period or len(lows) < period:
+        return None
+    return (max(highs) + min(lows)) / 2.0
+
+
+def evaluate_system_outcome(
+    *,
+    direction: str,
+    entry_trigger: float,
+    stop_loss: float,
+    bars: List[DailyBar],
+    signal_idx: int,
+    trigger_window: int = 3,
+    max_gap_r: float = 1.0,
+    be_at_r: float = 1.0,
+    max_hold: int = 60,
+) -> Dict[str, Any]:
+    """Full Ichimoku-system trade simulation (the desk's third entry model).
+
+    Day 0 is the confirmation candle (the signal bar). Entry is a resting
+    stop order at the trigger from day 1, with realistic gap handling:
+    - Opens through the trigger fill AT THE OPEN (a stop order can't fill at
+      a price the market never traded).
+    - Opens more than ``max_gap_r`` × initial risk beyond the trigger cancel
+      the order — the desk doesn't chase an invalidating gap.
+
+    Exits are what the system says, not a fixed R:R target:
+    - Protective stop at the playbook stop (gap-aware fill at the open when
+      gapped through).
+    - Once price reaches ``be_at_r`` × risk of favorable excursion intrabar,
+      the stop moves to breakeven — effective the NEXT bar (the intrabar
+      sequence is unknowable from daily data).
+    - Trend exit when the daily close crosses the live 26-bar Kijun against
+      the trade; filled at that close. No profit target — winners run.
+    - ``max_hold`` (default 60 bars) is a safety cap, not a strategy rule.
+
+    R multiples are anchored to the ACTUAL fill (open on gap entries), so a
+    worse fill honestly shrinks the reward and grows the risk.
+    """
+    is_bull = direction == "bullish"
+    risk0 = abs(entry_trigger - stop_loss)
+    out: Dict[str, Any] = {
+        "status": "expired",
+        "triggered": False,
+        "rMultiple": 0.0,
+        "barsHeld": 0,
+        "mae": 0.0,
+        "mfe": 0.0,
+        "exitPrice": None,
+        "pctReturn": None,
+        "entryFill": None,
+        "gapSkipped": False,
+        "beMoved": False,
+        "exitReason": None,
+    }
+    if risk0 <= 0 or signal_idx + 1 >= len(bars):
+        return out
+
+    # 1) Entry: stop order at the trigger within the trigger window.
+    fill: Optional[float] = None
+    entry_j: Optional[int] = None
+    for k in range(trigger_window):
+        j = signal_idx + 1 + k
+        if j >= len(bars):
+            break
+        b = bars[j]
+        if b.open is None or b.high is None or b.low is None:
+            continue
+        o, h, l = float(b.open), float(b.high), float(b.low)
+        gapped_through = (o >= entry_trigger) if is_bull else (o <= entry_trigger)
+        if gapped_through:
+            gap_r = abs(o - entry_trigger) / risk0
+            if gap_r > max_gap_r:
+                out["gapSkipped"] = True
+                return out  # order canceled — gap invalidates the entry
+            fill, entry_j = o, j
+            break
+        traded_through = (h >= entry_trigger) if is_bull else (l <= entry_trigger)
+        if traded_through:
+            fill, entry_j = entry_trigger, j
+            break
+    if fill is None or entry_j is None:
+        return out  # never triggered
+
+    risk = abs(fill - stop_loss)
+    if risk <= 0:
+        return out
+    out["triggered"] = True
+    out["entryFill"] = round(fill, 4)
+
+    def _r(px: float) -> float:
+        move = (px - fill) if is_bull else (fill - px)
+        return round(move / risk, 3)
+
+    def _pct(px: float) -> float:
+        move = (px - fill) if is_bull else (fill - px)
+        return round(100.0 * move / fill, 3)
+
+    def _close_out(status: str, px: float, bars_held: int, reason: str) -> Dict[str, Any]:
+        out.update({
+            "status": status, "rMultiple": _r(px), "barsHeld": bars_held,
+            "exitPrice": round(px, 4), "pctReturn": _pct(px),
+            "mae": round(mae_r, 3), "mfe": round(mfe_r, 3), "exitReason": reason,
+        })
+        return out
+
+    stop = stop_loss
+    be_active = False
+    be_armed = False
+    mae_r = 0.0
+    mfe_r = 0.0
+    last_j = min(len(bars) - 1, entry_j + max_hold - 1)
+
+    for j in range(entry_j, last_j + 1):
+        b = bars[j]
+        if b.high is None or b.low is None or b.close is None:
+            continue
+        o = float(b.open) if b.open is not None else None
+        h, l, c = float(b.high), float(b.low), float(b.close)
+        bars_held = j - entry_j + 1
+
+        # A breakeven move armed on a previous bar becomes effective now.
+        if be_armed and not be_active:
+            be_active = True
+            stop = max(stop, fill) if is_bull else min(stop, fill)
+            out["beMoved"] = True
+
+        fav = ((h - fill) if is_bull else (fill - l)) / risk
+        adv = ((fill - l) if is_bull else (h - fill)) / risk
+        mfe_r = max(mfe_r, fav)
+        mae_r = max(mae_r, adv)
+
+        # 1) Protective stop, gap-aware. The entry bar skips the open check —
+        #    the entry itself happened intraday, after the open.
+        stop_px: Optional[float] = None
+        if is_bull:
+            if j > entry_j and o is not None and o <= stop:
+                stop_px = o
+            elif l <= stop:
+                stop_px = stop
+        else:
+            if j > entry_j and o is not None and o >= stop:
+                stop_px = o
+            elif h >= stop:
+                stop_px = stop
+        if stop_px is not None:
+            return _close_out("be_stop" if be_active else "stopped", stop_px, bars_held,
+                              "be_stop" if be_active else "stopped")
+
+        # 2) Arm breakeven once favorable excursion reaches be_at_r intrabar.
+        if not be_armed and fav >= be_at_r:
+            be_armed = True
+
+        # 3) System exit: daily close crosses the Kijun against the trade.
+        kij = _kijun_at(bars, j)
+        if kij is not None and ((c < kij) if is_bull else (c > kij)):
+            return _close_out("system_exit", c, bars_held, "kijun_cross")
+
+    # Safety cap / end of data: mark to the last managed close.
+    last = bars[last_j]
+    c = float(last.close) if last.close is not None else fill
+    return _close_out("triggered", c, last_j - entry_j + 1, "open_at_end")
+
+
 _DOW_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri")
 
 
@@ -232,6 +451,11 @@ def backtest_from_bars(
       workflow, entering in the final minutes of the session. Only signals
       that are ACTIONABLE on the signal bar are taken (the desk doesn't
       close-enter a stale/extended structure name).
+    - ``system``: day 0 is the confirmation candle, day 1+ a resting stop
+      order at the trigger with gap-realistic fills (fill at the open when
+      gapped through; cancel when the gap exceeds 1R). No profit target —
+      breakeven stop after +1R, then the trade runs until the daily close
+      crosses the Kijun against it. Actionable signals only, like ``close``.
 
     Each distinct (ticker, playbook, signalDate) is counted once — the
     freshness window re-surfaces the same trigger bar for a few sessions, so
@@ -240,7 +464,9 @@ def backtest_from_bars(
     comparable. ``byDow`` cohorts key on the entry day of week (= signal-bar
     day for the close model).
     """
-    close_entry = str(entry_model).lower() == "close"
+    model = str(entry_model).lower()
+    close_entry = model == "close"
+    system_model = model == "system"
     overall = _blank_stats()
     by_grade: Dict[str, Dict[str, Any]] = {}
     by_bucket: Dict[str, Dict[str, Any]] = {}
@@ -289,13 +515,23 @@ def backtest_from_bars(
                     continue
                 if signal.freshness_bucket == "rejected":
                     continue
-                if close_entry and signal.freshness_bucket != "actionable":
-                    continue  # close-entry desk only takes actionable-at-close names
+                if (close_entry or system_model) and signal.freshness_bucket != "actionable":
+                    continue  # these models only trade actionable-on-signal-day names
 
                 seen_keys.add(key)
                 forward = bars[i + 1:]
                 close_pos: Optional[str] = None
-                if close_entry:
+                if system_model:
+                    outcome = evaluate_system_outcome(
+                        direction=signal.direction,
+                        entry_trigger=signal.entry_trigger,
+                        stop_loss=signal.stop_loss,
+                        bars=bars,
+                        signal_idx=i,
+                        trigger_window=trigger_window,
+                        max_hold=max_hold,
+                    )
+                elif close_entry:
                     entry_px = float(window[-1].close) if window[-1].close is not None else None
                     if not entry_px or entry_px <= 0:
                         continue
@@ -358,7 +594,7 @@ def backtest_from_bars(
             "warmup": warmup,
             "triggerWindow": trigger_window,
             "maxHold": max_hold,
-            "entryModel": "close" if close_entry else "trigger",
+            "entryModel": "system" if system_model else ("close" if close_entry else "trigger"),
             "tickersTested": len(bars_by_ticker),
             "tickersWithSignals": tickers_with_signals,
         },

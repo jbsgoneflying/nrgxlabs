@@ -390,7 +390,7 @@ def engine4_ichimoku_backtest(
     min_score: float = Query(75.0, ge=0, le=100, description="Min score to include"),
     max_tickers: int = Query(40, ge=1, le=120, description="Universe cap (runtime)"),
     tickers: Optional[str] = Query(None, description="Comma-separated tickers (defaults to universe sample)"),
-    entry_model: str = Query("trigger", description="Entry model: 'trigger' (stop order at trigger) or 'close' (filled at signal-bar close, actionable-only — the Close Preview workflow)"),
+    entry_model: str = Query("trigger", description="Entry model: 'trigger' (stop order at trigger), 'close' (filled at signal-bar close, actionable-only), or 'system' (gap-aware stop entry, breakeven at +1R, Kijun-cross exit, no target)"),
 ):
     """Engine 4: walk-forward continuation backtest (measured edge).
 
@@ -415,7 +415,9 @@ def engine4_ichimoku_backtest(
             from backend.universe import load_universe_sp500_and_nasdaq100
             universe = load_universe_sp500_and_nasdaq100()
 
-        em = "close" if str(entry_model).strip().lower() == "close" else "trigger"
+        em = str(entry_model).strip().lower()
+        if em not in ("trigger", "close", "system"):
+            em = "trigger"
         from backend.engine4_backtest import backtest_ichimoku
         result = backtest_ichimoku(
             tickers=universe,
@@ -424,6 +426,9 @@ def engine4_ichimoku_backtest(
             min_score=min_score,
             max_tickers=max_tickers,
             entry_model=em,
+            # System exits let winners run to the Kijun cross — the 10-bar
+            # research cap would truncate exactly the trades being measured.
+            max_hold=60 if em == "system" else 10,
         )
         return result
     except HTTPException:
