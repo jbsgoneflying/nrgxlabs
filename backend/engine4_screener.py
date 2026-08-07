@@ -348,17 +348,23 @@ def scan_ticker_playbooks(
     sector_state: Optional[Dict[str, Any]] = None,
     rs_lookback: int = RS_LOOKBACK_DEFAULT,
     beta_lookback: int = BETA_LOOKBACK_DEFAULT,
+    bars: Optional[List[DailyBar]] = None,
 ) -> List[IchimokuSignal]:
     """
     Scan a single ticker across ALL Ichimoku playbooks (core Kijun pullback,
     TK cross, Kumo breakout) on the same cached bars — one bar fetch and one
     Ichimoku-series computation per ticker, no extra EODHD calls.
 
+    Pass ``bars`` to scan a pre-built series (the close preview injects a
+    synthetic today-bar from the live quote); otherwise bars are fetched
+    with the normal cache behaviour.
+
     Returns a list of scored IchimokuSignal (zero to three entries, at most
     one per playbook).
     """
     try:
-        bars = fetch_bars_for_ticker(ticker=ticker, as_of_date=as_of_date, use_cache=use_cache)
+        if bars is None:
+            bars = fetch_bars_for_ticker(ticker=ticker, as_of_date=as_of_date, use_cache=use_cache)
         
         if not bars or len(bars) < 60:
             return []
@@ -1055,6 +1061,283 @@ def overlay_tracker_signals(
         if isinstance(v, list):
             flat.extend([s for s in v if isinstance(s, dict)])
     return overlay_signal_list(flat, max_workers=max_workers)
+
+
+# ---------------------------------------------------------------------------
+# Close Preview — "if today's candle closed right now, what would fire?"
+# ---------------------------------------------------------------------------
+# Daily-candle systems decide at the close, but the desk wants to act in the
+# last 15-20 minutes of the session while the candle is still forming. The
+# preview synthesizes today's bar from the live EODHD quote (open/high/low/
+# last + running volume), appends it to the cached daily series, and runs
+# every playbook detector on it — same scoring, same freshness rules, same
+# gate. Nothing here persists to the tracker: the preview is a decision
+# surface, not a record.
+
+_preview_cache: TTLCache = TTLCache(maxsize=4, ttl=90)
+_preview_cache_lock = threading.Lock()
+
+
+def synthesize_preview_bar(snap: Dict[str, Any], today_str: str) -> Optional[DailyBar]:
+    """Build today's forming daily bar from a live quote snapshot.
+
+    The quote's ``close`` is the last trade — the "what if it closed here"
+    price. Missing open/high/low fall back to consistent values so the bar
+    is always well-formed (high >= open/close >= low).
+    """
+    close = snap.get("close")
+    if close is None or float(close) <= 0:
+        return None
+    close = float(close)
+    o = snap.get("open")
+    o = float(o) if (o is not None and float(o) > 0) else close
+    highs = [float(v) for v in (snap.get("high"), o, close) if v is not None and float(v) > 0]
+    lows = [float(v) for v in (snap.get("low"), o, close) if v is not None and float(v) > 0]
+    vol = snap.get("volume")
+    return DailyBar(
+        trade_date=today_str,
+        open=o,
+        high=max(highs),
+        low=min(lows),
+        close=close,
+        volume=(float(vol) if vol else None),
+        vwap=None,
+    )
+
+
+def bars_with_preview_close(
+    bars: List[DailyBar],
+    snap: Optional[Dict[str, Any]],
+    today_str: str,
+) -> Tuple[List[DailyBar], bool]:
+    """Append the forming today-bar unless the real EOD row is already in.
+
+    Returns (bars, synthetic) — synthetic is False when today's close is
+    already published (post-close) or no usable quote exists, in which case
+    the series is returned unchanged and the preview equals the real scan.
+    """
+    if not bars:
+        return bars, False
+    if str(bars[-1].trade_date) >= today_str:
+        return bars, False
+    if not snap:
+        return bars, False
+    synthetic = synthesize_preview_bar(snap, today_str)
+    if synthetic is None:
+        return bars, False
+    return list(bars) + [synthetic], True
+
+
+def _preview_index_context(
+    symbol: str,
+    today: dt.date,
+    snaps: Dict[str, Dict[str, Any]],
+    today_str: str,
+) -> Tuple[List[DailyBar], Dict[str, Any]]:
+    """Index/sector proxy state evaluated on the same forming-candle basis."""
+    bars, _ = fetch_index_context(symbol=symbol, as_of_date=today)
+    pbars, _syn = bars_with_preview_close(bars, snaps.get(symbol), today_str)
+    return pbars, compute_index_ichimoku_state(pbars, symbol=symbol)
+
+
+def run_close_preview(
+    *,
+    direction: Optional[str] = None,
+    benzinga_client: Any = None,
+    max_workers: int = 10,
+    use_cache: bool = True,
+) -> Dict[str, Any]:
+    """Scan the universe as if today's daily candle closed at the live price.
+
+    Same pipeline as run_universe_scan (all playbooks, A+ bar, R:R floor,
+    freshness buckets) but on bars ending with a synthetic today-bar built
+    from live EODHD quotes. Results are marked ``preview`` and never persist
+    to the desk tracker. Cached for 90s — the desk polls this in the closing
+    window.
+    """
+    from backend.market_hours import is_us_equity_market_open, minutes_to_close
+    from backend.price_service import get_price_service
+
+    start_time = time.time()
+    today = dt.date.today()
+    as_of_str = today.isoformat()
+
+    cache_key = f"e4_preview:{as_of_str}:{direction or 'all'}"
+    if use_cache:
+        with _preview_cache_lock:
+            cached = _preview_cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+    flags = get_flags()
+    min_dollar_adv = float(getattr(flags, "ENGINE4_MIN_DOLLAR_ADV", 0.0) or 0.0)
+    structure_max = int(getattr(flags, "ENGINE4_STRUCTURE_MAX", 16) or 16)
+    min_rr = float(getattr(flags, "ENGINE4_MIN_RR", 1.0) or 0.0)
+    rs_lookback = int(getattr(flags, "ENGINE4_RS_LOOKBACK", RS_LOOKBACK_DEFAULT) or RS_LOOKBACK_DEFAULT)
+    beta_lookback = int(getattr(flags, "ENGINE4_BETA_LOOKBACK", BETA_LOOKBACK_DEFAULT) or BETA_LOOKBACK_DEFAULT)
+
+    universe = load_universe_sp500_and_nasdaq100()
+    memberships = load_index_memberships()
+    sector_map = load_sector_map()
+    needed_etfs = sorted({sector_map[t] for t in universe if sector_map.get(t)})
+    proxies = [index_proxy_for("sp500"), index_proxy_for("nasdaq100")] + needed_etfs
+
+    ps = get_price_service()
+    if ps is None:
+        raise RuntimeError("EODHD price service unavailable — cannot build close preview")
+
+    # One batched pass for every live quote the preview needs (universe +
+    # index proxies + sector ETFs).
+    snaps = ps.fetch_live_bar_snapshots(list(universe) + proxies)
+    market_open = is_us_equity_market_open()
+    mins_to_close = minutes_to_close()
+    now_iso = dt.datetime.utcnow().isoformat() + "Z"
+
+    # Top-down context on the same forming-candle basis.
+    spy_bars, index_spx = _preview_index_context(index_proxy_for("sp500"), today, snaps, as_of_str)
+    qqq_bars, index_ndx = _preview_index_context(index_proxy_for("nasdaq100"), today, snaps, as_of_str)
+    sector_states: Dict[str, Dict[str, Any]] = {}
+    for etf in needed_etfs:
+        _b, st = _preview_index_context(etf, today, snaps, as_of_str)
+        sector_states[etf] = st
+
+    signals: List[IchimokuSignal] = []
+    errors: List[str] = []
+    synthetic_count = 0
+
+    def _scan_one(ticker: str) -> Tuple[List[IchimokuSignal], bool]:
+        snap = snaps.get(ticker)
+        if snap is None:
+            return [], False
+        base = fetch_bars_for_ticker(ticker=ticker, as_of_date=today, use_cache=True)
+        if not base or len(base) < 60:
+            return [], False
+        pbars, synthetic = bars_with_preview_close(base, snap, as_of_str)
+        membership = memberships.get(ticker, "sp500")
+        if membership == "nasdaq100":
+            idx_bars, idx_state = qqq_bars, index_ndx
+        else:
+            idx_bars, idx_state = spy_bars, index_spx
+        s_etf = sector_map.get(ticker)
+        sigs = scan_ticker_playbooks(
+            ticker=ticker,
+            as_of_date=today,
+            index_membership=membership,
+            benzinga_client=benzinga_client,
+            min_dollar_adv=min_dollar_adv,
+            index_bars=idx_bars,
+            index_state=idx_state,
+            sector_etf=s_etf,
+            sector_state=sector_states.get(s_etf) if s_etf else None,
+            rs_lookback=rs_lookback,
+            beta_lookback=beta_lookback,
+            bars=pbars,
+        )
+        return sigs, synthetic
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_ticker = {executor.submit(_scan_one, t): t for t in universe}
+        for future in as_completed(future_to_ticker):
+            ticker = future_to_ticker[future]
+            try:
+                sigs, synthetic = future.result()
+                signals.extend(sigs)
+                if synthetic:
+                    synthetic_count += 1
+            except Exception as e:
+                errors.append(f"{ticker}: {str(e)}")
+
+    def _preview_dicts(sig_list: List[IchimokuSignal]) -> List[Dict[str, Any]]:
+        out = []
+        for s in sig_list:
+            d = signal_to_dict(s)
+            d["preview"] = True
+            snap = snaps.get(s.ticker) or {}
+            price = snap.get("close")
+            if price:
+                live = compute_live_state(
+                    direction=d.get("direction", "bullish"),
+                    price=float(price),
+                    entry_trigger=(d.get("levels") or {}).get("entryTrigger"),
+                    stop_loss=(d.get("levels") or {}).get("stopLoss"),
+                    target_1=(d.get("levels") or {}).get("target1"),
+                    atr=(d.get("indicators") or {}).get("atr"),
+                )
+                live.update({
+                    "available": True,
+                    "asOf": now_iso,
+                    "marketOpen": market_open,
+                    "source": "eodhd_live_quote",
+                })
+                d["live"] = live
+            out.append(d)
+        return out
+
+    core = _bucketize_signals(
+        [s for s in signals if s.playbook == PLAYBOOK_KIJUN_PULLBACK],
+        direction=direction, min_rr=min_rr, structure_max=structure_max,
+    )
+    playbook_blocks: Dict[str, Dict[str, Any]] = {}
+    for pb in RESEARCH_PLAYBOOKS:
+        b = _bucketize_signals(
+            [s for s in signals if s.playbook == pb],
+            direction=direction, min_rr=min_rr, structure_max=structure_max,
+        )
+        playbook_blocks[pb] = {
+            "label": PLAYBOOK_LABELS.get(pb, pb),
+            "research": True,
+            "totalAPlus": len(b["aplus"]),
+            "actionableCount": len(b["actionable"]),
+            "structureCount": len(b["structure"]),
+            "structureTotal": b["structure_total"],
+            "rejectedCount": b["rejected_count"],
+            "subRRRejected": b["sub_rr_count"],
+            "actionable": _preview_dicts(b["actionable"]),
+            "structure": _preview_dicts(b["structure"]),
+        }
+
+    elapsed_ms = int((time.time() - start_time) * 1000)
+    result = {
+        "asOfDate": as_of_str,
+        "scannedCount": len(universe),
+        "totalAPlus": len(core["aplus"]),
+        "actionableCount": len(core["actionable"]),
+        "structureCount": len(core["structure"]),
+        "structureTotal": core["structure_total"],
+        "rejectedCount": core["rejected_count"],
+        "actionable": _preview_dicts(core["actionable"]),
+        "structure": _preview_dicts(core["structure"]),
+        "playbooks": playbook_blocks,
+        "indexState": {"spx": index_spx, "ndx": index_ndx},
+        "sectorStates": sector_states,
+        "preview": {
+            "isPreview": True,
+            "asOf": now_iso,
+            "marketOpen": market_open,
+            "minutesToClose": mins_to_close,
+            "quotedCount": len(snaps),
+            "syntheticBars": synthetic_count,
+            "note": (
+                "Signals assume today's candle closes at the current live price. "
+                "Volume is the running session total — confirm the close."
+            ),
+        },
+        "meta": {
+            "scanDurationMs": elapsed_ms,
+            "direction": direction,
+            "minDollarAdv": min_dollar_adv,
+            "structureMax": structure_max,
+            "minRR": min_rr,
+            "subRRRejected": core["sub_rr_count"],
+            "rsLookback": rs_lookback,
+            "betaLookback": beta_lookback,
+            "errors": errors[:10] if errors else [],
+        },
+    }
+
+    with _preview_cache_lock:
+        _preview_cache[cache_key] = result
+    return result
 
 
 # ---------------------------------------------------------------------------

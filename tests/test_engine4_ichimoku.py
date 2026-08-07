@@ -1193,6 +1193,7 @@ from backend.engine4_ichimoku import (  # noqa: E402
     PLAYBOOK_KIJUN_PULLBACK,
     PLAYBOOK_KUMO_BREAKOUT,
     PLAYBOOK_TK_CROSS,
+    RESEARCH_PLAYBOOKS,
     count_bars_since_cloud_breakout,
     count_bars_since_tk_cross,
     detect_kumo_breakout_setup,
@@ -1534,6 +1535,93 @@ class TestPlaybookSignalPlumbing:
         signal = build_ichimoku_signal(ticker="LEGACY", detection=detection)
         assert signal.playbook == PLAYBOOK_KIJUN_PULLBACK
         assert signal_to_dict(signal)["playbook"] == PLAYBOOK_KIJUN_PULLBACK
+
+
+class TestClosePreview:
+    """Close preview: today's forming candle synthesized from the live quote."""
+
+    def test_synthesize_preview_bar(self):
+        from backend.engine4_screener import synthesize_preview_bar
+        bar = synthesize_preview_bar(
+            {"open": 10.0, "high": 10.5, "low": 9.8, "close": 10.2, "volume": 1_000_000},
+            "2026-08-07",
+        )
+        assert bar is not None
+        assert bar.trade_date == "2026-08-07"
+        assert bar.open == 10.0 and bar.high == 10.5 and bar.low == 9.8 and bar.close == 10.2
+        assert bar.volume == 1_000_000
+
+    def test_synthesize_requires_price(self):
+        from backend.engine4_screener import synthesize_preview_bar
+        assert synthesize_preview_bar({"close": None}, "2026-08-07") is None
+        assert synthesize_preview_bar({"close": 0.0}, "2026-08-07") is None
+
+    def test_synthesize_reconciles_partial_quote(self):
+        """Missing O/H/L still yields a well-formed bar (high >= close >= low)."""
+        from backend.engine4_screener import synthesize_preview_bar
+        bar = synthesize_preview_bar({"open": None, "high": None, "low": None, "close": 10.2}, "2026-08-07")
+        assert bar.open == bar.high == bar.low == bar.close == 10.2
+        # Stale/inconsistent quote high below last trade: close wins.
+        bar2 = synthesize_preview_bar({"open": 10.0, "high": 10.1, "low": 9.9, "close": 10.4}, "2026-08-07")
+        assert bar2.high == 10.4 and bar2.low == 9.9
+
+    def test_preview_appends_forming_bar(self):
+        from backend.engine4_screener import bars_with_preview_close
+        bars = make_bars(80)
+        out, synthetic = bars_with_preview_close(bars, {"close": 999.0}, "2099-01-01")
+        assert synthetic is True
+        assert len(out) == len(bars) + 1
+        assert out[-1].close == 999.0 and out[-1].trade_date == "2099-01-01"
+        assert bars[-1].trade_date != "2099-01-01"  # original series untouched
+
+    def test_preview_noop_when_close_already_published(self):
+        """Post-close, EODHD's real EOD row wins — no synthetic bar."""
+        from backend.engine4_screener import bars_with_preview_close
+        bars = make_bars(80)
+        out, synthetic = bars_with_preview_close(bars, {"close": 999.0}, bars[-1].trade_date)
+        assert synthetic is False
+        assert out is bars
+
+    def test_preview_noop_without_quote(self):
+        from backend.engine4_screener import bars_with_preview_close
+        bars = make_bars(80)
+        out, synthetic = bars_with_preview_close(bars, None, "2099-01-01")
+        assert synthetic is False and out is bars
+
+    def test_run_close_preview_shape_and_no_persist(self, monkeypatch):
+        """End-to-end plumbing on a stubbed 1-ticker universe: payload shape,
+        preview meta, and zero tracker writes."""
+        from backend import engine4_screener as scr
+
+        bars = make_bars(80)
+        today_str = dt.date.today().isoformat()
+
+        class FakePS:
+            def fetch_live_bar_snapshots(self, tickers, **kw):
+                return {t: {"open": 140.0, "high": 141.0, "low": 139.0,
+                            "close": 140.5, "volume": 5_000_000, "timestamp": 1}
+                        for t in tickers}
+
+        import backend.price_service as ps_mod
+        monkeypatch.setattr(ps_mod, "get_price_service", lambda: FakePS())
+        monkeypatch.setattr(scr, "load_universe_sp500_and_nasdaq100", lambda: ["ZZPRVW"])
+        monkeypatch.setattr(scr, "load_index_memberships", lambda *a, **k: {"ZZPRVW": "sp500"})
+        monkeypatch.setattr(scr, "load_sector_map", lambda *a, **k: {})
+        monkeypatch.setattr(scr, "fetch_index_context", lambda **kw: (bars, {"symbol": kw.get("symbol")}))
+        monkeypatch.setattr(scr, "fetch_bars_for_ticker", lambda **kw: bars)
+
+        persisted = []
+        monkeypatch.setattr(scr, "_persist_signals", lambda sigs: persisted.extend(sigs))
+
+        result = scr.run_close_preview(max_workers=2, use_cache=False)
+
+        assert result["preview"]["isPreview"] is True
+        assert result["preview"]["syntheticBars"] == 1  # forming bar was appended
+        assert result["asOfDate"] == today_str
+        assert "playbooks" in result and set(result["playbooks"]) == set(RESEARCH_PLAYBOOKS)
+        for sig in result["actionable"] + result["structure"]:
+            assert sig["preview"] is True
+        assert persisted == []  # the preview must never seed the tracker
 
 
 class TestResearchPlaybookTrackerSeeding:

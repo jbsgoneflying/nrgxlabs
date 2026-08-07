@@ -13,6 +13,7 @@ function fmtMoney(x) {
 
 // State
 let lastPayload = null;
+let lastPreviewPayload = null;  // last close-preview payload (forming candle)
 let lastTrackerSignals = null;  // last desk-tracker payload, for row-level insight lookups
 
 // Playbook display metadata. The core playbook (kijun_pullback) keeps the
@@ -344,6 +345,9 @@ function renderSignalCard(signal, isStructure = false) {
   // the far cloud edge).
   const playbookBadge = isResearchPlaybook(playbook)
     ? `<span class="playbookBadge">${escapeHtml(pbMeta.label)}</span>` : "";
+  // Close-preview cards evaluate the FORMING candle — flag them so nobody
+  // mistakes a preview for a confirmed end-of-day signal.
+  const previewBadge = signal.preview ? `<span class="previewBadge">Preview</span>` : "";
   const stopLabel = playbook === "kumo_breakout" ? "Stop (cloud)" : "Stop";
   const structureNotes = {
     kijun_pullback: "Watch for next pullback to Kijun",
@@ -360,6 +364,7 @@ function renderSignalCard(signal, isStructure = false) {
           <span class="signalCardDirection ${direction}">${direction}</span>
           <span class="indexBadgeSmall">${indexBadge}</span>
           ${playbookBadge}
+          ${previewBadge}
           ${status !== "pending" ? `<span class="signalCardStatus ${status}">${status}</span>` : ""}
         </div>
         <span class="signalCardGrade ${gradeClass}">${grade} (${score})</span>
@@ -697,6 +702,77 @@ async function handleScan(e, opts) {
 }
 
 // -----------------------------------------------------------------------------
+// Close Preview — today's forming candle evaluated at the live price
+// -----------------------------------------------------------------------------
+
+function renderPreview(payload) {
+  lastPreviewPayload = payload;
+  const section = $("previewSection");
+  const grid = $("previewGrid");
+  const meta = $("previewMeta");
+  const empty = $("previewEmpty");
+  if (!section || !grid) return;
+
+  // The preview surfaces what would be ACTIONABLE at today's close — across
+  // every playbook, one combined ranked grid (badges disambiguate).
+  let candidates = [].concat(payload.actionable || []);
+  const pbs = payload.playbooks || {};
+  Object.keys(pbs).forEach(k => {
+    candidates = candidates.concat((pbs[k] || {}).actionable || []);
+  });
+  candidates.sort((a, b) => (b.quality?.score ?? 0) - (a.quality?.score ?? 0));
+
+  const pv = payload.preview || {};
+  const bits = [];
+  if (pv.marketOpen === false) bits.push("market closed — preview equals the last close");
+  else if (pv.minutesToClose !== null && pv.minutesToClose !== undefined) {
+    bits.push(pv.minutesToClose > 0 ? `${Math.round(pv.minutesToClose)} min to the bell` : "after the bell");
+  }
+  bits.push(`${candidates.length} would-fire candidate${candidates.length !== 1 ? "s" : ""}`);
+  const wouldWatch = (payload.structureTotal ?? 0) +
+    Object.keys(pbs).reduce((n, k) => n + ((pbs[k] || {}).structureTotal ?? 0), 0);
+  if (wouldWatch > 0) bits.push(`${wouldWatch} would-be approaching`);
+  if (pv.quotedCount) bits.push(`${pv.quotedCount} live quotes`);
+  if (meta) meta.textContent = bits.join(" · ");
+
+  grid.innerHTML = candidates.map(s => renderSignalCard(s, false)).join("");
+  if (empty) empty.style.display = candidates.length ? "none" : "";
+  renderTickerStrip("previewTickers", candidates);
+  section.classList.remove("hidden");
+}
+
+async function handleClosePreview() {
+  const btn = $("previewBtn");
+  const direction = $("direction")?.value || "";
+  if (btn) { btn.disabled = true; btn.classList.add("isLoading"); }
+  setStatus("Close preview: evaluating today's forming candle at the live price...");
+  try {
+    const params = new URLSearchParams();
+    if (direction) params.set("direction", direction);
+    params.set("force", "true");
+    const resp = await fetch(`/api/engine4-ichimoku/close-preview?${params.toString()}`);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const payload = await resp.json();
+    renderPreview(payload);
+    const n = ($("previewGrid")?.children || []).length;
+    const pv = payload.preview || {};
+    let msg = `Close preview ready — ${n} candidate${n !== 1 ? "s" : ""} would fire at the current price.`;
+    if (pv.marketOpen === false) msg += " Market is closed; this equals the last real close.";
+    else msg += " Confirm the candle holds into the bell before entering.";
+    setStatus(msg);
+    $("previewSection")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (err) {
+    console.error("Close preview failed:", err);
+    setStatus(`Close preview error: ${err.message}`, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove("isLoading"); }
+  }
+}
+
+// -----------------------------------------------------------------------------
 // Desk Trade Tracker + Backtest
 // -----------------------------------------------------------------------------
 
@@ -919,6 +995,12 @@ function init() {
   if (runBtn) {
     runBtn.addEventListener("click", handleScan);
   }
+
+  // Close Preview — evaluate today's forming candle at the live price
+  const previewBtn = $("previewBtn");
+  if (previewBtn) {
+    previewBtn.addEventListener("click", handleClosePreview);
+  }
   
   // Approaching (structure) toggle — collapsed by default
   const approachingToggle = $("approachingToggle");
@@ -1016,13 +1098,23 @@ if (document.readyState === "loading") {
   // Find a rendered signal across the core lists AND the research playbook
   // blocks. The same ticker can fire multiple playbooks, so the card's
   // data-playbook attribute disambiguates.
-  function findRenderedSignal(ticker, playbook) {
-    var lists = [].concat(lastPayload.actionable || [], lastPayload.structure || []);
-    var pbs = lastPayload.playbooks || {};
-    Object.keys(pbs).forEach(function (k) {
-      var b = pbs[k] || {};
-      lists = lists.concat(b.actionable || [], b.structure || []);
-    });
+  function findRenderedSignal(ticker, playbook, preferPreview) {
+    function collect(payload) {
+      if (!payload) return [];
+      var lists = [].concat(payload.actionable || [], payload.structure || []);
+      var pbs = payload.playbooks || {};
+      Object.keys(pbs).forEach(function (k) {
+        var b = pbs[k] || {};
+        lists = lists.concat(b.actionable || [], b.structure || []);
+      });
+      return lists;
+    }
+    // Preview cards resolve against the preview payload first (the same
+    // ticker/playbook may also exist in the confirmed scan with different
+    // levels), everything else against the main scan.
+    var lists = preferPreview
+      ? collect(lastPreviewPayload).concat(collect(lastPayload))
+      : collect(lastPayload).concat(collect(lastPreviewPayload));
     return lists.find(function (s) {
       var sPb = s.playbook || "kijun_pullback";
       return s.ticker === ticker && (!playbook || sPb === playbook);
@@ -1031,10 +1123,11 @@ if (document.readyState === "loading") {
 
   function onCardClick(ev) {
     var card = ev.target.closest(".signalCard");
-    if (!card || !lastPayload) return;
+    if (!card || (!lastPayload && !lastPreviewPayload)) return;
     var ticker = card.getAttribute("data-ticker");
     var cardPb = card.getAttribute("data-playbook") || "";
-    var sig = findRenderedSignal(ticker, cardPb);
+    var inPreview = !!card.closest("#previewGrid");
+    var sig = findRenderedSignal(ticker, cardPb, inPreview);
     if (!sig) return;
 
     // Dedicated insight affordance → LLM, docked right so it never overlaps the sizer.
@@ -1065,8 +1158,8 @@ if (document.readyState === "loading") {
   }
   if (actionableGrid) actionableGrid.addEventListener("click", onCardClick);
   if (structureGrid) structureGrid.addEventListener("click", onCardClick);
-  // Research playbook grids share the same click model.
-  ["tkCrossGrid", "tkCrossStructureGrid", "kumoGrid", "kumoStructureGrid"].forEach(function (id) {
+  // Research playbook + close-preview grids share the same click model.
+  ["tkCrossGrid", "tkCrossStructureGrid", "kumoGrid", "kumoStructureGrid", "previewGrid"].forEach(function (id) {
     var el = $(id);
     if (el) el.addEventListener("click", onCardClick);
   });

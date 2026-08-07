@@ -283,6 +283,61 @@ class PriceService:
             return None
         return None
 
+    def fetch_live_bar_snapshots(
+        self,
+        tickers: List[str],
+        *,
+        chunk_size: int = 20,
+        max_workers: int = 6,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Today's forming daily candle (live OHLCV) for many tickers at once.
+
+        Uses the EODHD real-time endpoint's multi-symbol form (``s=`` param,
+        1 API call per symbol either way) in chunks, fetched in parallel.
+        Returns {bare_ticker: {open, high, low, close, volume, previousClose,
+        timestamp}} — names with no usable quote are omitted.
+        """
+        bare = [str(t).strip().upper() for t in tickers if t and str(t).strip()]
+        if not bare:
+            return {}
+        sym_to_bare = {_to_eodhd_symbol(t): t for t in bare}
+        syms = list(sym_to_bare.keys())
+        chunks = [syms[i:i + chunk_size] for i in range(0, len(syms), chunk_size)]
+
+        def _fetch(chunk: List[str]) -> List[dict]:
+            try:
+                resp = self._eodhd.get_live_quote(
+                    chunk[0], extra_symbols=",".join(chunk[1:]) or None
+                )
+                return [r for r in (resp.rows or []) if isinstance(r, dict)]
+            except Exception as exc:
+                LOG.warning("fetch_live_bar_snapshots chunk failed: %s", exc)
+                return []
+
+        rows: List[dict] = []
+        with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(chunks)))) as ex:
+            for fut in as_completed({ex.submit(_fetch, c) for c in chunks}):
+                rows.extend(fut.result())
+
+        out: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            code = str(row.get("code") or "").upper()
+            t = sym_to_bare.get(code) or code.split(".")[0]
+            close = _to_float(row.get("close"))
+            if not t or close is None or close <= 0:
+                continue
+            ts = row.get("timestamp")
+            out[t] = {
+                "open": _to_float(row.get("open")),
+                "high": _to_float(row.get("high")),
+                "low": _to_float(row.get("low")),
+                "close": close,
+                "volume": _to_float(row.get("volume")),
+                "previousClose": _to_float(row.get("previousClose")),
+                "timestamp": (int(ts) if isinstance(ts, (int, float)) else None),
+            }
+        return out
+
     # -----------------------------------------------------------------------
     # fetch_daily_bars_batch  —  efficient multi-ticker fetch
     # -----------------------------------------------------------------------

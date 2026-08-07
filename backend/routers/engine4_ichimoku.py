@@ -20,6 +20,7 @@ from backend.deps import (
 )
 from backend.engine4_screener import (
     run_universe_scan as compute_engine4_scan,
+    run_close_preview as compute_engine4_close_preview,
     scan_single_ticker as compute_engine4_single_ticker,
     get_all_signals as get_engine4_signals,
     refresh_signal_statuses as refresh_engine4_statuses,
@@ -426,6 +427,50 @@ def engine4_ichimoku_backtest(
         raise HTTPException(status_code=400, detail=f"Invalid date: {e}") from e
     except Exception as e:
         LOG.exception("Unhandled failure (engine4-ichimoku/backtest)")
+        raise HTTPException(status_code=500, detail="Internal error") from e
+
+
+@router.get("/api/engine4-ichimoku/close-preview")
+def engine4_ichimoku_close_preview(
+    request: Request,
+    direction: Optional[str] = Query(None, description="Filter by direction: bullish or bearish"),
+    force: bool = Query(False, description="Bypass the 90s preview cache"),
+):
+    """Engine 4: Close Preview — evaluate today's FORMING daily candle.
+
+    Synthesizes today's bar from live EODHD quotes (last trade = hypothetical
+    close), appends it to the daily series, and runs every playbook detector.
+    Built for the last 15-20 minutes of the session: if a candidate is
+    actionable here and holds into the bell, the close IS the entry.
+
+    Same gate + verdict reconciliation as the main scan. Never persists to
+    the desk tracker — preview signals enter the book via manual Watch only.
+    """
+    flags = get_flags()
+    if not flags.ENABLE_ENGINE4_ICHIMOKU:
+        raise HTTPException(status_code=503, detail="Engine 4 (Ichimoku Continuation) is disabled.")
+
+    try:
+        dir_filter = None
+        if direction:
+            d = str(direction).strip().lower()
+            if d in ("bullish", "bull", "long"):
+                dir_filter = "bullish"
+            elif d in ("bearish", "bear", "short"):
+                dir_filter = "bearish"
+
+        result = compute_engine4_close_preview(
+            direction=dir_filter,
+            benzinga_client=get_benzinga_client_optional(),
+            max_workers=flags.ENGINE4_MAX_WORKERS,
+            use_cache=not force,
+        )
+        result = _gate_engine4_result(result, flags)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        LOG.exception("Unhandled failure (engine4-ichimoku/close-preview)")
         raise HTTPException(status_code=500, detail="Internal error") from e
 
 

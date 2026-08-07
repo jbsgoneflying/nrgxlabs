@@ -308,6 +308,33 @@
         color: rgba(120, 40, 160, 0.95);
         white-space: nowrap;
       }
+
+      /* Close-preview chip: the candle is still forming */
+      .previewChip {
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        background: rgba(255, 149, 0, 0.12);
+        border: 1px solid rgba(255, 149, 0, 0.35);
+        color: #995c00;
+        white-space: nowrap;
+      }
+      .previewBadge {
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        background: rgba(255, 149, 0, 0.12);
+        border: 1px solid rgba(255, 149, 0, 0.35);
+        color: #995c00;
+        margin-left: 6px;
+        white-space: nowrap;
+      }
     </style>
   </head>
   <body>
@@ -352,8 +379,41 @@
             <span class="btnSpinner" aria-hidden="true"></span>
             Scan Universe
           </button>
+          <button id="previewBtn" class="primaryButton" type="button" style="background:#b36b00;">
+            <span class="btnSpinner" aria-hidden="true"></span>
+            Close Preview
+          </button>
         </form>
         <div id="status" class="status">Click "Scan Universe" to find Ichimoku continuation setups in SP500 + Nasdaq100 (516 tickers).</div>
+      </section>
+
+      <!-- Close Preview — today's forming candle evaluated at the live price -->
+      <section class="surface hidden" id="previewSection" style="border:1px solid rgba(255,149,0,0.35); margin-bottom:12px;">
+        <div class="sectionHeader">
+          <h2 class="sectionTitle">
+            Close Preview — Today's Candle
+            <span class="tipWrap">
+              <button class="tipBtn" type="button" aria-label="Close preview help" aria-expanded="false">i</button>
+              <div class="tipPanel" role="tooltip">
+                <div class="tipTitle">Close Preview</div>
+                <div class="tipBody">
+                  <p>Every playbook re-evaluated as if <b>today's daily candle closed at the current live price</b>. Built for the last 15-20 minutes of the session: if a candidate shows here and holds into the bell, the close is the entry.</p>
+                  <ul>
+                    <li><b>Same rules</b>: identical detectors, scoring, freshness and regime gate as the main scan</li>
+                    <li><b>Forming candle</b>: the trigger can appear or vanish with the tape — confirm it holds at 4:00 ET</li>
+                    <li><b>Volume caveat</b>: uses the running session volume; a volume-surge tag can still change by the bell</li>
+                    <li><b>Never auto-tracks</b>: preview names enter the Desk Tracker only via manual Watch</li>
+                  </ul>
+                </div>
+              </div>
+            </span>
+            <span class="previewChip">Forming candle — confirm at the bell</span>
+          </h2>
+          <div class="sectionMeta muted" id="previewMeta">—</div>
+        </div>
+        <div id="previewTickers" class="tickerStrip" style="display:none;"></div>
+        <div id="previewGrid" class="watchlistGrid"></div>
+        <div id="previewEmpty" class="muted" style="display:none; font-size:12px; padding:8px 0;">No playbook would fire if today's candle closed at the current price.</div>
       </section>
 
       <section class="results hidden" id="results">
@@ -671,7 +731,7 @@
     <script src="/static/desk-insight.js?v=2"></script>
     <script src="/static/ui_kit.js?v=7"></script>
     <script src="/static/position_calculator.js?v=4"></script>
-    <script src="/static/ichimoku.js?v=16"></script>
+    <script src="/static/ichimoku.js?v=17"></script>
     <script src="/static/calculator.js"></script>
     <!-- nav.js intentionally not loaded: the NRGX desk is Ichimoku-only. -->
     <script src="/static/raven-chat.js?v=4"></script>
