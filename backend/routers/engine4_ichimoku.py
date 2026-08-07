@@ -14,8 +14,6 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from backend.config import get_flags
 from backend.deps import (
     LOG,
-    get_client,
-    get_client_optional,
     get_benzinga_client_optional,
     engine4_cache,
     engine4_cache_lock,
@@ -35,7 +33,6 @@ from backend.gating import (
     reconcile_ichimoku_verdict,
     summarize_verdicts,
 )
-from backend.orats_client import OratsError
 
 router = APIRouter()
 
@@ -123,8 +120,9 @@ def engine4_ichimoku_scan(
     - Trend qualification (price vs cloud, Kijun slope)
     - Pullback detection (past Tenkan, near Kijun)
     - Entry triggers (Tenkan reclaim with candle quality)
-    - Dealer gamma context (SPX for S&P, NDX for Nasdaq)
     - Earnings filter (downgrade if within 5 sessions)
+
+    Market data is served entirely by EODHD (bars + live quotes).
     """
     flags = get_flags()
     if not flags.ENABLE_ENGINE4_ICHIMOKU:
@@ -134,10 +132,6 @@ def engine4_ichimoku_scan(
         )
 
     try:
-        client = get_client_optional()
-        if client is None:
-            raise HTTPException(status_code=503, detail="ORATS unavailable (missing ORATS_TOKEN).")
-
         dir_filter = None
         if direction:
             d = str(direction).strip().lower()
@@ -157,7 +151,6 @@ def engine4_ichimoku_scan(
             benzinga_client = get_benzinga_client_optional()
 
             result = compute_engine4_scan(
-                client,
                 as_of_date=date,
                 min_score=min_score,
                 direction=dir_filter,
@@ -176,7 +169,7 @@ def engine4_ichimoku_scan(
         # the scan-time close. Cheap: one quote per surfaced name.
         if getattr(flags, "ENGINE4_LIVE_REPRICE", True) and isinstance(result, dict):
             try:
-                apply_engine4_live_overlay(result, client, max_workers=flags.ENGINE4_MAX_WORKERS)
+                apply_engine4_live_overlay(result, max_workers=flags.ENGINE4_MAX_WORKERS)
             except Exception as live_err:
                 LOG.warning(f"Live re-pricing overlay failed for engine4: {live_err}")
 
@@ -184,9 +177,6 @@ def engine4_ichimoku_scan(
 
     except HTTPException:
         raise
-    except OratsError as e:
-        LOG.exception("ORATS failure (engine4-ichimoku)")
-        raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:
         LOG.exception("Unhandled failure (engine4-ichimoku)")
         raise HTTPException(status_code=500, detail="Internal error") from e
@@ -234,19 +224,16 @@ def _gate_engine4_result(result, flags):
             result["gateSummary"] = gs
             result["gateContext"] = gate_ctx
 
-            # Reconcile grade + freshness + gate + gamma into one
-            # continuation verdict per name, and lead the card with it.
-            market_gamma = result.get("marketGamma", {}) if isinstance(result.get("marketGamma"), dict) else {}
+            # Reconcile grade + freshness + gate into one continuation
+            # verdict per name, and lead the card with it.
             regime_label = gate_ctx.get("regime_label", "")
             for key in ("actionable", "structure", "watchlist"):
                 setups = result.get(key)
                 if not isinstance(setups, list):
                     continue
                 for sig in setups:
-                    membership = str(sig.get("indexMembership") or "sp500")
-                    gctx = market_gamma.get("ndx") if membership == "nasdaq100" else market_gamma.get("spx")
                     sig["verdict"] = reconcile_ichimoku_verdict(
-                        sig, gamma_ctx=gctx, regime_label=regime_label
+                        sig, regime_label=regime_label
                     )
             result["verdictSummary"] = summarize_verdicts(
                 (result.get("actionable") or []) + (result.get("structure") or [])
@@ -281,19 +268,15 @@ def engine4_ichimoku_status(
         )
 
     try:
-        client = get_client_optional()
         live_reprice = getattr(flags, "ENGINE4_LIVE_REPRICE", True)
 
         if refresh:
-            if client is None:
-                raise HTTPException(status_code=503, detail="ORATS unavailable for refresh.")
-
-            refresh_result = refresh_engine4_statuses(client, as_of_date=date)
+            refresh_result = refresh_engine4_statuses(as_of_date=date)
             signals = get_engine4_signals()
-            if live_reprice and client is not None:
+            if live_reprice:
                 try:
                     from backend.engine4_screener import overlay_tracker_signals
-                    overlay_tracker_signals(signals, client, max_workers=flags.ENGINE4_MAX_WORKERS)
+                    overlay_tracker_signals(signals, max_workers=flags.ENGINE4_MAX_WORKERS)
                 except Exception as live_err:
                     LOG.warning(f"Tracker live overlay failed for engine4: {live_err}")
             return {
@@ -306,10 +289,10 @@ def engine4_ichimoku_status(
         # Even on a plain load, re-price the desk book against the live market
         # so a name that already blew through its trigger doesn't keep reading
         # its scan-time distance.
-        if live_reprice and client is not None:
+        if live_reprice:
             try:
                 from backend.engine4_screener import overlay_tracker_signals
-                overlay_tracker_signals(signals, client, max_workers=flags.ENGINE4_MAX_WORKERS)
+                overlay_tracker_signals(signals, max_workers=flags.ENGINE4_MAX_WORKERS)
             except Exception as live_err:
                 LOG.warning(f"Tracker live overlay failed for engine4: {live_err}")
         return {
@@ -401,10 +384,6 @@ def engine4_ichimoku_backtest(
         raise HTTPException(status_code=503, detail="Engine 4 (Ichimoku Continuation) is disabled.")
 
     try:
-        client = get_client_optional()
-        if client is None:
-            raise HTTPException(status_code=503, detail="ORATS unavailable (missing ORATS_TOKEN).")
-
         end_d = _dt.date.fromisoformat(end[:10]) if end else _dt.date.today()
         start_d = _dt.date.fromisoformat(start[:10]) if start else (end_d - _dt.timedelta(days=365))
 
@@ -416,7 +395,6 @@ def engine4_ichimoku_backtest(
 
         from backend.engine4_backtest import backtest_ichimoku
         result = backtest_ichimoku(
-            client,
             tickers=universe,
             start=start_d,
             end=end_d,
@@ -428,9 +406,6 @@ def engine4_ichimoku_backtest(
         raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid date: {e}") from e
-    except OratsError as e:
-        LOG.exception("ORATS failure (engine4-ichimoku/backtest)")
-        raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:
         LOG.exception("Unhandled failure (engine4-ichimoku/backtest)")
         raise HTTPException(status_code=500, detail="Internal error") from e
@@ -451,7 +426,6 @@ def engine4_ichimoku_ticker(
     - Pullback state machine
     - Entry trigger detection
     - A+ scoring breakdown
-    - Dealer gamma context
     """
     flags = get_flags()
     if not flags.ENABLE_ENGINE4_ICHIMOKU:
@@ -461,10 +435,6 @@ def engine4_ichimoku_ticker(
         )
 
     try:
-        client = get_client_optional()
-        if client is None:
-            raise HTTPException(status_code=503, detail="ORATS unavailable (missing ORATS_TOKEN).")
-
         t = str(ticker or "").strip().upper()
         if not t:
             raise HTTPException(status_code=400, detail="Missing ticker.")
@@ -472,7 +442,6 @@ def engine4_ichimoku_ticker(
         benzinga_client = get_benzinga_client_optional()
 
         result = compute_engine4_single_ticker(
-            client,
             ticker=t,
             as_of_date=date,
             benzinga_client=benzinga_client,
@@ -482,9 +451,6 @@ def engine4_ichimoku_ticker(
 
     except HTTPException:
         raise
-    except OratsError as e:
-        LOG.exception(f"ORATS failure (engine4-ichimoku/{ticker})")
-        raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:
         LOG.exception(f"Unhandled failure (engine4-ichimoku/{ticker})")
         raise HTTPException(status_code=500, detail="Internal error") from e

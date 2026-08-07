@@ -1275,21 +1275,6 @@ Rules: These are TREND-CONTINUATION setups — they follow established Ichimoku 
 Return valid JSON:
 { "ichimoku_structure": "...", "entry_quality": "...", "freshness_read": "...", "risk_framework": "...", "component_analysis": "...", "desk_takeaway": "..." }""",
 
-    "ik_gamma": """You are a senior gamma analyst advising an Ichimoku trend-continuation desk.
-
-Given the Ichimoku market gamma context for both SPX and NDX — each with net gamma sign (positive/negative),
-environment (supportive/challenging), recommendation text, GEX values, spot, and expiry — explain:
-
-1. DUAL INDEX READ — What are SPX and NDX gamma telling us? Do they agree or diverge?
-2. CONTINUATION IMPACT — How does dealer gamma affect the likelihood of trend continuation vs reversal?
-3. INDEX MEMBERSHIP — How should SPX gamma matter for SP500 names and NDX gamma for Nasdaq names?
-4. DESK TAKEAWAY — One sentence: does the gamma environment support taking Ichimoku continuation trades today?
-
-Rules: Frame for trend-continuation, not mean-reversion. Cite both SPX and NDX gamma signs. Under 230 words.
-
-Return valid JSON:
-{ "dual_index_read": "...", "continuation_impact": "...", "index_membership": "...", "desk_takeaway": "..." }""",
-
     "ik_scan_summary": """You are a senior scanner analyst at a proprietary trend-continuation desk.
 
 Given the Ichimoku scan summary — universe scanned, actionable count, structure (watchlist) count,
@@ -1414,7 +1399,6 @@ _CARD_INSIGHT_KEYS: Dict[str, set] = {
     "rd_gate": {"gate_status", "regime_impact", "vol_direction", "desk_takeaway"},
     # Ichimoku (Engine 4) card types
     "ik_signal": {"ichimoku_structure", "entry_quality", "freshness_read", "risk_framework", "component_analysis", "desk_takeaway"},
-    "ik_gamma": {"dual_index_read", "continuation_impact", "index_membership", "desk_takeaway"},
     "ik_scan_summary": {"opportunity_read", "actionable_vs_structure", "rejection_rate", "desk_takeaway"},
     "ik_gate": {"gate_status", "regime_for_continuation", "vol_direction_impact", "desk_takeaway"},
     # Desk Brain (meta-allocator) card type

@@ -664,18 +664,16 @@ def reconcile_red_dog_verdict(
 def reconcile_ichimoku_verdict(
     signal: dict,
     *,
-    gamma_ctx: Optional[dict] = None,
     regime_label: str = "",
 ) -> Dict[str, Any]:
-    """Collapse grade + freshness + gate + gamma into one continuation verdict.
+    """Collapse grade + freshness + gate into one continuation verdict.
 
     Ichimoku is a *trend-continuation* engine, so the read differs from the
     mean-reversion ladder:
       - Gate SUPPRESS, grade C, or freshness 'rejected'   → STAND_DOWN
       - 'structure' (not actionable today), grade B, gate
-        WATCH, gamma hostile, or earnings warning          → at most WATCH
-      - Actionable A/A+, continuation-friendly gamma, gate
-        clear                                              → TRADABLE
+        WATCH, or earnings warning                         → at most WATCH
+      - Actionable A/A+, gate clear                        → TRADABLE
     """
     quality = signal.get("quality", {}) if isinstance(signal.get("quality"), dict) else {}
     gate = signal.get("gate", {}) if isinstance(signal.get("gate"), dict) else {}
@@ -694,10 +692,6 @@ def reconcile_ichimoku_verdict(
     sector_bias = str(indicators.get("sectorBias") or "").lower()
     rs_ratio = indicators.get("rsRatio")
     index_direction = str(indicators.get("indexDirection") or "").lower()
-
-    # Continuation likes orderly, dealer-stabilised tape (positive/long gamma);
-    # negative gamma ("challenging") can whip the pullback before it resumes.
-    gamma_env = str((gamma_ctx or {}).get("environment") or "").lower()
 
     drivers: List[str] = []
     verdict = VERDICT_TRADABLE
@@ -724,8 +718,6 @@ def reconcile_ichimoku_verdict(
         demote(VERDICT_WATCH, "Pattern grade B")
     if gate_status == "WATCH":
         demote(VERDICT_WATCH, "Gate: marginal regime/vol")
-    if gamma_env == "challenging":
-        demote(VERDICT_WATCH, "Dealer gamma can whip the pullback")
     if "Earnings Warning" in tags:
         demote(VERDICT_WATCH, "Earnings inside the hold window")
     # Sector trend: a name fighting its own sector is at most a watch.
@@ -755,7 +747,6 @@ def reconcile_ichimoku_verdict(
             "grade": grade,
             "freshnessBucket": bucket,
             "gateStatus": gate_status or "n/a",
-            "gammaEnvironment": gamma_env or "n/a",
             "regimeLabel": regime_label or "n/a",
             "sectorBias": sector_bias or "n/a",
             "indexDirection": index_direction or "n/a",

@@ -123,62 +123,6 @@ function renderStats(payload) {
   setText("statsMeta", `A+ setups only | ${payload.asOfDate || "—"} | ${duration > 0 ? `${(duration / 1000).toFixed(1)}s` : "—"}`);
 }
 
-function renderGammaContext(payload) {
-  const gamma = payload.marketGamma || {};
-  const spx = gamma.spx || {};
-  const ndx = gamma.ndx || {};
-  
-  // SPX Gamma
-  const spxAvailable = spx.available !== false && spx.netGammaSign;
-  const spxSign = spx.netGammaSign || "unknown";
-  if (spxSign === "positive") {
-    setHtml("spxGammaSign", `<span class="gammaPositive">POSITIVE</span>`);
-  } else if (spxSign === "negative") {
-    setHtml("spxGammaSign", `<span class="gammaNegative">NEGATIVE</span>`);
-  } else {
-    setHtml("spxGammaSign", `<span style="color: var(--muted);">Unavailable</span>`);
-  }
-  
-  const spxEnv = spx.environment || "unknown";
-  if (spxEnv === "supportive") {
-    setHtml("spxGammaEnv", `<span class="gammaEnvSupportive">Supportive</span>`);
-  } else if (spxEnv === "challenging") {
-    setHtml("spxGammaEnv", `<span class="gammaEnvChallenging">Challenging</span>`);
-  } else {
-    setHtml("spxGammaEnv", `<span style="color: var(--muted);">—</span>`);
-  }
-  
-  // Show recommendation or unavailable message
-  const spxNote = spx.recommendation || (spx.warnings ? spx.warnings[0] : "Gamma context unavailable.");
-  setText("spxGammaNote", spxNote);
-  
-  // NDX Gamma
-  const ndxAvailable = ndx.available !== false && ndx.netGammaSign;
-  const ndxSign = ndx.netGammaSign || "unknown";
-  if (ndxSign === "positive") {
-    setHtml("ndxGammaSign", `<span class="gammaPositive">POSITIVE</span>`);
-  } else if (ndxSign === "negative") {
-    setHtml("ndxGammaSign", `<span class="gammaNegative">NEGATIVE</span>`);
-  } else {
-    setHtml("ndxGammaSign", `<span style="color: var(--muted);">Unavailable</span>`);
-  }
-  
-  const ndxEnv = ndx.environment || "unknown";
-  if (ndxEnv === "supportive") {
-    setHtml("ndxGammaEnv", `<span class="gammaEnvSupportive">Supportive</span>`);
-  } else if (ndxEnv === "challenging") {
-    setHtml("ndxGammaEnv", `<span class="gammaEnvChallenging">Challenging</span>`);
-  } else {
-    setHtml("ndxGammaEnv", `<span style="color: var(--muted);">—</span>`);
-  }
-  
-  // Show recommendation or unavailable message
-  const ndxNote = ndx.recommendation || (ndx.warnings ? ndx.warnings[0] : "Gamma context unavailable.");
-  setText("ndxGammaNote", ndxNote);
-  
-  setText("gammaMeta", spxAvailable || ndxAvailable ? "Dealer positioning by index" : "Gamma data unavailable for today");
-}
-
 function fmtAsOfTime(iso) {
   if (!iso) return "";
   try {
@@ -477,7 +421,7 @@ function renderSignals(payload) {
   if (actionable.length > 0) {
     actionableGrid.innerHTML = actionable.map(s => renderSignalCard(s, false)).join("");
     // Lead with the reconciled verdict mix so the header never overstates "ready
-    // to trade" when the regime/gamma has stood names down.
+    // to trade" when the regime gate has stood names down.
     const vCount = (st) => actionable.filter(s => (s.verdict && s.verdict.status) === st).length;
     const vt = vCount("TRADABLE"), vw = vCount("WATCH"), vs = vCount("STAND_DOWN");
     const vParts = [];
@@ -590,7 +534,6 @@ function render(payload) {
   renderGateBanner(payload);
   renderVerdictBanner(payload);
   renderStats(payload);
-  renderGammaContext(payload);
   renderSignals(payload);
 }
 
@@ -924,7 +867,7 @@ if (document.readyState === "loading") {
 
   function fetchInsight(cardType, cardData, title, x, y) {
     var ctx = {};
-    if (lastPayload) { ctx.marketGamma = lastPayload.marketGamma || {}; ctx.asOfDate = lastPayload.asOfDate; }
+    if (lastPayload) { ctx.asOfDate = lastPayload.asOfDate; }
     ikInsight.fetch(cardType, cardData, title, x, y, ctx);
   }
 
@@ -992,18 +935,6 @@ if (document.readyState === "loading") {
       if (!rec) return;
       var ix = Math.max(20, window.innerWidth - 470);
       fetchInsight("ik_signal", rec, "Ichimoku: " + ticker + " (" + (rec.direction || "") + ", " + (rec.status || "tracked") + ")", ix, 96);
-    });
-  }
-
-  // ── Gamma Context (SPX + NDX) ──
-  var gammaEl = $("gammaSection");
-  if (gammaEl) {
-    gammaEl.classList.add("ikClick");
-    gammaEl.title = "Click for desk insight";
-    gammaEl.addEventListener("click", function(ev) {
-      if (ev.target.closest(".signalCard, button, a")) return;
-      if (!lastPayload || !lastPayload.marketGamma) return;
-      fetchInsight("ik_gamma", lastPayload.marketGamma, "Market Gamma Context (SPX + NDX)", ev.clientX, ev.clientY);
     });
   }
 

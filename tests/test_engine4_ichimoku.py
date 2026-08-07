@@ -757,7 +757,7 @@ class TestReconcileIchimokuVerdict:
     def test_actionable_clean_is_tradable(self):
         sig = {"quality": {"grade": "A+", "score": 88}, "freshness": {"bucket": "actionable"},
                "gate": {"status": "TRADABLE"}, "tags": []}
-        v = reconcile_ichimoku_verdict(sig, gamma_ctx={"environment": "supportive"})
+        v = reconcile_ichimoku_verdict(sig)
         assert v["status"] == VERDICT_TRADABLE
 
     def test_structure_caps_at_watch(self):
@@ -824,12 +824,16 @@ class TestDirectionAwareGate:
         assert d.status == "SUPPRESS"
 
 
-class TestReconcileIchimokuVerdictHostileGamma:
-    def test_hostile_gamma_caps_at_watch(self):
+class TestReconcileIchimokuVerdictNoGammaInput:
+    def test_verdict_has_no_gamma_input(self):
+        """Dealer gamma was removed from the Ichimoku engine (EODHD-only data
+        plan) — the reconciled verdict must not carry a gamma input or demote
+        on it."""
         sig = {"quality": {"grade": "A+", "score": 85}, "freshness": {"bucket": "actionable"},
                "gate": {"status": "TRADABLE"}, "tags": []}
-        v = reconcile_ichimoku_verdict(sig, gamma_ctx={"environment": "challenging"})
-        assert v["status"] == VERDICT_WATCH
+        v = reconcile_ichimoku_verdict(sig)
+        assert v["status"] == VERDICT_TRADABLE
+        assert "gammaEnvironment" not in v["inputs"]
 
 
 class TestBacktestHarness:
@@ -956,7 +960,7 @@ class TestLiveRepricing:
 
         prices = {"AAA": 100.5, "BBB": 49.0}
 
-        def fake_ctx(client, *, ticker):
+        def fake_ctx(*, ticker):
             return {"price": prices.get(ticker), "marketOpen": True, "source": "test"}
 
         monkeypatch.setattr(scr, "fetch_live_price_context_optional", fake_ctx)
@@ -973,7 +977,7 @@ class TestLiveRepricing:
                 "indicators": {"atr": 1.0},
             }],
         }
-        n = scr.apply_live_price_overlay(result, client=object(), max_workers=2)
+        n = scr.apply_live_price_overlay(result, max_workers=2)
         assert n == 2
         assert result["actionable"][0]["live"]["state"] == "triggered"
         assert result["actionable"][0]["live"]["available"] is True
@@ -984,13 +988,13 @@ class TestLiveRepricing:
     def test_overlay_handles_missing_quote(self, monkeypatch):
         from backend import engine4_screener as scr
         monkeypatch.setattr(scr, "fetch_live_price_context_optional",
-                            lambda client, *, ticker: {"price": None})
+                            lambda *, ticker: {"price": None})
         result = {"actionable": [{
             "ticker": "AAA", "direction": "bullish",
             "levels": {"entryTrigger": 100.0, "stopLoss": 95.0, "target1": 110.0},
             "indicators": {"atr": 2.0},
         }], "structure": []}
-        scr.apply_live_price_overlay(result, client=object(), max_workers=1)
+        scr.apply_live_price_overlay(result, max_workers=1)
         assert result["actionable"][0]["live"]["available"] is False
 
 

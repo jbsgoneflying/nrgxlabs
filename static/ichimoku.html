@@ -252,77 +252,6 @@
         .watchlistGrid { grid-template-columns: 1fr; }
       }
 
-      /* Gamma context panels */
-      .gammaContextGrid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 16px;
-        margin-top: 12px;
-      }
-
-      @media (max-width: 768px) {
-        .gammaContextGrid { grid-template-columns: 1fr; }
-      }
-
-      .gammaPanel {
-        padding: 14px;
-        border-radius: var(--radius-card);
-        border: 1px solid var(--border);
-        background: rgba(255,255,255,0.60);
-      }
-
-      .gammaPanelTitle {
-        font-size: 13px;
-        font-weight: 800;
-        margin-bottom: 10px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-
-      .gammaPanelTitle .indexBadge {
-        padding: 2px 8px;
-        border-radius: 999px;
-        font-size: 10px;
-        font-weight: 700;
-        background: rgba(0, 122, 255, 0.10);
-        border: 1px solid rgba(0, 122, 255, 0.20);
-        color: rgba(0, 90, 200, 0.95);
-      }
-
-      .gammaRow {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 4px 0;
-        font-size: 12px;
-      }
-
-      .gammaRow .label {
-        color: var(--muted);
-        font-weight: 600;
-      }
-
-      .gammaPositive {
-        color: rgba(52, 199, 89, 0.95);
-        font-weight: 700;
-      }
-
-      .gammaNegative {
-        color: rgba(255, 59, 48, 0.95);
-        font-weight: 700;
-      }
-
-      .gammaEnvSupportive {
-        color: rgba(52, 199, 89, 0.95);
-        font-weight: 700;
-      }
-
-      .gammaEnvChallenging {
-        color: rgba(255, 149, 0, 0.95);
-        font-weight: 700;
-      }
-
       .emptyState {
         padding: 40px 20px;
         text-align: center;
@@ -414,7 +343,7 @@
             <span style="font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);">Desk Verdict</span>
             <span id="verdictSummary" style="font-size:13px; font-weight:700;"></span>
           </div>
-          <div id="verdictNote" style="margin-top:6px; font-size:11px; color:var(--muted);">Reconciled continuation read = grade + freshness + gate + dealer gamma.</div>
+          <div id="verdictNote" style="margin-top:6px; font-size:11px; color:var(--muted);">Reconciled continuation read = grade + freshness + regime gate.</div>
         </section>
 
         <!-- Stats Summary -->
@@ -460,65 +389,6 @@
               <div class="metricLabel">Rejected</div>
               <div id="statRejected" class="metricValue mono" style="color: var(--muted);">—</div>
               <div class="metricCaption muted">Impulse bars</div>
-            </div>
-          </div>
-        </section>
-
-        <!-- Market Gamma Context -->
-        <section class="surface" id="gammaSection">
-          <div class="sectionHeader" data-insight="regime_gate">
-            <h2 class="sectionTitle">
-              Market Gamma Context
-              <span class="tipWrap">
-                <button class="tipBtn" type="button" aria-label="Market gamma help" aria-expanded="false">i</button>
-                <div class="tipPanel" role="tooltip">
-                  <div class="tipTitle">Market Gamma Context (Segmented by Index)</div>
-                  <div class="tipBody">
-                    <p><b>What is dealer gamma?</b> Options market makers must hedge their positions. When "long gamma," they buy dips and sell rips. When "short gamma," they do the opposite.</p>
-                    <p><b>For Ichimoku continuation setups:</b></p>
-                    <ul>
-                      <li><b>Positive gamma</b>: Supports pullback continuation (dealers buy the dip)</li>
-                      <li><b>Negative gamma</b>: Can accelerate moves - be more selective</li>
-                    </ul>
-                    <p>S&P 500 names use SPX gamma; Nasdaq 100 names use NDX/QQQ gamma.</p>
-                  </div>
-                </div>
-              </span>
-            </h2>
-            <div class="sectionMeta muted" id="gammaMeta">—</div>
-          </div>
-          <div class="gammaContextGrid">
-            <!-- SPX Gamma Panel -->
-            <div class="gammaPanel">
-              <div class="gammaPanelTitle">
-                S&P 500 Names
-                <span class="indexBadge">SPX</span>
-              </div>
-              <div class="gammaRow">
-                <span class="label">Net Gamma</span>
-                <span id="spxGammaSign">—</span>
-              </div>
-              <div class="gammaRow">
-                <span class="label">Environment</span>
-                <span id="spxGammaEnv">—</span>
-              </div>
-              <div id="spxGammaNote" class="gammaRow" style="font-size: 11px; color: var(--muted); display: block; margin-top: 8px;"></div>
-            </div>
-            <!-- NDX Gamma Panel -->
-            <div class="gammaPanel">
-              <div class="gammaPanelTitle">
-                Nasdaq 100 Names
-                <span class="indexBadge">NDX</span>
-              </div>
-              <div class="gammaRow">
-                <span class="label">Net Gamma</span>
-                <span id="ndxGammaSign">—</span>
-              </div>
-              <div class="gammaRow">
-                <span class="label">Environment</span>
-                <span id="ndxGammaEnv">—</span>
-              </div>
-              <div id="ndxGammaNote" class="gammaRow" style="font-size: 11px; color: var(--muted); display: block; margin-top: 8px;"></div>
             </div>
           </div>
         </section>

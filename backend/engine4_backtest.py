@@ -170,7 +170,6 @@ def backtest_from_bars(
 
 
 def backtest_ichimoku(
-    client,
     *,
     tickers: List[str],
     start: dt.date,
@@ -181,7 +180,7 @@ def backtest_ichimoku(
     max_hold: int = 10,
     max_tickers: int = 40,
 ) -> Dict[str, Any]:
-    """Universe continuation backtest over a date range using ORATS daily bars."""
+    """Universe continuation backtest over a date range using EODHD daily bars."""
     tickers = list(dict.fromkeys(t.upper().strip() for t in tickers if t))[:max_tickers]
     # Pull enough history before `start` to satisfy the (cloud-heavy) warmup.
     fetch_start = start - dt.timedelta(days=int(warmup * 1.8) + 30)
@@ -189,7 +188,7 @@ def backtest_ichimoku(
     bars_by_ticker: Dict[str, List[DailyBar]] = {}
     for t in tickers:
         try:
-            bars = fetch_daily_bars_range(client, ticker=t, start=fetch_start, end=end)
+            bars = fetch_daily_bars_range(ticker=t, start=fetch_start, end=end)
             if bars and len(bars) >= warmup + 2:
                 bars_by_ticker[t] = bars
         except Exception as e:

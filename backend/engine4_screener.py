@@ -2,7 +2,8 @@
 Engine 4: Ichimoku Cloud Continuation Universe Scanner
 
 Scans the SP500 + Nasdaq100 universe for Ichimoku continuation setups
-with caching, parallel processing, and segmented gamma context.
+with caching and parallel processing. All market data (daily bars and
+live quotes) is served by EODHD via the shared PriceService.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from cachetools import TTLCache
 
 from backend.config import get_flags
-from backend.dealer_gamma_context import compute_dealer_gamma_context
 from backend.engine4_ichimoku import (
     APLUS_THRESHOLD,
     BETA_LOOKBACK_DEFAULT,
@@ -33,7 +33,6 @@ from backend.engine4_ichimoku import (
     detect_ichimoku_setup,
     signal_to_dict,
 )
-from backend.orats_client import OratsClient
 from backend.technicals import (
     DailyBar,
     fetch_daily_bars_range,
@@ -143,7 +142,6 @@ def load_sector_map(repo_root: Optional[Path] = None) -> Dict[str, str]:
 
 
 def fetch_index_context(
-    client: OratsClient,
     *,
     symbol: str,
     as_of_date: dt.date,
@@ -156,7 +154,7 @@ def fetch_index_context(
     """
     try:
         bars = fetch_bars_for_ticker(
-            client, ticker=symbol, as_of_date=as_of_date, use_cache=use_cache
+            ticker=symbol, as_of_date=as_of_date, use_cache=use_cache
         )
     except Exception as e:
         LOG.warning(f"Index/sector context fetch failed for {symbol}: {e}")
@@ -166,7 +164,6 @@ def fetch_index_context(
 
 
 def fetch_sector_states(
-    client: OratsClient,
     etfs: Set[str],
     *,
     as_of_date: dt.date,
@@ -177,7 +174,7 @@ def fetch_sector_states(
     states_by_etf: Dict[str, Dict[str, Any]] = {}
     for etf in sorted(e for e in etfs if e):
         bars, state = fetch_index_context(
-            client, symbol=etf, as_of_date=as_of_date, use_cache=use_cache
+            symbol=etf, as_of_date=as_of_date, use_cache=use_cache
         )
         bars_by_etf[etf] = bars
         states_by_etf[etf] = state
@@ -243,7 +240,6 @@ def _cache_key_bars(ticker: str, as_of: str) -> str:
 # ---------------------------------------------------------------------------
 
 def fetch_bars_for_ticker(
-    client: OratsClient,
     *,
     ticker: str,
     as_of_date: dt.date,
@@ -251,7 +247,7 @@ def fetch_bars_for_ticker(
     use_cache: bool = True,
 ) -> List[DailyBar]:
     """
-    Fetch daily bars for a ticker with caching.
+    Fetch daily bars for a ticker with caching (EODHD via PriceService).
     Ichimoku needs 52+ bars for Span B, plus 26 bars for cloud projection alignment,
     so we request 150 calendar days to ensure ~100 trading days.
 
@@ -269,7 +265,7 @@ def fetch_bars_for_ticker(
                 return cached
     
     start = as_of_date - dt.timedelta(days=lookback_days)
-    bars = fetch_daily_bars_range(client, ticker=ticker, start=start, end=as_of_date)
+    bars = fetch_daily_bars_range(ticker=ticker, start=start, end=as_of_date)
     
     with _bars_cache_lock:
         _bars_cache[cache_key] = bars
@@ -303,171 +299,6 @@ def fetch_earnings_days_ahead(
 
 
 # ---------------------------------------------------------------------------
-# Gamma Context
-# ---------------------------------------------------------------------------
-
-def fetch_gamma_context_spx(
-    client: OratsClient,
-    trade_date: dt.date,
-) -> Dict[str, Any]:
-    """
-    Fetch SPX gamma context for S&P 500 names.
-    """
-    return _fetch_gamma_context_for_symbol(client, trade_date, symbols=["SPX", "SPXW"])
-
-
-def fetch_gamma_context_ndx(
-    client: OratsClient,
-    trade_date: dt.date,
-) -> Dict[str, Any]:
-    """
-    Fetch NDX/QQQ gamma context for Nasdaq 100 names.
-    """
-    return _fetch_gamma_context_for_symbol(client, trade_date, symbols=["QQQ", "NDX"])
-
-
-def _fetch_gamma_context_for_symbol(
-    client: OratsClient,
-    trade_date: dt.date,
-    symbols: List[str],
-) -> Dict[str, Any]:
-    """
-    Fetch gamma context for given symbols with robust fallback logic.
-    
-    Strategy:
-    1. Try live strikes first (market hours)
-    2. Fall back to EOD hist_strikes
-    3. Walk back up to 5 trading days to find data
-    """
-    fields = "ticker,tradeDate,expirDate,strike,spotPrice,stockPrice,gamma,callOpenInterest,putOpenInterest,callVolume,putVolume"
-    
-    # Find next Friday for weekly expiry
-    now = dt.datetime.now()
-    days_until_friday = (4 - trade_date.weekday()) % 7
-    if days_until_friday == 0 and now.hour >= 16:
-        days_until_friday = 7
-    target_friday = trade_date + dt.timedelta(days=days_until_friday if days_until_friday > 0 else 7)
-    
-    strikes = None
-    expiry_used = None
-    data_source = "unknown"
-    
-    # STRATEGY 1: Try live strikes first (market hours)
-    for symbol in symbols:
-        try:
-            resp = client.live_strikes_by_expiry(
-                ticker=symbol,
-                expiry=target_friday.isoformat(),
-                fields=fields,
-            )
-            live_rows = resp.rows if hasattr(resp, "rows") else []
-            if live_rows and len(live_rows) > 10:
-                strikes = live_rows
-                expiry_used = target_friday.isoformat()
-                data_source = "live"
-                LOG.info(f"Using live {symbol} strikes ({len(strikes)} rows)")
-                break
-        except Exception as e:
-            LOG.debug(f"Live strikes for {symbol} failed: {e}")
-            continue
-    
-    # STRATEGY 2: Try live_strikes without specific expiry
-    if not strikes or len(strikes) < 10:
-        for symbol in symbols:
-            try:
-                resp = client.live_strikes(
-                    ticker=symbol,
-                    fields=fields,
-                )
-                live_rows = resp.rows if hasattr(resp, "rows") else []
-                if live_rows and len(live_rows) > 10:
-                    strikes = live_rows
-                    expiry_used = live_rows[0].get("expirDate", "")[:10] if live_rows else None
-                    data_source = "live"
-                    LOG.info(f"Using live {symbol} strikes without expiry filter ({len(strikes)} rows)")
-                    break
-            except Exception as e:
-                LOG.debug(f"Live strikes (no expiry) for {symbol} failed: {e}")
-                continue
-    
-    # STRATEGY 3: Fall back to EOD hist_strikes (after hours / weekends)
-    if not strikes or len(strikes) < 10:
-        LOG.info(f"Live strikes unavailable for {symbols}, falling back to EOD hist_strikes")
-        
-        dte_range = "3,21"  # 3-21 DTE
-        
-        # Walk back up to 5 trading days
-        for days_back in range(0, 6):
-            check_date = trade_date - dt.timedelta(days=days_back)
-            # Skip weekends
-            if check_date.weekday() >= 5:
-                continue
-            
-            for symbol in symbols:
-                try:
-                    resp = client.get(
-                        "hist/strikes",
-                        ticker=symbol,
-                        tradeDate=check_date.isoformat(),
-                        dte=dte_range,
-                        fields=fields,
-                    )
-                    rows = resp.rows if hasattr(resp, "rows") else []
-                    if rows and len(rows) > 10:
-                        # Pick expiry closest to target Friday
-                        expiries = set(str(r.get("expirDate", ""))[:10] for r in rows if r.get("expirDate"))
-                        if expiries:
-                            chosen = min(expiries, key=lambda e: abs((dt.date.fromisoformat(e) - target_friday).days))
-                            filtered = [r for r in rows if str(r.get("expirDate", ""))[:10] == chosen]
-                            if len(filtered) > 10:
-                                strikes = filtered
-                                expiry_used = chosen
-                                data_source = f"eod:{check_date.isoformat()}"
-                                LOG.info(f"Using EOD {symbol} strikes from {check_date} ({len(strikes)} rows)")
-                                break
-                except Exception as e:
-                    LOG.debug(f"EOD strikes for {symbol} on {check_date} failed: {e}")
-                    continue
-            
-            if strikes and len(strikes) > 10:
-                break
-    
-    # Process the strikes if we have them
-    if not strikes or len(strikes) < 10:
-        return {
-            "available": False,
-            "environment": "unknown",
-            "recommendation": "Gamma context unavailable.",
-            "warnings": [f"Could not fetch gamma data for {symbols}."],
-        }
-    
-    gamma = compute_dealer_gamma_context(strikes, expiry=expiry_used)
-    
-    # Add environment classification for continuation setups
-    net_sign = gamma.get("netGammaSign")
-    if net_sign == "positive":
-        gamma["environment"] = "supportive"
-        gamma["recommendation"] = "Positive gamma supports pullback continuation setups."
-    elif net_sign == "negative":
-        gamma["environment"] = "challenging"
-        gamma["recommendation"] = "Negative gamma can accelerate moves - be selective with entries."
-    else:
-        gamma["environment"] = "unknown"
-        gamma["recommendation"] = "Gamma context unclear - proceed with standard criteria."
-    
-    # Add source metadata
-    gamma["symbol"] = symbols[0] if symbols else "unknown"
-    gamma["dataSource"] = data_source
-    
-    # Add note if using historical data
-    if data_source.startswith("eod:"):
-        eod_date = data_source.split(":")[1]
-        gamma["recommendation"] = f"[EOD data from {eod_date}] " + gamma["recommendation"]
-    
-    return gamma
-
-
-# ---------------------------------------------------------------------------
 # Single Ticker Scan
 # ---------------------------------------------------------------------------
 
@@ -487,12 +318,10 @@ def _compute_dollar_adv(bars: List[DailyBar], lookback: int = 20) -> Optional[fl
 
 
 def scan_ticker(
-    client: OratsClient,
     *,
     ticker: str,
     as_of_date: dt.date,
     index_membership: str,
-    gamma_context: Optional[Dict[str, Any]] = None,
     benzinga_client: Any = None,
     min_dollar_adv: float = 0.0,
     use_cache: bool = True,
@@ -508,7 +337,7 @@ def scan_ticker(
     Returns IchimokuSignal if found, None otherwise.
     """
     try:
-        bars = fetch_bars_for_ticker(client, ticker=ticker, as_of_date=as_of_date, use_cache=use_cache)
+        bars = fetch_bars_for_ticker(ticker=ticker, as_of_date=as_of_date, use_cache=use_cache)
         
         if not bars or len(bars) < 60:
             return None
@@ -526,7 +355,6 @@ def scan_ticker(
             bars,
             ticker=ticker,
             index_membership=index_membership,
-            gamma_context=gamma_context,
             earnings_days_ahead=earnings_days,
         )
         
@@ -560,7 +388,6 @@ def scan_ticker(
             bars=bars,
             closes=closes,
             tenkan_series=tenkan_series,
-            gamma_context=gamma_context,
             earnings_days_ahead=earnings_days,
             index_membership=index_membership,
             dollar_adv=dollar_adv,
@@ -580,7 +407,6 @@ def scan_ticker(
 
 
 def scan_single_ticker(
-    client: OratsClient,
     *,
     ticker: str,
     as_of_date: Optional[str] = None,
@@ -601,23 +427,19 @@ def scan_single_ticker(
     memberships = load_index_memberships()
     index_membership = memberships.get(t, "sp500")
     
-    # Fetch appropriate gamma + index context
+    # Index context for the membership's proxy
     proxy = index_proxy_for(index_membership)
-    if index_membership == "nasdaq100":
-        gamma_context = fetch_gamma_context_ndx(client, today)
-    else:
-        gamma_context = fetch_gamma_context_spx(client, today)
-    index_bars, index_state = fetch_index_context(client, symbol=proxy, as_of_date=today)
+    index_bars, index_state = fetch_index_context(symbol=proxy, as_of_date=today)
 
     # Sector context for this name
     sector_map = load_sector_map()
     sector_etf = sector_map.get(t)
     sector_state = None
     if sector_etf:
-        _, sector_state = fetch_index_context(client, symbol=sector_etf, as_of_date=today)
+        _, sector_state = fetch_index_context(symbol=sector_etf, as_of_date=today)
     
     # Fetch bars
-    bars = fetch_bars_for_ticker(client, ticker=t, as_of_date=today)
+    bars = fetch_bars_for_ticker(ticker=t, as_of_date=today)
     
     if not bars or len(bars) < 60:
         return {
@@ -635,7 +457,6 @@ def scan_single_ticker(
         bars,
         ticker=t,
         index_membership=index_membership,
-        gamma_context=gamma_context,
         earnings_days_ahead=earnings_days,
     )
     
@@ -649,7 +470,6 @@ def scan_single_ticker(
         "pullback": detection.get("pullback"),
         "trigger": detection.get("trigger"),
         "indicators": detection.get("indicators"),
-        "gammaContext": gamma_context,
         "indexState": index_state,
         "sectorState": sector_state,
         "indexMembership": index_membership,
@@ -679,7 +499,6 @@ def scan_single_ticker(
             bars=bars,
             closes=ich_closes,
             tenkan_series=ich_series.get("tenkan_series", []),
-            gamma_context=gamma_context,
             earnings_days_ahead=earnings_days,
             index_membership=index_membership,
             dollar_adv=_compute_dollar_adv(bars),
@@ -701,7 +520,6 @@ def scan_single_ticker(
 # ---------------------------------------------------------------------------
 
 def run_universe_scan(
-    client: OratsClient,
     *,
     as_of_date: Optional[str] = None,
     min_score: int = 50,
@@ -715,7 +533,6 @@ def run_universe_scan(
     Scan the full SP500 + Nasdaq100 universe for Ichimoku setups.
     
     Args:
-        client: ORATS client
         as_of_date: Scan date (YYYY-MM-DD), defaults to today
         min_score: Minimum score to include (0-100)
         direction: Filter by direction ("bullish", "bearish", or None for both)
@@ -728,7 +545,7 @@ def run_universe_scan(
             names the desk never looked at).
     
     Returns:
-        Dict with scan results, stats, and gamma context
+        Dict with scan results and stats
     """
     start_time = time.time()
     
@@ -758,10 +575,6 @@ def run_universe_scan(
     # Load universe and memberships
     universe = load_universe_sp500_and_nasdaq100()
     memberships = load_index_memberships()
-    
-    # Fetch gamma contexts (once per index)
-    gamma_spx = fetch_gamma_context_spx(client, today)
-    gamma_ndx = fetch_gamma_context_ndx(client, today)
 
     # Top-down context, computed once per scan:
     #  - index Ichimoku state + bars (for the alignment gate, RS, and beta)
@@ -769,15 +582,15 @@ def run_universe_scan(
     rs_lookback = int(getattr(flags, "ENGINE4_RS_LOOKBACK", RS_LOOKBACK_DEFAULT) or RS_LOOKBACK_DEFAULT)
     beta_lookback = int(getattr(flags, "ENGINE4_BETA_LOOKBACK", BETA_LOOKBACK_DEFAULT) or BETA_LOOKBACK_DEFAULT)
     spy_bars, index_spx = fetch_index_context(
-        client, symbol=index_proxy_for("sp500"), as_of_date=today, use_cache=use_cache
+        symbol=index_proxy_for("sp500"), as_of_date=today, use_cache=use_cache
     )
     qqq_bars, index_ndx = fetch_index_context(
-        client, symbol=index_proxy_for("nasdaq100"), as_of_date=today, use_cache=use_cache
+        symbol=index_proxy_for("nasdaq100"), as_of_date=today, use_cache=use_cache
     )
     sector_map = load_sector_map()
     needed_etfs = {sector_map[t] for t in universe if sector_map.get(t)}
     _, sector_states = fetch_sector_states(
-        client, needed_etfs, as_of_date=today, use_cache=use_cache
+        needed_etfs, as_of_date=today, use_cache=use_cache
     )
     
     # Scan in parallel
@@ -787,23 +600,19 @@ def run_universe_scan(
     def _scan_one(ticker: str) -> Optional[IchimokuSignal]:
         membership = memberships.get(ticker, "sp500")
         
-        # Select appropriate gamma + index context
+        # Select appropriate index context
         if membership == "nasdaq100":
-            gamma = gamma_ndx
             idx_bars, idx_state = qqq_bars, index_ndx
         else:
-            gamma = gamma_spx
             idx_bars, idx_state = spy_bars, index_spx
 
         s_etf = sector_map.get(ticker)
         s_state = sector_states.get(s_etf) if s_etf else None
         
         return scan_ticker(
-            client,
             ticker=ticker,
             as_of_date=today,
             index_membership=membership,
-            gamma_context=gamma,
             benzinga_client=benzinga_client,
             min_dollar_adv=min_dollar_adv,
             use_cache=use_cache,
@@ -895,10 +704,6 @@ def run_universe_scan(
         "rejectedCount": rejected_count,
         "actionable": [signal_to_dict(s) for s in actionable],
         "structure": [signal_to_dict(s) for s in structure],
-        "marketGamma": {
-            "spx": gamma_spx,
-            "ndx": gamma_ndx,
-        },
         "indexState": {
             "spx": index_spx,
             "ndx": index_ndx,
@@ -990,15 +795,14 @@ def compute_live_state(
 
 def overlay_signal_list(
     sigs: List[Dict[str, Any]],
-    client: OratsClient,
     *,
     max_workers: int = 10,
 ) -> int:
     """Annotate a flat list of signal dicts with a fresh ``live`` block.
 
     Each signal must carry ``ticker``, ``direction``, ``levels`` and
-    ``indicators``. One live quote per distinct ticker. Returns the number of
-    signals annotated.
+    ``indicators``. One live quote per distinct ticker (EODHD). Returns the
+    number of signals annotated.
     """
     sigs = [s for s in (sigs or []) if isinstance(s, dict)]
     if not sigs:
@@ -1013,7 +817,7 @@ def overlay_signal_list(
 
     def _quote(ticker: str) -> Optional[Dict[str, Any]]:
         try:
-            return fetch_live_price_context_optional(client, ticker=ticker)
+            return fetch_live_price_context_optional(ticker=ticker)
         except Exception:
             return None
 
@@ -1061,7 +865,6 @@ def overlay_signal_list(
 
 def apply_live_price_overlay(
     result: Dict[str, Any],
-    client: OratsClient,
     *,
     max_workers: int = 10,
 ) -> int:
@@ -1079,12 +882,11 @@ def apply_live_price_overlay(
         block = result.get(key)
         if isinstance(block, list):
             sigs.extend([s for s in block if isinstance(s, dict)])
-    return overlay_signal_list(sigs, client, max_workers=max_workers)
+    return overlay_signal_list(sigs, max_workers=max_workers)
 
 
 def overlay_tracker_signals(
     signals: Dict[str, Any],
-    client: OratsClient,
     *,
     max_workers: int = 10,
 ) -> int:
@@ -1098,7 +900,7 @@ def overlay_tracker_signals(
     for v in signals.values():
         if isinstance(v, list):
             flat.extend([s for s in v if isinstance(s, dict)])
-    return overlay_signal_list(flat, client, max_workers=max_workers)
+    return overlay_signal_list(flat, max_workers=max_workers)
 
 
 # ---------------------------------------------------------------------------
@@ -1298,7 +1100,6 @@ def remove_signal(ticker: str, signal_date: Optional[str] = None) -> Dict[str, A
 
 
 def refresh_signal_statuses(
-    client: OratsClient,
     as_of_date: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Re-evaluate every auto-tracked signal against forward price action.
@@ -1329,7 +1130,7 @@ def refresh_signal_statuses(
             continue
 
         try:
-            bars = fetch_bars_for_ticker(client, ticker=ticker, as_of_date=today, use_cache=False)
+            bars = fetch_bars_for_ticker(ticker=ticker, as_of_date=today, use_cache=False)
         except Exception:
             continue
         forward = [b for b in bars if str(b.trade_date)[:10] > str(sig_date)[:10]]
@@ -1339,7 +1140,7 @@ def refresh_signal_statuses(
         # bar to close. Without this, a name can read "pending" all session
         # even though price already blew through the entry.
         try:
-            ctx = fetch_live_price_context_optional(client, ticker=ticker)
+            ctx = fetch_live_price_context_optional(ticker=ticker)
             live_px = ctx.get("price") if isinstance(ctx, dict) else None
         except Exception:
             live_px = None

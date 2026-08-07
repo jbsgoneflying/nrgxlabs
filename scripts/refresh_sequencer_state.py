@@ -106,14 +106,14 @@ def _compute_red_dog_breadth(orats_client) -> str:
     return bucket
 
 
-def _compute_ichimoku_breadth(orats_client) -> str:
-    """Run Engine 4 universe scan and classify A+ breadth."""
+def _compute_ichimoku_breadth() -> str:
+    """Run Engine 4 universe scan and classify A+ breadth (EODHD-backed)."""
     from backend.engine4_screener import run_universe_scan
 
     # persist=False: this is a breadth measurement only — it must not seed the
     # desk tracker with names nobody looked at (that was a source of stale
     # "pending" cards lingering for weeks).
-    result = run_universe_scan(orats_client, use_cache=False, persist=False)
+    result = run_universe_scan(use_cache=False, persist=False)
     scanned = result.get("scannedCount", 0)
     aplus = result.get("totalAPlus", 0)
     ratio = aplus / max(1, scanned)
@@ -156,7 +156,7 @@ def main() -> int:
         from backend.orats_client import OratsClient
         orats_client = OratsClient.from_env()
     except Exception as e:
-        LOG.warning("ORATS client unavailable; skipping Engine 3/4 scans: %s", e)
+        LOG.warning("ORATS client unavailable; skipping Engine 3 scan: %s", e)
 
     if orats_client:
         try:
@@ -168,18 +168,18 @@ def main() -> int:
         except Exception as e:
             LOG.warning("Red Dog breadth failed: %s", e)
             partial = True
-
-        # 3. Ichimoku breadth (Engine 4 scan)
-        try:
-            ichi = _compute_ichimoku_breadth(orats_client)
-            if ichi:
-                store.set_json("sequencer:state:ichimoku_breadth", ichi, ttl_s=_STATE_TTL_S)
-            else:
-                partial = True
-        except Exception as e:
-            LOG.warning("Ichimoku breadth failed: %s", e)
-            partial = True
     else:
+        partial = True
+
+    # 3. Ichimoku breadth (Engine 4 scan — EODHD-backed, no ORATS needed)
+    try:
+        ichi = _compute_ichimoku_breadth()
+        if ichi:
+            store.set_json("sequencer:state:ichimoku_breadth", ichi, ttl_s=_STATE_TTL_S)
+        else:
+            partial = True
+    except Exception as e:
+        LOG.warning("Ichimoku breadth failed: %s", e)
         partial = True
 
     if partial:

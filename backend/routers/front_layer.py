@@ -917,7 +917,7 @@ def api_front_layer_card_insight(body: dict):
         # Engine 3 – Red Dog
         "rd_signal", "rd_gamma", "rd_trend", "rd_scan_summary", "rd_gate",
         # Engine 4 – Ichimoku
-        "ik_signal", "ik_gamma", "ik_scan_summary", "ik_gate",
+        "ik_signal", "ik_scan_summary", "ik_gate",
     }
 
     if card_type not in valid_types:
