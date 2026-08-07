@@ -247,6 +247,10 @@ def backtest_from_bars(
     by_playbook: Dict[str, Dict[str, Any]] = {}
     by_dow: Dict[str, Dict[str, Any]] = {}
     by_playbook_dow: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    # Close model only: did the signal candle CLOSE through the trigger level
+    # (the entry is effectively tomorrow's stop-fill taken a day early) or is
+    # the close still on the near side (entering before confirmation)?
+    by_close_vs_trigger: Dict[str, Dict[str, Any]] = {}
     tickers_with_signals = 0
 
     for ticker, bars in bars_by_ticker.items():
@@ -290,10 +294,14 @@ def backtest_from_bars(
 
                 seen_keys.add(key)
                 forward = bars[i + 1:]
+                close_pos: Optional[str] = None
                 if close_entry:
                     entry_px = float(window[-1].close) if window[-1].close is not None else None
                     if not entry_px or entry_px <= 0:
                         continue
+                    is_bull = signal.direction == "bullish"
+                    through = (entry_px >= signal.entry_trigger) if is_bull else (entry_px <= signal.entry_trigger)
+                    close_pos = "throughTrigger" if through else "beforeTrigger"
                     outcome = evaluate_close_entry_outcome(
                         direction=signal.direction,
                         entry_price=entry_px,
@@ -328,6 +336,9 @@ def backtest_from_bars(
                     _record(by_dow[dow], outcome)
                     by_playbook_dow.setdefault(playbook, {}).setdefault(dow, _blank_stats())
                     _record(by_playbook_dow[playbook][dow], outcome)
+                if close_pos:
+                    by_close_vs_trigger.setdefault(close_pos, _blank_stats())
+                    _record(by_close_vs_trigger[close_pos], outcome)
         if had_signal:
             tickers_with_signals += 1
 
@@ -341,6 +352,7 @@ def backtest_from_bars(
         "byPlaybook": {p: _finalize(s) for p, s in sorted(by_playbook.items())},
         "byDow": _dow_sorted(by_dow),
         "byPlaybookDow": {p: _dow_sorted(d) for p, d in sorted(by_playbook_dow.items())},
+        "byCloseVsTrigger": {k: _finalize(s) for k, s in sorted(by_close_vs_trigger.items())},
         "params": {
             "minScore": min_score,
             "warmup": warmup,

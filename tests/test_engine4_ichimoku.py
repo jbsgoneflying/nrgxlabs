@@ -875,6 +875,7 @@ class TestBacktestHarness:
         )
         assert result["params"]["entryModel"] == "close"
         assert set(result["byBucket"]).issubset({"actionable"})
+        assert set(result["byCloseVsTrigger"]).issubset({"throughTrigger", "beforeTrigger"})
         o = result["overall"]
         # Close entry has no trigger window: entered == signals.
         assert o["triggered"] == o["signals"]
