@@ -2,13 +2,13 @@
 Engine 4: Ichimoku Cloud Continuation — backtest harness.
 
 Turns the "A+" / "actionable vs structure" labels into a *measured* edge.
-Walks each ticker's history bar-by-bar, detects the Ichimoku continuation
-setup using only data available at that bar, scores it with the exact
-production scorer, simulates the trade with `evaluate_outcome` (reused from
-Red Dog), and aggregates win-rate / avg-R / expectancy / MAE / MFE — broken
-out by grade AND by freshness bucket. The bucket breakdown answers the
-audit's key question: *does the "structure" surface actually pay, or is it
-noise we should keep suppressing?*
+Walks each ticker's history bar-by-bar, detects every Ichimoku playbook
+(core Kijun pullback, TK cross, Kumo breakout) using only data available at
+that bar, scores each with the exact production scorer, simulates the trade
+with `evaluate_outcome` (reused from Red Dog), and aggregates win-rate /
+avg-R / expectancy / MAE / MFE — broken out by grade, by freshness bucket,
+AND by playbook. The playbook cohort is the number that decides whether a
+research playbook earns desk trust, gets tightened, or gets cut.
 
 Two entry points:
 - `backtest_from_bars(...)` — pure, deterministic, no I/O (unit-testable).
@@ -22,12 +22,25 @@ import datetime as dt
 import logging
 from typing import Any, Dict, List, Optional
 
-from backend.technicals import DailyBar, fetch_daily_bars_range, compute_ichimoku_series
+from backend.technicals import DailyBar, fetch_daily_bars_range
 from backend.engine4_ichimoku import (
-    detect_ichimoku_setup,
+    PLAYBOOK_KIJUN_PULLBACK,
+    PLAYBOOK_KUMO_BREAKOUT,
+    PLAYBOOK_TK_CROSS,
     build_ichimoku_signal,
+    compute_detection_context,
+    detect_ichimoku_setup,
+    detect_kumo_breakout_setup,
+    detect_tk_cross_setup,
 )
 from backend.engine3_red_dog import evaluate_outcome
+
+# Walked per bar window, on the same shared detection context.
+_PLAYBOOK_DETECTORS = (
+    (PLAYBOOK_KIJUN_PULLBACK, detect_ichimoku_setup),
+    (PLAYBOOK_TK_CROSS, detect_tk_cross_setup),
+    (PLAYBOOK_KUMO_BREAKOUT, detect_kumo_breakout_setup),
+)
 
 LOG = logging.getLogger("engine4_backtest")
 
@@ -91,66 +104,78 @@ def backtest_from_bars(
     trigger_window: int = 3,
     max_hold: int = 10,
 ) -> Dict[str, Any]:
-    """Pure walk-forward continuation backtest over pre-fetched bars.
+    """Pure walk-forward backtest over pre-fetched bars, all playbooks.
 
-    Each distinct (ticker, signalDate) is counted once — the freshness window
-    re-surfaces the same trigger bar for a few sessions, so we dedupe to avoid
-    double-counting a single trade.
+    Each distinct (ticker, playbook, signalDate) is counted once — the
+    freshness window re-surfaces the same trigger bar for a few sessions, so
+    we dedupe to avoid double-counting a single trade. Every playbook uses
+    the same outcome evaluator (same trigger window, same max hold), so the
+    ``byPlaybook`` cohorts are directly comparable.
     """
     overall = _blank_stats()
     by_grade: Dict[str, Dict[str, Any]] = {}
     by_bucket: Dict[str, Dict[str, Any]] = {}
+    by_playbook: Dict[str, Dict[str, Any]] = {}
     tickers_with_signals = 0
 
     for ticker, bars in bars_by_ticker.items():
         if not bars or len(bars) < warmup + 2:
             continue
         had_signal = False
-        seen_dates: set = set()
+        seen_keys: set = set()
 
         for i in range(warmup, len(bars) - 1):
             window = bars[: i + 1]
-            detection = detect_ichimoku_setup(window, ticker=ticker)
-            if not detection.get("hasSignal"):
+            # One Ichimoku-series computation per bar window, shared by all
+            # playbook detectors AND the signal build.
+            context, _err = compute_detection_context(window)
+            if context is None:
                 continue
 
-            sig_payload = detection.get("signal") or {}
-            sig_date = str(sig_payload.get("signalDate") or bars[i].trade_date)[:10]
-            if sig_date in seen_dates:
-                continue  # same trigger bar already counted
+            for playbook, detector in _PLAYBOOK_DETECTORS:
+                detection = detector(window, ticker=ticker, context=context)
+                if not detection.get("hasSignal"):
+                    continue
 
-            ich = compute_ichimoku_series(window)
-            signal = build_ichimoku_signal(
-                ticker=ticker,
-                detection=detection,
-                bars=window,
-                closes=ich.get("closes", []),
-                tenkan_series=ich.get("tenkan_series", []),
-            )
-            if signal is None or signal.score < min_score:
-                continue
-            if signal.freshness_bucket == "rejected":
-                continue
+                sig_payload = detection.get("signal") or {}
+                sig_date = str(sig_payload.get("signalDate") or bars[i].trade_date)[:10]
+                key = (playbook, sig_date)
+                if key in seen_keys:
+                    continue  # same trigger bar already counted
 
-            seen_dates.add(sig_date)
-            forward = bars[i + 1:]
-            outcome = evaluate_outcome(
-                direction=signal.direction,
-                entry_trigger=signal.entry_trigger,
-                stop_loss=signal.stop_loss,
-                target_1=signal.target_1,
-                forward_bars=forward,
-                trigger_window=trigger_window,
-                max_hold=max_hold,
-            )
+                signal = build_ichimoku_signal(
+                    ticker=ticker,
+                    detection=detection,
+                    bars=window,
+                    closes=context["closes"],
+                    tenkan_series=context["tenkan_series"],
+                )
+                if signal is None or signal.score < min_score:
+                    continue
+                if signal.freshness_bucket == "rejected":
+                    continue
 
-            had_signal = True
-            _record(overall, outcome)
-            by_grade.setdefault(signal.grade, _blank_stats())
-            _record(by_grade[signal.grade], outcome)
-            bucket = signal.freshness_bucket or "unknown"
-            by_bucket.setdefault(bucket, _blank_stats())
-            _record(by_bucket[bucket], outcome)
+                seen_keys.add(key)
+                forward = bars[i + 1:]
+                outcome = evaluate_outcome(
+                    direction=signal.direction,
+                    entry_trigger=signal.entry_trigger,
+                    stop_loss=signal.stop_loss,
+                    target_1=signal.target_1,
+                    forward_bars=forward,
+                    trigger_window=trigger_window,
+                    max_hold=max_hold,
+                )
+
+                had_signal = True
+                _record(overall, outcome)
+                by_grade.setdefault(signal.grade, _blank_stats())
+                _record(by_grade[signal.grade], outcome)
+                bucket = signal.freshness_bucket or "unknown"
+                by_bucket.setdefault(bucket, _blank_stats())
+                _record(by_bucket[bucket], outcome)
+                by_playbook.setdefault(playbook, _blank_stats())
+                _record(by_playbook[playbook], outcome)
         if had_signal:
             tickers_with_signals += 1
 
@@ -158,6 +183,7 @@ def backtest_from_bars(
         "overall": _finalize(overall),
         "byGrade": {g: _finalize(s) for g, s in sorted(by_grade.items())},
         "byBucket": {b: _finalize(s) for b, s in sorted(by_bucket.items())},
+        "byPlaybook": {p: _finalize(s) for p, s in sorted(by_playbook.items())},
         "params": {
             "minScore": min_score,
             "warmup": warmup,

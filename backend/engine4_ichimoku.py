@@ -34,6 +34,40 @@ from backend.technicals import (
 # A+ threshold: setups scoring >= 75 are considered high-quality
 APLUS_THRESHOLD = 75
 
+# ---------------------------------------------------------------------------
+# Playbooks
+#
+# Engine 4 runs multiple Ichimoku playbooks over the same daily bars:
+#   - kijun_pullback (core): Kijun pullback + Tenkan reclaim continuation.
+#     The battle-tested desk playbook; auto-feeds the trade tracker.
+#   - tk_cross (research): "strong" Tenkan/Kijun cross taken only with price
+#     already on the trend side of the cloud and Chikou clear. Trend
+#     re-ignition.
+#   - kumo_breakout (research): first daily close through the cloud with
+#     Chikou clear and the forward cloud twisted supportive. Trend inception.
+#
+# Research playbooks render on the page with measured backtest edge but do
+# NOT auto-feed the desk tracker (manual Watch only) until they prove out.
+# ---------------------------------------------------------------------------
+PLAYBOOK_KIJUN_PULLBACK = "kijun_pullback"
+PLAYBOOK_TK_CROSS = "tk_cross"
+PLAYBOOK_KUMO_BREAKOUT = "kumo_breakout"
+
+PLAYBOOK_LABELS = {
+    PLAYBOOK_KIJUN_PULLBACK: "Kijun Pullback Continuation",
+    PLAYBOOK_TK_CROSS: "TK Cross (Strong)",
+    PLAYBOOK_KUMO_BREAKOUT: "Kumo Breakout",
+}
+
+RESEARCH_PLAYBOOKS = (PLAYBOOK_TK_CROSS, PLAYBOOK_KUMO_BREAKOUT)
+
+# Research-playbook freshness: the trigger event (TK cross / cloud breakout)
+# must be recent for the setup to be actionable, and price must not already
+# be extended past the trigger.
+PLAYBOOK_EVENT_MAX_AGE_BARS = 3      # cross/breakout <= 3 bars ago = actionable
+KUMO_FRESH_LOOKBACK = 10             # bars before breakout that must be non-breakout
+PLAYBOOK_EXTENSION_MAX_ATR = 1.5     # mirror of FRESHNESS_KIJUN_DISTANCE_ATR
+
 # Scoring weights (total possible = 100).
 #
 # 2026-06 top-down stack: dealer gamma was REMOVED from the quality score
@@ -182,6 +216,9 @@ class IchimokuSignal:
     rs_ratio: Optional[float] = None               # excess return vs index over RS lookback
     beta: Optional[float] = None                   # daily-return beta to index
     corr: Optional[float] = None                   # daily-return correlation to index
+
+    # --- Playbook expansion (2026-08) ---
+    playbook: str = PLAYBOOK_KIJUN_PULLBACK        # which Ichimoku playbook fired
 
 
 def _ramp(x: Optional[float], lo: float, hi: float) -> float:
@@ -1270,59 +1307,36 @@ def check_impulse_reclaim(
 # Main Detection Function
 # ---------------------------------------------------------------------------
 
-def detect_ichimoku_setup(
-    bars: List[DailyBar],
-    *,
-    ticker: str = "",
-    index_membership: str = "sp500",
-    gamma_context: Optional[Dict[str, Any]] = None,
-    earnings_days_ahead: Optional[int] = None,
-) -> Dict[str, Any]:
+def compute_detection_context(bars: List[DailyBar]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """
-    Detect Ichimoku continuation setup with full analysis.
-    
-    This is the main entry point for Engine4 analysis on a single ticker.
-    
+    Compute the shared per-ticker detection inputs used by every playbook:
+    Ichimoku series, current values, forward cloud, and the indicator stack
+    (RSI, volume, ATR, Kijun slope, time-in-cloud, Chikou entanglement).
+
+    Computing this once and passing it to each detector keeps a multi-playbook
+    scan at one Ichimoku-series computation per ticker.
+
     Returns:
-        Dict with detection results, indicators, and optional signal
+        (context, None) on success, (None, error_note) on failure.
+        Callers are expected to have already verified len(bars) >= 60.
     """
-    result: Dict[str, Any] = {
-        "enabled": False,
-        "ticker": ticker,
-        "hasSignal": False,
-        "signal": None,
-        "trend": None,
-        "pullback": None,
-        "trigger": None,
-        "indicators": {},
-        "notes": [],
-    }
-    
-    if not bars or len(bars) < 60:
-        result["notes"].append("Insufficient bars for Ichimoku analysis (need 60+).")
-        return result
-    
-    result["enabled"] = True
-    
-    # Compute Ichimoku series
     ich_series = compute_ichimoku_series(bars)
     if not ich_series.get("enabled"):
-        result["notes"].append("Failed to compute Ichimoku series.")
-        return result
-    
+        return None, "Failed to compute Ichimoku series."
+
     tenkan_series = ich_series["tenkan_series"]
     kijun_series = ich_series["kijun_series"]
     cloud_series = ich_series["cloud_series"]
     closes = ich_series["closes"]
     highs = ich_series["highs"]
     lows = ich_series["lows"]
-    
+
     # Current Ichimoku values
     tenkan = tenkan_series[-1] if tenkan_series[-1] is not None else None
     kijun = kijun_series[-1] if kijun_series[-1] is not None else None
     prev_tenkan = tenkan_series[-2] if len(tenkan_series) > 1 and tenkan_series[-2] is not None else None
     cloud = cloud_series[-1] if cloud_series[-1] is not None else None
-    
+
     # Get future cloud (current span values represent 26-day forward projection)
     span_a = ich_series["span_a_series"][-1] if ich_series["span_a_series"][-1] is not None else None
     span_b = ich_series["span_b_series"][-1] if ich_series["span_b_series"][-1] is not None else None
@@ -1335,33 +1349,31 @@ def detect_ichimoku_setup(
             "cloudBottom": min(span_a, span_b),
             "cloudBias": "bullish" if span_a >= span_b else "bearish",
         }
-    
+
     if tenkan is None or kijun is None or cloud is None:
-        result["notes"].append("Missing current Ichimoku values.")
-        return result
-    
+        return None, "Missing current Ichimoku values."
+
     # Compute additional indicators
     rsi_series = compute_rsi_series(closes, period=14)
     rsi = rsi_series[-1] if rsi_series and rsi_series[-1] is not None else None
-    
+
     volume_metrics = compute_volume_metrics(bars, period=20)
     volume_ratio = volume_metrics.get("volumeRatio")
-    
+
     atr_data = compute_atr_series(bars, period=14)
     atr = atr_data.get("atr")
-    
+
     # Kijun slope analysis
     kijun_slope_dir, kijun_slope_val = compute_kijun_slope(kijun_series, lookback=5)
     kijun_flat_days = count_kijun_flat_days(kijun_series, lookback=20)
-    
+
     # Time in cloud
     time_in_cloud = compute_time_in_cloud(closes, cloud_series, lookback=20)
-    
+
     # Chikou entanglement
     chikou_tangled = is_chikou_tangled(closes, highs, lows)
-    
-    # Store indicators
-    result["indicators"] = {
+
+    indicators = {
         "tenkan": tenkan,
         "kijun": kijun,
         "cloudTop": cloud.get("cloudTop"),
@@ -1377,6 +1389,102 @@ def detect_ichimoku_setup(
         "timeInCloud": time_in_cloud,
         "chikouTangled": chikou_tangled,
     }
+
+    context = {
+        "tenkan_series": tenkan_series,
+        "kijun_series": kijun_series,
+        "cloud_series": cloud_series,
+        "closes": closes,
+        "highs": highs,
+        "lows": lows,
+        "tenkan": tenkan,
+        "kijun": kijun,
+        "prev_tenkan": prev_tenkan,
+        "cloud": cloud,
+        "cloud_future": cloud_future,
+        "rsi": rsi,
+        "volume_ratio": volume_ratio,
+        "atr": atr,
+        "kijun_slope_dir": kijun_slope_dir,
+        "kijun_flat_days": kijun_flat_days,
+        "time_in_cloud": time_in_cloud,
+        "chikou_tangled": chikou_tangled,
+        "indicators": indicators,
+    }
+    return context, None
+
+
+def chikou_is_clear(context: Dict[str, Any]) -> bool:
+    """Shared Chikou filter: True when the lagging span is NOT tangled with
+    the price candles ~26 bars back. The core playbook scores this; the
+    research playbooks (TK cross, Kumo breakout) require it outright."""
+    return context.get("chikou_tangled") is False
+
+
+def detect_ichimoku_setup(
+    bars: List[DailyBar],
+    *,
+    ticker: str = "",
+    index_membership: str = "sp500",
+    gamma_context: Optional[Dict[str, Any]] = None,
+    earnings_days_ahead: Optional[int] = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Detect Ichimoku continuation setup (core Kijun-pullback playbook).
+    
+    This is the main entry point for Engine4 analysis on a single ticker.
+    Pass a precomputed ``context`` (from compute_detection_context) when
+    running multiple playbooks on the same bars.
+    
+    Returns:
+        Dict with detection results, indicators, and optional signal
+    """
+    result: Dict[str, Any] = {
+        "enabled": False,
+        "ticker": ticker,
+        "playbook": PLAYBOOK_KIJUN_PULLBACK,
+        "hasSignal": False,
+        "signal": None,
+        "trend": None,
+        "pullback": None,
+        "trigger": None,
+        "indicators": {},
+        "notes": [],
+    }
+    
+    if not bars or len(bars) < 60:
+        result["notes"].append("Insufficient bars for Ichimoku analysis (need 60+).")
+        return result
+    
+    result["enabled"] = True
+    
+    if context is None:
+        context, err = compute_detection_context(bars)
+        if context is None:
+            result["notes"].append(err)
+            return result
+    
+    tenkan_series = context["tenkan_series"]
+    kijun_series = context["kijun_series"]
+    cloud_series = context["cloud_series"]
+    closes = context["closes"]
+    highs = context["highs"]
+    lows = context["lows"]
+    tenkan = context["tenkan"]
+    kijun = context["kijun"]
+    prev_tenkan = context["prev_tenkan"]
+    cloud = context["cloud"]
+    cloud_future = context["cloud_future"]
+    rsi = context["rsi"]
+    volume_ratio = context["volume_ratio"]
+    atr = context["atr"]
+    kijun_slope_dir = context["kijun_slope_dir"]
+    kijun_flat_days = context["kijun_flat_days"]
+    time_in_cloud = context["time_in_cloud"]
+    chikou_tangled = context["chikou_tangled"]
+    
+    result["indicators"] = context["indicators"]
     
     # Detect trend regime
     close = closes[-1]
@@ -1430,6 +1538,7 @@ def detect_ichimoku_setup(
     result["hasSignal"] = True
     result["signal"] = {
         "ticker": ticker,
+        "playbook": PLAYBOOK_KIJUN_PULLBACK,
         "signalDate": bars[-1].trade_date,
         "direction": direction,
         "tenkan": tenkan,
@@ -1465,6 +1574,496 @@ def detect_ichimoku_setup(
 
 
 # ---------------------------------------------------------------------------
+# Research Playbook Detectors (TK Cross, Kumo Breakout)
+# ---------------------------------------------------------------------------
+
+def count_bars_since_tk_cross(
+    tenkan_series: List[Optional[float]],
+    kijun_series: List[Optional[float]],
+    direction: str,
+) -> Optional[int]:
+    """
+    Count bars since the most recent Tenkan/Kijun cross in the given direction.
+
+    Bull: Tenkan crossed from at/below Kijun to above Kijun.
+    Bear: Tenkan crossed from at/above Kijun to below Kijun.
+
+    Returns:
+        Bars since the cross bar (0 = crossed today), or None if the current
+        bar is not on the crossed side or no cross exists in the history.
+    """
+    if not tenkan_series or not kijun_series:
+        return None
+    n = min(len(tenkan_series), len(kijun_series))
+    if n < 2:
+        return None
+
+    # Current bar must still be in the crossed state.
+    t_now, k_now = tenkan_series[n - 1], kijun_series[n - 1]
+    if t_now is None or k_now is None:
+        return None
+    if direction == "bullish" and not t_now > k_now:
+        return None
+    if direction == "bearish" and not t_now < k_now:
+        return None
+
+    for i in range(n - 1, 0, -1):
+        t1, k1 = tenkan_series[i], kijun_series[i]
+        t0, k0 = tenkan_series[i - 1], kijun_series[i - 1]
+        if t1 is None or k1 is None or t0 is None or k0 is None:
+            continue
+        if direction == "bullish":
+            if t1 > k1 and t0 <= k0:
+                return (n - 1) - i
+        else:
+            if t1 < k1 and t0 >= k0:
+                return (n - 1) - i
+    return None
+
+
+def count_bars_since_cloud_breakout(
+    closes: List[float],
+    cloud_series: List[Optional[Dict[str, Any]]],
+    direction: str,
+    *,
+    fresh_lookback: int = KUMO_FRESH_LOOKBACK,
+) -> Optional[int]:
+    """
+    Count bars since close first broke through the cloud in the given direction.
+
+    Bull: close crossed from at/inside/below the cloud to above the cloud top.
+    Bear: close crossed from at/inside/above the cloud to below the cloud bottom.
+
+    The breakout must be FRESH: in the ``fresh_lookback`` bars before the
+    breakout bar there must be no close already beyond the cloud (this is the
+    "first such close in >= 10 bars" trend-inception requirement — a close
+    that dipped inside the cloud for a day and popped back out is not an
+    inception).
+
+    Returns:
+        Bars since the breakout bar (0 = broke out today), or None when the
+        current close is not beyond the cloud or the breakout is not fresh.
+    """
+    if not closes or not cloud_series:
+        return None
+    n = min(len(closes), len(cloud_series))
+    if n < 2:
+        return None
+
+    def _beyond(i: int) -> Optional[bool]:
+        cloud = cloud_series[i]
+        if not isinstance(cloud, dict):
+            return None
+        top = cloud.get("cloudTop")
+        bot = cloud.get("cloudBottom")
+        if top is None or bot is None:
+            return None
+        if direction == "bullish":
+            return closes[i] > top
+        return closes[i] < bot
+
+    # Current close must be beyond the cloud.
+    if _beyond(n - 1) is not True:
+        return None
+
+    for i in range(n - 1, 0, -1):
+        b1 = _beyond(i)
+        b0 = _beyond(i - 1)
+        if b1 is None or b0 is None:
+            continue
+        if not b1:
+            # Streak of beyond-cloud closes broke before we found the cross.
+            return None
+        if b1 and not b0:
+            # Found the breakout bar — verify freshness window before it.
+            for j in range(max(0, i - fresh_lookback), i):
+                if _beyond(j) is True:
+                    return None
+            return (n - 1) - i
+    return None
+
+
+def _current_close_position(bar: DailyBar) -> Optional[float]:
+    """Close position within the bar's range: 0 = at low, 1 = at high."""
+    if bar.high is None or bar.low is None or bar.close is None:
+        return None
+    h, l, c = float(bar.high), float(bar.low), float(bar.close)
+    day_range = max(h - l, 0.0001)
+    return round((c - l) / day_range, 4)
+
+
+def _playbook_freshness(
+    *,
+    event_name: str,
+    event_age: Optional[int],
+    extension_atr: Optional[float],
+    extension_name: str,
+    is_impulse: bool,
+    kijun_distance_atr: Optional[float],
+) -> Dict[str, Any]:
+    """
+    Freshness classification for the research playbooks.
+
+    Same bucket semantics as the core classify_freshness: "actionable" when
+    the trigger event is recent and price hasn't already run, "structure"
+    when the setup is valid but stale/extended, "rejected" on an impulse bar.
+    ``barsSinceReclaim`` carries the event age (bars since cross/breakout) so
+    the ranking and payload plumbing are shared with the core playbook.
+    """
+    reasons: List[str] = []
+    bucket = "actionable"
+
+    if is_impulse:
+        bucket = "rejected"
+        reasons.append(f"Impulse bar (TR > {IMPULSE_DISPLACEMENT_MULT}x ATR)")
+    else:
+        if event_age is None:
+            bucket = "structure"
+            reasons.append(f"No {event_name} found")
+        elif event_age > PLAYBOOK_EVENT_MAX_AGE_BARS:
+            bucket = "structure"
+            reasons.append(
+                f"{event_name} {event_age} bars ago (max {PLAYBOOK_EVENT_MAX_AGE_BARS})"
+            )
+        if extension_atr is not None and extension_atr > PLAYBOOK_EXTENSION_MAX_ATR:
+            bucket = "structure"
+            reasons.append(
+                f"Extended {extension_atr:.1f} ATR {extension_name} (max {PLAYBOOK_EXTENSION_MAX_ATR})"
+            )
+
+    return {
+        "bucket": bucket,
+        "reasons": reasons,
+        "barsSinceReclaim": event_age,
+        "kijunDistanceAtr": round(kijun_distance_atr, 2) if kijun_distance_atr is not None else None,
+        "recentTenkanTouch": None,
+        "isImpulseBar": is_impulse,
+        "triggerAlreadyRan": None,
+        "triggerRanDistanceAtr": None,
+        "impulseReclaim": None,
+        "reclaimBarRangeAtr": None,
+    }
+
+
+def detect_tk_cross_setup(
+    bars: List[DailyBar],
+    *,
+    ticker: str = "",
+    index_membership: str = "sp500",
+    earnings_days_ahead: Optional[int] = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Detect a STRONG Tenkan/Kijun cross setup (research playbook: tk_cross).
+
+    "Strong" in the classic Ichimoku hierarchy means the cross happens with
+    price already on the trend side of the cloud. Requirements (bullish;
+    bearish mirrors):
+    - Trend regime valid: price above cloud, cloud bias aligned (reuses
+      detect_trend_regime, same as the core playbook)
+    - Tenkan crossed above Kijun within the recent history and is still above
+    - Chikou clear of price 26 bars back (HARD filter — the research
+      playbooks don't trade tangled lagging spans)
+
+    Levels: stop below Kijun (trend re-ignition rides the Kijun), targets via
+    the shared swing-target logic. Freshness: cross age <= 3 bars =
+    actionable, extension > 1.5 ATR from Kijun or stale cross = structure,
+    impulse bar = rejected.
+    """
+    result: Dict[str, Any] = {
+        "enabled": False,
+        "ticker": ticker,
+        "playbook": PLAYBOOK_TK_CROSS,
+        "hasSignal": False,
+        "signal": None,
+        "trend": None,
+        "trigger": None,
+        "indicators": {},
+        "notes": [],
+    }
+
+    if not bars or len(bars) < 60:
+        result["notes"].append("Insufficient bars for Ichimoku analysis (need 60+).")
+        return result
+
+    result["enabled"] = True
+
+    if context is None:
+        context, err = compute_detection_context(bars)
+        if context is None:
+            result["notes"].append(err)
+            return result
+
+    result["indicators"] = context["indicators"]
+
+    closes = context["closes"]
+    close = closes[-1]
+    cloud = context["cloud"]
+    tenkan = context["tenkan"]
+    kijun = context["kijun"]
+    atr = context["atr"]
+
+    # Trend regime: price must be on the trend side of the cloud (this is
+    # what makes the cross "strong").
+    trend = detect_trend_regime(close, cloud, context["cloud_future"], context["kijun_slope_dir"])
+    result["trend"] = trend
+    if not trend.get("valid"):
+        result["notes"].append(f"Trend not qualified: {trend.get('reason')}")
+        return result
+    direction = trend["direction"]
+
+    # TK cross in the trend direction, still in effect.
+    cross_age = count_bars_since_tk_cross(
+        context["tenkan_series"], context["kijun_series"], direction
+    )
+    if cross_age is None:
+        result["notes"].append("No Tenkan/Kijun cross in the trend direction.")
+        return result
+
+    # Chikou must be clear (hard filter for research playbooks).
+    if not chikou_is_clear(context):
+        result["notes"].append("Chikou tangled with prior candles — strong cross requires a clear lagging span.")
+        return result
+
+    result["trigger"] = {
+        "triggered": True,
+        "crossAgeBars": cross_age,
+        "closePosition": _current_close_position(bars[-1]),
+        "notes": [f"Tenkan crossed Kijun {cross_age} bar(s) ago with price {'above' if direction == 'bullish' else 'below'} cloud."],
+    }
+
+    # Levels: same shared logic as the core playbook — stop rides the Kijun.
+    swing_target = find_swing_target(context["highs"], context["lows"], direction, lookback=20)
+    levels = compute_entry_levels(bars[-1], kijun, direction, atr, swing_target)
+    if not levels:
+        result["notes"].append("Failed to compute entry levels.")
+        return result
+
+    # Freshness: cross recency + extension from Kijun.
+    kijun_dist = compute_kijun_distance_atr(close, kijun, atr, direction) if atr else None
+    is_impulse = check_impulse_displacement(bars[-1], atr) if atr else False
+    result["freshnessOverride"] = _playbook_freshness(
+        event_name="TK cross",
+        event_age=cross_age,
+        extension_atr=kijun_dist,
+        extension_name="from Kijun",
+        is_impulse=is_impulse,
+        kijun_distance_atr=kijun_dist,
+    )
+
+    result["hasSignal"] = True
+    result["signal"] = {
+        "ticker": ticker,
+        "playbook": PLAYBOOK_TK_CROSS,
+        "signalDate": bars[-1].trade_date,
+        "direction": direction,
+        "tenkan": tenkan,
+        "kijun": kijun,
+        "chikou": close,
+        "cloudTop": cloud.get("cloudTop"),
+        "cloudBottom": cloud.get("cloudBottom"),
+        "cloudBias": cloud.get("cloudBias"),
+        "cloudThickness": cloud.get("thickness"),
+        "close": close,
+        "closePosition": _current_close_position(bars[-1]),
+        "pullbackDepth": 0.0,
+        "cloudPenetrationPct": 0.0,
+        "entry": levels.get("entry"),
+        "stop": levels.get("stop"),
+        "risk": levels.get("risk"),
+        "target1": levels.get("target1"),
+        "target2": levels.get("target2"),
+        "trail": levels.get("trail"),
+        "rsi": context["rsi"],
+        "volumeRatio": context["volume_ratio"],
+        "atr": atr,
+        "kijunSlope": context["kijun_slope_dir"],
+        "kijunFlatDays": context["kijun_flat_days"],
+        "timeInCloud": context["time_in_cloud"],
+        "chikouTangled": context["chikou_tangled"],
+        "indexMembership": index_membership,
+        "earningsDaysAhead": earnings_days_ahead,
+    }
+    return result
+
+
+def detect_kumo_breakout_setup(
+    bars: List[DailyBar],
+    *,
+    ticker: str = "",
+    index_membership: str = "sp500",
+    earnings_days_ahead: Optional[int] = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Detect a Kumo (cloud) breakout setup (research playbook: kumo_breakout).
+
+    Trend inception: the first daily close through the cloud. Requirements
+    (bullish; bearish mirrors):
+    - Close crossed from at/inside the cloud to above it within recent bars,
+      and it is the first such close in >= 10 bars (fresh inception, not a
+      wobble around the cloud edge)
+    - Forward cloud twist supportive: the 26-bar-forward cloud bias must
+      match the breakout direction (HARD filter)
+    - Chikou clear of price 26 bars back (HARD filter)
+
+    Levels: stop at the FAR cloud edge (the whole cloud must hold as
+    support/resistance for the inception thesis), targets via the shared
+    swing-target logic. Thin clouds are easier to escape and score higher.
+    Freshness: breakout age <= 3 bars = actionable, extension > 1.5 ATR
+    beyond the near cloud edge or stale breakout = structure, impulse bar =
+    rejected.
+    """
+    result: Dict[str, Any] = {
+        "enabled": False,
+        "ticker": ticker,
+        "playbook": PLAYBOOK_KUMO_BREAKOUT,
+        "hasSignal": False,
+        "signal": None,
+        "trend": None,
+        "trigger": None,
+        "indicators": {},
+        "notes": [],
+    }
+
+    if not bars or len(bars) < 60:
+        result["notes"].append("Insufficient bars for Ichimoku analysis (need 60+).")
+        return result
+
+    result["enabled"] = True
+
+    if context is None:
+        context, err = compute_detection_context(bars)
+        if context is None:
+            result["notes"].append(err)
+            return result
+
+    result["indicators"] = context["indicators"]
+
+    closes = context["closes"]
+    close = closes[-1]
+    cloud = context["cloud"]
+    cloud_future = context["cloud_future"]
+    tenkan = context["tenkan"]
+    kijun = context["kijun"]
+    atr = context["atr"]
+
+    cloud_top = cloud.get("cloudTop")
+    cloud_bottom = cloud.get("cloudBottom")
+    if cloud_top is None or cloud_bottom is None:
+        result["notes"].append("Cloud values missing.")
+        return result
+
+    # Direction from the side of the cloud the close broke to.
+    if close > cloud_top:
+        direction = "bullish"
+    elif close < cloud_bottom:
+        direction = "bearish"
+    else:
+        result["notes"].append("Price inside cloud — no breakout.")
+        return result
+
+    # Record the regime read for context (not a filter here — inception
+    # setups fire before the regime turns "valid" on current-cloud bias).
+    result["trend"] = detect_trend_regime(
+        close, cloud, cloud_future, context["kijun_slope_dir"]
+    )
+
+    # Fresh first close through the cloud.
+    breakout_age = count_bars_since_cloud_breakout(closes, context["cloud_series"], direction)
+    if breakout_age is None:
+        result["notes"].append("No fresh cloud breakout (first close through the cloud in 10+ bars).")
+        return result
+
+    # Forward cloud twist must support the breakout direction.
+    future_bias = cloud_future.get("cloudBias") if cloud_future else None
+    if future_bias != direction:
+        result["notes"].append("Forward cloud twist not supportive of the breakout.")
+        return result
+
+    # Chikou must be clear (hard filter for research playbooks).
+    if not chikou_is_clear(context):
+        result["notes"].append("Chikou tangled with prior candles — breakout requires a clear lagging span.")
+        return result
+
+    result["trigger"] = {
+        "triggered": True,
+        "breakoutAgeBars": breakout_age,
+        "closePosition": _current_close_position(bars[-1]),
+        "notes": [f"First close {'above' if direction == 'bullish' else 'below'} cloud in {KUMO_FRESH_LOOKBACK}+ bars, {breakout_age} bar(s) ago."],
+    }
+
+    # Levels: stop at the FAR cloud edge. compute_entry_levels anchors the
+    # stop on the level we pass as "kijun", so hand it the far edge — the
+    # trail then also rides the cloud edge, which is the breakout trail.
+    far_edge = cloud_bottom if direction == "bullish" else cloud_top
+    swing_target = find_swing_target(context["highs"], context["lows"], direction, lookback=20)
+    levels = compute_entry_levels(bars[-1], far_edge, direction, atr, swing_target)
+    if not levels:
+        result["notes"].append("Failed to compute entry levels.")
+        return result
+
+    # Freshness: breakout recency + extension beyond the NEAR cloud edge.
+    near_edge = cloud_top if direction == "bullish" else cloud_bottom
+    edge_dist = None
+    if atr and atr > 0:
+        edge_dist = ((close - near_edge) / atr) if direction == "bullish" else ((near_edge - close) / atr)
+    kijun_dist = compute_kijun_distance_atr(close, kijun, atr, direction) if atr else None
+    is_impulse = check_impulse_displacement(bars[-1], atr) if atr else False
+    result["freshnessOverride"] = _playbook_freshness(
+        event_name="Cloud breakout",
+        event_age=breakout_age,
+        extension_atr=edge_dist,
+        extension_name="beyond cloud",
+        is_impulse=is_impulse,
+        kijun_distance_atr=kijun_dist,
+    )
+
+    result["hasSignal"] = True
+    result["signal"] = {
+        "ticker": ticker,
+        "playbook": PLAYBOOK_KUMO_BREAKOUT,
+        "signalDate": bars[-1].trade_date,
+        "direction": direction,
+        "tenkan": tenkan,
+        "kijun": kijun,
+        "chikou": close,
+        "cloudTop": cloud_top,
+        "cloudBottom": cloud_bottom,
+        "cloudBias": cloud.get("cloudBias"),
+        "cloudThickness": cloud.get("thickness"),
+        "close": close,
+        "closePosition": _current_close_position(bars[-1]),
+        "pullbackDepth": 0.0,
+        "cloudPenetrationPct": 0.0,
+        "entry": levels.get("entry"),
+        "stop": levels.get("stop"),
+        "risk": levels.get("risk"),
+        "target1": levels.get("target1"),
+        "target2": levels.get("target2"),
+        "trail": levels.get("trail"),
+        "rsi": context["rsi"],
+        "volumeRatio": context["volume_ratio"],
+        "atr": atr,
+        "kijunSlope": context["kijun_slope_dir"],
+        "kijunFlatDays": context["kijun_flat_days"],
+        "timeInCloud": context["time_in_cloud"],
+        "chikouTangled": context["chikou_tangled"],
+        "indexMembership": index_membership,
+        "earningsDaysAhead": earnings_days_ahead,
+    }
+    return result
+
+
+# Registry used by the scanner and backtester to walk every playbook.
+PLAYBOOK_DETECTORS = {
+    PLAYBOOK_KIJUN_PULLBACK: detect_ichimoku_setup,
+    PLAYBOOK_TK_CROSS: detect_tk_cross_setup,
+    PLAYBOOK_KUMO_BREAKOUT: detect_kumo_breakout_setup,
+}
+
+
+# ---------------------------------------------------------------------------
 # A+ Scoring System
 # ---------------------------------------------------------------------------
 
@@ -1473,9 +2072,17 @@ def score_ichimoku_setup(
     *,
     gamma_context: Optional[Dict[str, Any]] = None,
     earnings_days_ahead: Optional[int] = None,
+    playbook: str = PLAYBOOK_KIJUN_PULLBACK,
 ) -> Dict[str, Any]:
     """
     Score an Ichimoku setup from 0-100.
+
+    All playbooks share the same 0-100 scale and the same A+ >= 75 bar so a
+    grade means the same thing across page sections. The only per-playbook
+    weight difference: kumo_breakout inverts the cloud-thickness credit —
+    a breakout wants a THIN cloud to escape (thin kumo = weak equilibrium =
+    cleaner inception), where the continuation playbooks want a solid cloud
+    beneath them as support.
     
     Scoring Components (total possible = 100):
     - Chikou clean: 15 points
@@ -1589,9 +2196,18 @@ def score_ichimoku_setup(
     close = signal.get("close", 1)
     if cloud_thickness is not None and close > 0:
         thickness_pct = (cloud_thickness / close) * 100
+        if playbook == PLAYBOOK_KUMO_BREAKOUT:
+            # Breakouts invert the read: a thin kumo is a weak equilibrium
+            # that's easy to escape (full credit <= 1.5% of price, fading to
+            # zero at 6%); a thick kumo swallows the breakout.
+            thickness_credit = _ramp(thickness_pct, 6.0, 1.5)
+            if thickness_pct <= 1.5:
+                tags.append("Thin-Cloud Escape")
+            elif thickness_pct >= 6.0:
+                notes.append(f"Thick cloud ({thickness_pct:.1f}% of price) - hard equilibrium to escape.")
         # Smooth "tent": full credit in the [0.5%, 5%] band, ramping to 0 at
         # 0% (razor thin) and 10% (too massive to traverse).
-        if 0.5 <= thickness_pct <= 5.0:
+        elif 0.5 <= thickness_pct <= 5.0:
             thickness_credit = 1.0
             tags.append("Cloud Optimal")
         elif thickness_pct < 0.5:
@@ -1869,11 +2485,14 @@ def build_ichimoku_signal(
     signal_data["sectorBias"] = sector_bias
     signal_data["rsRatio"] = rs_ratio
 
+    playbook = signal_data.get("playbook") or PLAYBOOK_KIJUN_PULLBACK
+
     # Score the setup
     scoring = score_ichimoku_setup(
         signal_data,
         gamma_context=gamma_context,
         earnings_days_ahead=earnings_days_ahead,
+        playbook=playbook,
     )
     
     # Build notes from all sources
@@ -1900,7 +2519,13 @@ def build_ichimoku_signal(
         "reclaimBarRangeAtr": None,
     }
     
-    if bars and closes and tenkan_series and atr:
+    override = detection.get("freshnessOverride")
+    if isinstance(override, dict):
+        # Research playbooks classify freshness on their own trigger event
+        # (TK cross / cloud breakout age) — the core reclaim-based rules
+        # don't apply to them.
+        freshness = {**freshness, **override}
+    elif bars and closes and tenkan_series and atr:
         freshness = classify_freshness(
             bars=bars,
             closes=closes,
@@ -1980,6 +2605,7 @@ def build_ichimoku_signal(
         rs_ratio=rs_ratio,
         beta=beta,
         corr=corr,
+        playbook=playbook,
     )
 
 
@@ -1990,6 +2616,8 @@ def signal_to_dict(signal: IchimokuSignal) -> Dict[str, Any]:
         "signalDate": signal.signal_date,
         "direction": signal.direction,
         "status": signal.status,
+        "playbook": signal.playbook,
+        "playbookLabel": PLAYBOOK_LABELS.get(signal.playbook, signal.playbook),
         "ichimoku": {
             "tenkan": signal.tenkan,
             "kijun": signal.kijun,

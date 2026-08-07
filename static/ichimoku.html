@@ -279,6 +279,35 @@
         color: rgba(0, 90, 200, 0.85);
         margin-left: 6px;
       }
+
+      /* Playbook badge (card-level): which Ichimoku playbook fired */
+      .playbookBadge {
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        background: rgba(175, 82, 222, 0.10);
+        border: 1px solid rgba(175, 82, 222, 0.25);
+        color: rgba(120, 40, 160, 0.95);
+        margin-left: 6px;
+        white-space: nowrap;
+      }
+
+      /* Research-playbook section chip: rendered but manual-tracking only */
+      .researchChip {
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        background: rgba(175, 82, 222, 0.10);
+        border: 1px solid rgba(175, 82, 222, 0.25);
+        color: rgba(120, 40, 160, 0.95);
+        white-space: nowrap;
+      }
     </style>
   </head>
   <body>
@@ -449,6 +478,71 @@
           <div id="structureGrid" class="watchlistGrid" style="display:none;"></div>
         </section>
 
+        <!-- TK Cross — Trend Re-ignition (research playbook) -->
+        <section class="surface hidden" id="tkCrossSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              TK Cross — Trend Re-ignition
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="TK Cross playbook help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">TK Cross (Strong)</div>
+                  <div class="tipBody">
+                    <p>Tenkan crosses Kijun with price already on the trend side of the cloud — the "strong" cross in the classic Ichimoku hierarchy. Trend re-ignition after a rest.</p>
+                    <ul>
+                      <li><b>Price vs cloud</b>: must already be above (bull) / below (bear) the cloud</li>
+                      <li><b>Chikou clear</b>: lagging span free of price 26 bars back (hard filter)</li>
+                      <li><b>Fresh cross</b>: within 3 bars = actionable, older = approaching</li>
+                      <li><b>Stop</b>: rides the Kijun, targets via prior swing</li>
+                    </ul>
+                    <p>Research playbook — cards render with full scoring and the regime gate, but nothing auto-enters the tracker. Use <b>Watch</b> to track a name manually. Judge it by the Playbook rows in the backtest table below.</p>
+                  </div>
+                </div>
+              </span>
+              <span class="researchChip">Research — manual tracking only</span>
+            </h2>
+            <div class="sectionMeta muted" id="tkCrossMeta">—</div>
+            <button id="tkCrossToggle" class="ghostButton" type="button" style="margin-left:auto; display:none;">Show approaching</button>
+          </div>
+          <div id="tkCrossTickers" class="tickerStrip" style="display:none;"></div>
+          <div id="tkCrossGrid" class="watchlistGrid"></div>
+          <div id="tkCrossStructureGrid" class="watchlistGrid" style="display:none;"></div>
+          <div id="tkCrossEmpty" class="muted" style="display:none; font-size:12px; padding:8px 0;">No A+ TK cross setups in this scan.</div>
+        </section>
+
+        <!-- Kumo Breakout — Trend Inception (research playbook) -->
+        <section class="surface hidden" id="kumoSection">
+          <div class="sectionHeader">
+            <h2 class="sectionTitle">
+              Kumo Breakout — Trend Inception
+              <span class="tipWrap">
+                <button class="tipBtn" type="button" aria-label="Kumo Breakout playbook help" aria-expanded="false">i</button>
+                <div class="tipPanel" role="tooltip">
+                  <div class="tipTitle">Kumo Breakout</div>
+                  <div class="tipBody">
+                    <p>The first daily close through the cloud in 10+ bars — catching a trend at inception instead of riding one already underway.</p>
+                    <ul>
+                      <li><b>First close through</b>: no close beyond the cloud in the prior 10 bars</li>
+                      <li><b>Forward twist</b>: the 26-bar-forward cloud must agree with the breakout (hard filter)</li>
+                      <li><b>Chikou clear</b>: lagging span free of price 26 bars back (hard filter)</li>
+                      <li><b>Stop</b>: the FAR cloud edge — the whole cloud must hold; risk is wider by design</li>
+                      <li><b>Thin cloud</b>: easier escape, scores higher</li>
+                    </ul>
+                    <p>Research playbook — cards render with full scoring and the regime gate, but nothing auto-enters the tracker. Use <b>Watch</b> to track a name manually. Judge it by the Playbook rows in the backtest table below.</p>
+                  </div>
+                </div>
+              </span>
+              <span class="researchChip">Research — manual tracking only</span>
+            </h2>
+            <div class="sectionMeta muted" id="kumoMeta">—</div>
+            <button id="kumoToggle" class="ghostButton" type="button" style="margin-left:auto; display:none;">Show approaching</button>
+          </div>
+          <div id="kumoTickers" class="tickerStrip" style="display:none;"></div>
+          <div id="kumoGrid" class="watchlistGrid"></div>
+          <div id="kumoStructureGrid" class="watchlistGrid" style="display:none;"></div>
+          <div id="kumoEmpty" class="muted" style="display:none; font-size:12px; padding:8px 0;">No A+ Kumo breakout setups in this scan.</div>
+        </section>
+
         <!-- Desk Trade Tracker -->
         <section class="surface" id="trackerSection">
           <div class="sectionHeader" data-insight="score_breakdown">
@@ -488,8 +582,8 @@
                 <div class="tipPanel" role="tooltip">
                   <div class="tipTitle">Walk-forward continuation backtest</div>
                   <div class="tipBody">
-                    <p>Replays history bar-by-bar with the exact production detector + scorer, then prices each trade with the live outcome engine.</p>
-                    <p>Broken out <b>by grade</b> and <b>by bucket</b> — so you can see whether the "Approaching/structure" surface actually pays or is noise.</p>
+                    <p>Replays history bar-by-bar with the exact production detectors + scorer (all three playbooks), then prices each trade with the live outcome engine.</p>
+                    <p>Broken out <b>by grade</b>, <b>by bucket</b>, and <b>by playbook</b> — the Playbook rows are the measured edge that decides whether TK Cross and Kumo Breakout earn desk trust or get cut.</p>
                   </div>
                 </div>
               </span>
@@ -577,7 +671,7 @@
     <script src="/static/desk-insight.js?v=2"></script>
     <script src="/static/ui_kit.js?v=7"></script>
     <script src="/static/position_calculator.js?v=4"></script>
-    <script src="/static/ichimoku.js?v=14"></script>
+    <script src="/static/ichimoku.js?v=15"></script>
     <script src="/static/calculator.js"></script>
     <!-- nav.js intentionally not loaded: the NRGX desk is Ichimoku-only. -->
     <script src="/static/raven-chat.js?v=4"></script>

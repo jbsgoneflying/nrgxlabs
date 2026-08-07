@@ -191,6 +191,24 @@ def _gate_engine4_result(result, flags):
     """
     if flags.ENABLE_GATING and isinstance(result, dict):
         try:
+            # Every playbook section runs behind the same gate + verdict
+            # reconciliation: core lists live at the top level, research
+            # playbooks (tk_cross / kumo_breakout) under result["playbooks"].
+            def _signal_lists(res):
+                for key in ("actionable", "structure", "watchlist"):
+                    setups = res.get(key)
+                    if isinstance(setups, list):
+                        yield setups
+                playbooks = res.get("playbooks")
+                if isinstance(playbooks, dict):
+                    for block in playbooks.values():
+                        if not isinstance(block, dict):
+                            continue
+                        for key in ("actionable", "structure"):
+                            setups = block.get(key)
+                            if isinstance(setups, list):
+                                yield setups
+
             gate_ctx = _get_gate_context(flags)
             regime_allow = [s.strip() for s in str(flags.GATE_ICH_REGIME_ALLOW).split(",") if s.strip()]
             regime_allow_short = [s.strip() for s in str(flags.GATE_ICH_REGIME_ALLOW_SHORT).split(",") if s.strip()]
@@ -200,24 +218,22 @@ def _gate_engine4_result(result, flags):
             index_align_enable = bool(getattr(flags, "GATE_ICH_INDEX_ALIGN_ENABLE", False))
             index_beta_hard = float(getattr(flags, "GATE_ICH_INDEX_BETA_HARD", 1.0) or 1.0)
             index_corr_hard = float(getattr(flags, "GATE_ICH_INDEX_CORR_HARD", 0.6) or 0.6)
-            for key in ("actionable", "structure", "watchlist"):
-                setups = result.get(key)
-                if isinstance(setups, list):
-                    gate_scan_results(
-                        scan_results=setups,
-                        engine="engine4_ichimoku",
-                        regime_allow=regime_allow,
-                        regime_allow_short=regime_allow_short,
-                        vol_state_allow=vol_state_allow,
-                        regime_min_confidence=float(
-                            getattr(flags, "GATE_ICH_REGIME_MIN_CONFIDENCE", 0.0) or 0.0
-                        ),
-                        index_states=index_states,
-                        index_align_enable=index_align_enable,
-                        index_beta_hard=index_beta_hard,
-                        index_corr_hard=index_corr_hard,
-                        **gate_ctx,
-                    )
+            for setups in _signal_lists(result):
+                gate_scan_results(
+                    scan_results=setups,
+                    engine="engine4_ichimoku",
+                    regime_allow=regime_allow,
+                    regime_allow_short=regime_allow_short,
+                    vol_state_allow=vol_state_allow,
+                    regime_min_confidence=float(
+                        getattr(flags, "GATE_ICH_REGIME_MIN_CONFIDENCE", 0.0) or 0.0
+                    ),
+                    index_states=index_states,
+                    index_align_enable=index_align_enable,
+                    index_beta_hard=index_beta_hard,
+                    index_corr_hard=index_corr_hard,
+                    **gate_ctx,
+                )
             gs = summarize_gates(
                 (result.get("actionable") or []) + (result.get("structure") or [])
             )
@@ -227,10 +243,7 @@ def _gate_engine4_result(result, flags):
             # Reconcile grade + freshness + gate into one continuation
             # verdict per name, and lead the card with it.
             regime_label = gate_ctx.get("regime_label", "")
-            for key in ("actionable", "structure", "watchlist"):
-                setups = result.get(key)
-                if not isinstance(setups, list):
-                    continue
+            for setups in _signal_lists(result):
                 for sig in setups:
                     sig["verdict"] = reconcile_ichimoku_verdict(
                         sig, regime_label=regime_label
@@ -311,9 +324,11 @@ def engine4_ichimoku_status(
 async def engine4_ichimoku_track(request: Request):
     """Desk Trade Tracker override.
 
-    Body: {ticker, status, signalDate?, note?, pinned?}
+    Body: {ticker, status, signalDate?, note?, pinned?, signal?}
     `status` is one of watching/entered/working/broken/exited. Desk states
     survive scan refreshes and are never clobbered by the auto-evaluator.
+    `signal` (full card payload) seeds the tracker for research-playbook
+    names, which are never auto-persisted by the scan.
     """
     flags = get_flags()
     if not flags.ENABLE_ENGINE4_ICHIMOKU:
@@ -352,6 +367,9 @@ async def engine4_ichimoku_track(request: Request):
             signal_date=body.get("signalDate"),
             note=body.get("note"),
             pinned=body.get("pinned"),
+            # Research playbook cards aren't auto-persisted by the scan; the
+            # card sends its full signal payload so the first Watch seeds it.
+            signal=body.get("signal") if isinstance(body.get("signal"), dict) else None,
         )
         if not result.get("ok"):
             raise HTTPException(status_code=400, detail=result.get("error", "Could not update."))

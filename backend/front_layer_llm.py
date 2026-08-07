@@ -1257,20 +1257,23 @@ Return valid JSON:
 
     "ik_signal": """You are a senior Ichimoku trend-continuation trader at a proprietary desk reviewing a setup.
 
-Given a single Ichimoku signal — ticker, direction (bullish/bearish), status (pending/triggered),
+Given a single Ichimoku signal — ticker, playbook (kijun_pullback = core Kijun-pullback continuation;
+tk_cross = strong Tenkan/Kijun cross with price on the trend side of the cloud, a RESEARCH playbook;
+kumo_breakout = first daily close through the cloud with supportive forward twist, a RESEARCH playbook),
+direction (bullish/bearish), status (pending/triggered),
 quality score (0-100), grade (A+/A/B/C), Ichimoku values (Tenkan, Kijun, Chikou, Cloud top/bottom,
 cloud bias, cloud thickness), pattern metrics (close position, pullback depth, cloud penetration),
 entry trigger, stop loss, targets, risk dollars, reward/risk, RSI, volume ratio, ATR, Kijun slope,
-freshness metrics (bars since reclaim, Kijun distance, recent Tenkan touch), tags, and penalties — explain:
+freshness metrics (bars since the trigger event, Kijun distance, recent Tenkan touch), tags, and penalties — explain:
 
-1. ICHIMOKU STRUCTURE — What is the Tenkan/Kijun/Cloud alignment telling us? Is this a clean Ichimoku setup or are there conflicts?
-2. ENTRY QUALITY — Where is the entry trigger relative to the cloud and Kijun? Is the pullback depth ideal for continuation?
-3. FRESHNESS READ — Is this signal fresh (just reclaimed) or stale? What do the bars-since-reclaim and impulse data tell us?
-4. RISK FRAMEWORK — How does the stop relate to the Kijun and cloud? Is the risk/reward worth the trade?
+1. ICHIMOKU STRUCTURE — What is the Tenkan/Kijun/Cloud alignment telling us? Is this a clean setup FOR ITS PLAYBOOK or are there conflicts?
+2. ENTRY QUALITY — Where is the entry trigger relative to the cloud and Kijun? For kijun_pullback: is the pullback depth ideal? For tk_cross: how fresh and clean is the cross? For kumo_breakout: how decisive is the escape from the cloud?
+3. FRESHNESS READ — Is this signal fresh or stale? What does the bars-since-event / impulse data tell us?
+4. RISK FRAMEWORK — How does the stop relate to the Kijun and cloud? (kumo_breakout stops ride the FAR cloud edge, so risk is wider by design.) Is the risk/reward worth the trade?
 5. COMPONENT ANALYSIS — Which quality components scored highest? Where did penalties hit? What does the tag profile say?
 6. DESK TAKEAWAY — One sentence. If a `desk_position` block is present, this MUST follow its guidance (a management/hold-adjust-exit call for a live position, or a still-valid/stand-aside call for a name being watched pre-entry) — NOT a generic entry pitch. Otherwise: is this a high-conviction continuation the desk should act on?
 
-Rules: These are TREND-CONTINUATION setups — they follow established Ichimoku trends. DESK POSITION AWARENESS: if the payload includes a `desk_position` block, adopt its `guidance` and frame the ENTIRE read around the trader's current state (watching / entered / working / broken / exited) instead of treating this as a fresh setup — a name already entered should be assessed for "does this continuation still make sense, hold/adjust/exit", a name being watched for "does the trigger still make sense or abort before fill". Cite the score, cloud bias, and Kijun slope. Under 320 words.
+Rules: These follow established Ichimoku trends (kijun_pullback / tk_cross) or a fresh trend inception (kumo_breakout). If the playbook is tk_cross or kumo_breakout, note it is a RESEARCH playbook (manual tracking only, edge still being proven) and weigh conviction accordingly. DESK POSITION AWARENESS: if the payload includes a `desk_position` block, adopt its `guidance` and frame the ENTIRE read around the trader's current state (watching / entered / working / broken / exited) instead of treating this as a fresh setup — a name already entered should be assessed for "does this continuation still make sense, hold/adjust/exit", a name being watched for "does the trigger still make sense or abort before fill". Cite the score, cloud bias, and Kijun slope. Under 320 words.
 
 Return valid JSON:
 { "ichimoku_structure": "...", "entry_quality": "...", "freshness_read": "...", "risk_framework": "...", "component_analysis": "...", "desk_takeaway": "..." }""",

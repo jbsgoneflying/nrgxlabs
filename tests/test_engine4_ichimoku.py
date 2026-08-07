@@ -847,10 +847,17 @@ class TestBacktestHarness:
         assert "overall" in result
         assert "byGrade" in result
         assert "byBucket" in result
+        assert "byPlaybook" in result
         assert result["params"]["tickersTested"] == 2
         # Overall must always carry the standard stat keys.
         for k in ("signals", "triggered", "winRate", "avgR", "expectancy"):
             assert k in result["overall"]
+        # Every playbook cohort that fired must carry the same stat keys, and
+        # only known playbooks may appear.
+        for pb, stats in result["byPlaybook"].items():
+            assert pb in ("kijun_pullback", "tk_cross", "kumo_breakout")
+            for k in ("signals", "triggered", "winRate", "avgR", "expectancy"):
+                assert k in stats
 
 
 class TestDeskTracker:
@@ -1176,3 +1183,341 @@ class TestSectorMap:
         assert m.get("AAPL") == "XLK"
         assert m.get("JPM") == "XLF"
         assert m.get("XOM") == "XLE"
+
+
+# ---------------------------------------------------------------------------
+# Tests: Research Playbooks (2026-08) — TK Cross + Kumo Breakout
+# ---------------------------------------------------------------------------
+
+from backend.engine4_ichimoku import (  # noqa: E402
+    PLAYBOOK_KIJUN_PULLBACK,
+    PLAYBOOK_KUMO_BREAKOUT,
+    PLAYBOOK_TK_CROSS,
+    count_bars_since_cloud_breakout,
+    count_bars_since_tk_cross,
+    detect_kumo_breakout_setup,
+    detect_tk_cross_setup,
+)
+
+
+def make_context(
+    *,
+    n: int = 80,
+    closes: Optional[List[float]] = None,
+    tenkan_series: Optional[List[Optional[float]]] = None,
+    kijun_series: Optional[List[Optional[float]]] = None,
+    cloud_top: float = 104.0,
+    cloud_bottom: float = 102.0,
+    cloud_bias: str = "bullish",
+    future_bias: str = "bullish",
+    chikou_tangled: bool = False,
+    atr: float = 1.0,
+):
+    """Synthetic detection context: lets the detector tests drive the exact
+    Ichimoku series shapes (cross bars, breakout bars, Chikou state) without
+    reverse-engineering bar prices through the real series computation."""
+    closes = closes if closes is not None else [107.0] * n
+    tenkan_series = tenkan_series if tenkan_series is not None else [106.5] * n
+    kijun_series = kijun_series if kijun_series is not None else [106.0] * n
+    cloud = {
+        "cloudTop": cloud_top,
+        "cloudBottom": cloud_bottom,
+        "cloudBias": cloud_bias,
+        "thickness": cloud_top - cloud_bottom,
+    }
+    cloud_future = {
+        "cloudTop": cloud_top,
+        "cloudBottom": cloud_bottom,
+        "cloudBias": future_bias,
+    }
+    return {
+        "tenkan_series": tenkan_series,
+        "kijun_series": kijun_series,
+        "cloud_series": [dict(cloud) for _ in range(n)],
+        "closes": closes,
+        "highs": [max(c + 1.0, 108.0) for c in closes],
+        "lows": [min(c - 1.0, 101.0) for c in closes],
+        "tenkan": tenkan_series[-1],
+        "kijun": kijun_series[-1],
+        "prev_tenkan": tenkan_series[-2],
+        "cloud": cloud,
+        "cloud_future": cloud_future,
+        "rsi": 58.0,
+        "volume_ratio": 1.3,
+        "atr": atr,
+        "kijun_slope_dir": "positive",
+        "kijun_flat_days": 0,
+        "time_in_cloud": 0,
+        "chikou_tangled": chikou_tangled,
+        "indicators": {"atr": atr},
+    }
+
+
+class TestTkCrossHelper:
+    def test_fresh_bull_cross_age(self):
+        """Tenkan crossed above Kijun 1 bar ago → age 1."""
+        tenkan = [105.0] * 78 + [106.5, 106.8]
+        kijun = [106.0] * 80
+        assert count_bars_since_tk_cross(tenkan, kijun, "bullish") == 1
+
+    def test_cross_today_is_age_zero(self):
+        tenkan = [105.0] * 79 + [106.5]
+        kijun = [106.0] * 80
+        assert count_bars_since_tk_cross(tenkan, kijun, "bullish") == 0
+
+    def test_no_cross_when_tenkan_below_kijun(self):
+        """Current bar not in the crossed state → None regardless of history."""
+        tenkan = [105.0] * 80
+        kijun = [106.0] * 80
+        assert count_bars_since_tk_cross(tenkan, kijun, "bullish") is None
+
+    def test_stale_cross_age(self):
+        tenkan = [105.0] * 70 + [106.5] * 10
+        kijun = [106.0] * 80
+        assert count_bars_since_tk_cross(tenkan, kijun, "bullish") == 9
+
+    def test_bearish_mirror(self):
+        tenkan = [107.0] * 78 + [105.5, 105.2]
+        kijun = [106.0] * 80
+        assert count_bars_since_tk_cross(tenkan, kijun, "bearish") == 1
+
+
+class TestKumoBreakoutHelper:
+    def _clouds(self, n, top=105.0, bottom=103.0):
+        return [{"cloudTop": top, "cloudBottom": bottom} for _ in range(n)]
+
+    def test_fresh_bull_breakout_age(self):
+        """First close above the cloud 1 bar ago, clean 10-bar window → age 1."""
+        closes = [104.0] * 78 + [105.5, 105.8]
+        assert count_bars_since_cloud_breakout(closes, self._clouds(80), "bullish") == 1
+
+    def test_not_fresh_when_recent_close_beyond(self):
+        """A close above the cloud within the prior 10 bars → not an inception."""
+        closes = [104.0] * 70 + [106.0] + [104.0] * 7 + [105.5, 105.8]
+        assert count_bars_since_cloud_breakout(closes, self._clouds(80), "bullish") is None
+
+    def test_none_when_inside_cloud(self):
+        closes = [104.0] * 80
+        assert count_bars_since_cloud_breakout(closes, self._clouds(80), "bullish") is None
+
+    def test_bearish_mirror(self):
+        closes = [106.0] * 78 + [102.5, 102.0]
+        assert count_bars_since_cloud_breakout(closes, self._clouds(80), "bearish") == 1
+
+
+class TestTkCrossDetector:
+    def test_fresh_cross_fires_actionable(self):
+        bars = make_bars(80)
+        ctx = make_context(
+            tenkan_series=[105.0] * 78 + [106.5, 106.8],
+        )
+        det = detect_tk_cross_setup(bars, ticker="TEST", context=ctx)
+        assert det["hasSignal"] is True
+        assert det["playbook"] == PLAYBOOK_TK_CROSS
+        assert det["signal"]["playbook"] == PLAYBOOK_TK_CROSS
+        fresh = det["freshnessOverride"]
+        assert fresh["bucket"] == "actionable"
+        assert fresh["barsSinceReclaim"] == 1  # bars since the cross
+
+    def test_stale_cross_lands_in_structure(self):
+        bars = make_bars(80)
+        ctx = make_context(
+            tenkan_series=[105.0] * 70 + [106.5] * 10,
+        )
+        det = detect_tk_cross_setup(bars, ticker="TEST", context=ctx)
+        assert det["hasSignal"] is True
+        fresh = det["freshnessOverride"]
+        assert fresh["bucket"] == "structure"
+        assert any("TK cross" in r for r in fresh["reasons"])
+
+    def test_wrong_side_of_cloud_rejected(self):
+        """Price inside the cloud → trend regime invalid → no strong cross."""
+        bars = make_bars(80)
+        ctx = make_context(
+            closes=[103.0] * 80,  # inside the 102-104 cloud
+            tenkan_series=[105.0] * 78 + [106.5, 106.8],
+        )
+        det = detect_tk_cross_setup(bars, ticker="TEST", context=ctx)
+        assert det["hasSignal"] is False
+        assert det["trend"]["valid"] is False
+
+    def test_chikou_veto(self):
+        bars = make_bars(80)
+        ctx = make_context(
+            tenkan_series=[105.0] * 78 + [106.5, 106.8],
+            chikou_tangled=True,
+        )
+        det = detect_tk_cross_setup(bars, ticker="TEST", context=ctx)
+        assert det["hasSignal"] is False
+        assert any("Chikou" in n for n in det["notes"])
+
+    def test_extended_from_kijun_lands_in_structure(self):
+        """Fresh cross but price 4 ATR from Kijun → extended → structure."""
+        bars = make_bars(80)
+        ctx = make_context(
+            closes=[110.0] * 80,  # (110 - 106) / 1.0 ATR = 4.0 from Kijun
+            tenkan_series=[105.0] * 78 + [106.5, 106.8],
+        )
+        det = detect_tk_cross_setup(bars, ticker="TEST", context=ctx)
+        assert det["hasSignal"] is True
+        fresh = det["freshnessOverride"]
+        assert fresh["bucket"] == "structure"
+        assert any("Extended" in r for r in fresh["reasons"])
+
+
+class TestKumoBreakoutDetector:
+    def _ctx(self, **kw):
+        defaults = dict(
+            closes=[104.0] * 78 + [105.5, 105.8],
+            cloud_top=105.0,
+            cloud_bottom=103.0,
+            cloud_bias="bearish",   # pre-breakout cloud is often still bearish
+            future_bias="bullish",  # ...but the forward twist must agree
+        )
+        defaults.update(kw)
+        return make_context(**defaults)
+
+    def test_first_close_through_cloud_fires(self):
+        bars = make_bars(80)
+        det = detect_kumo_breakout_setup(bars, ticker="TEST", context=self._ctx())
+        assert det["hasSignal"] is True
+        assert det["playbook"] == PLAYBOOK_KUMO_BREAKOUT
+        sig = det["signal"]
+        assert sig["playbook"] == PLAYBOOK_KUMO_BREAKOUT
+        assert sig["direction"] == "bullish"
+        fresh = det["freshnessOverride"]
+        assert fresh["bucket"] == "actionable"
+        assert fresh["barsSinceReclaim"] == 1  # bars since the breakout
+
+    def test_stop_rides_far_cloud_edge(self):
+        """Bull breakout stop anchors below Senkou B (cloud bottom), not Kijun."""
+        bars = make_bars(80)
+        det = detect_kumo_breakout_setup(bars, ticker="TEST", context=self._ctx())
+        sig = det["signal"]
+        # ATR buffer = 0.25 * 1.0 → stop = cloud_bottom (103) - 0.25
+        assert sig["stop"] == pytest.approx(102.75)
+        assert sig["trail"] == pytest.approx(103.0)
+
+    def test_rewobble_is_not_inception(self):
+        """A close above the cloud 8 bars before the breakout → not first close."""
+        bars = make_bars(80)
+        ctx = self._ctx(closes=[104.0] * 70 + [106.0] + [104.0] * 7 + [105.5, 105.8])
+        det = detect_kumo_breakout_setup(bars, ticker="TEST", context=ctx)
+        assert det["hasSignal"] is False
+        assert any("No fresh cloud breakout" in n for n in det["notes"])
+
+    def test_unsupportive_forward_twist_rejected(self):
+        bars = make_bars(80)
+        det = detect_kumo_breakout_setup(
+            bars, ticker="TEST", context=self._ctx(future_bias="bearish")
+        )
+        assert det["hasSignal"] is False
+        assert any("Forward cloud twist" in n for n in det["notes"])
+
+    def test_chikou_veto(self):
+        bars = make_bars(80)
+        det = detect_kumo_breakout_setup(
+            bars, ticker="TEST", context=self._ctx(chikou_tangled=True)
+        )
+        assert det["hasSignal"] is False
+        assert any("Chikou" in n for n in det["notes"])
+
+    def test_inside_cloud_no_breakout(self):
+        bars = make_bars(80)
+        det = detect_kumo_breakout_setup(
+            bars, ticker="TEST", context=self._ctx(closes=[104.0] * 80)
+        )
+        assert det["hasSignal"] is False
+
+
+class TestPlaybookScoring:
+    """Same 0-100 scale and A+ bar; kumo_breakout inverts cloud thickness."""
+
+    def _sig(self, thickness):
+        return {
+            "direction": "bullish",
+            "close": 100.0,
+            "cloudThickness": thickness,
+        }
+
+    def test_thin_cloud_scores_higher_for_breakout(self):
+        """0.4% cloud: core penalizes 'razor thin', breakout rewards escape."""
+        core = score_ichimoku_setup(self._sig(0.4), playbook=PLAYBOOK_KIJUN_PULLBACK)
+        kumo = score_ichimoku_setup(self._sig(0.4), playbook=PLAYBOOK_KUMO_BREAKOUT)
+        assert kumo["scores"]["cloudThickness"] == 10.0
+        assert core["scores"]["cloudThickness"] < 10.0
+        assert "Thin-Cloud Escape" in kumo["tags"]
+
+    def test_thick_cloud_scores_zero_for_breakout(self):
+        """7% cloud: too hard to escape for an inception trade."""
+        core = score_ichimoku_setup(self._sig(7.0), playbook=PLAYBOOK_KIJUN_PULLBACK)
+        kumo = score_ichimoku_setup(self._sig(7.0), playbook=PLAYBOOK_KUMO_BREAKOUT)
+        assert kumo["scores"]["cloudThickness"] == 0.0
+        assert core["scores"]["cloudThickness"] > 0.0
+
+
+class TestPlaybookSignalPlumbing:
+    def test_playbook_propagates_to_signal_and_dict(self):
+        """Detection → build_ichimoku_signal → signal_to_dict keeps the
+        playbook tag and the detector's own freshness classification."""
+        bars = make_bars(80)
+        ctx = make_context(tenkan_series=[105.0] * 78 + [106.5, 106.8])
+        det = detect_tk_cross_setup(bars, ticker="TEST", context=ctx)
+        signal = build_ichimoku_signal(
+            ticker="TEST",
+            detection=det,
+            bars=bars,
+            closes=ctx["closes"],
+            tenkan_series=ctx["tenkan_series"],
+        )
+        assert signal is not None
+        assert signal.playbook == PLAYBOOK_TK_CROSS
+        assert signal.freshness_bucket == "actionable"
+        assert signal.bars_since_reclaim == 1
+        d = signal_to_dict(signal)
+        assert d["playbook"] == PLAYBOOK_TK_CROSS
+        assert d["playbookLabel"] == "TK Cross (Strong)"
+
+    def test_core_default_playbook(self):
+        """Legacy detections without a playbook key stay kijun_pullback."""
+        detection = {
+            "enabled": True, "hasSignal": True,
+            "signal": {
+                "signalDate": "2024-03-03", "direction": "bullish", "tenkan": 100.0,
+                "kijun": 98.0, "chikou": 102.0, "cloudTop": 97.0, "cloudBottom": 95.0,
+                "cloudBias": "bullish", "cloudThickness": 2.0, "close": 102.0,
+                "closePosition": 0.75, "pullbackDepth": 0.02, "cloudPenetrationPct": 0.0,
+                "entry": 103.01, "stop": 96.5, "risk": 6.51, "target1": 110.0,
+                "target2": 116.0, "trail": 98.0, "rsi": 55.0, "volumeRatio": 1.3,
+                "atr": 2.0, "kijunSlope": "positive", "kijunFlatDays": 0,
+                "timeInCloud": 2, "chikouTangled": False,
+            },
+            "notes": [],
+        }
+        signal = build_ichimoku_signal(ticker="LEGACY", detection=detection)
+        assert signal.playbook == PLAYBOOK_KIJUN_PULLBACK
+        assert signal_to_dict(signal)["playbook"] == PLAYBOOK_KIJUN_PULLBACK
+
+
+class TestResearchPlaybookTrackerSeeding:
+    def test_watch_seeds_untracked_research_signal(self):
+        """Research playbooks never auto-persist; the first manual Watch must
+        seed the tracker from the card payload."""
+        from backend import engine4_screener as scr
+        payload = {
+            "ticker": "ZZRESEARCH", "signalDate": "2026-08-07", "direction": "bullish",
+            "playbook": PLAYBOOK_TK_CROSS,
+            "levels": {"entryTrigger": 50.0, "stopLoss": 48.0, "target1": 55.0},
+        }
+        res = scr.set_desk_status(
+            "ZZRESEARCH", desk_status="watching", signal_date="2026-08-07",
+            signal=payload,
+        )
+        assert res["ok"] is True
+        assert res["record"]["status"] == "watching"
+        assert res["record"]["playbook"] == PLAYBOOK_TK_CROSS
+
+    def test_watch_without_payload_still_fails_for_unknown(self):
+        from backend import engine4_screener as scr
+        res = scr.set_desk_status("ZZNOSUCHNAME", desk_status="watching")
+        assert res["ok"] is False

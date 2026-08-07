@@ -24,13 +24,21 @@ from backend.config import get_flags
 from backend.engine4_ichimoku import (
     APLUS_THRESHOLD,
     BETA_LOOKBACK_DEFAULT,
+    PLAYBOOK_KIJUN_PULLBACK,
+    PLAYBOOK_KUMO_BREAKOUT,
+    PLAYBOOK_LABELS,
+    PLAYBOOK_TK_CROSS,
+    RESEARCH_PLAYBOOKS,
     RS_LOOKBACK_DEFAULT,
     IchimokuSignal,
     build_ichimoku_signal,
     compute_beta_corr,
+    compute_detection_context,
     compute_index_ichimoku_state,
     compute_relative_strength,
     detect_ichimoku_setup,
+    detect_kumo_breakout_setup,
+    detect_tk_cross_setup,
     signal_to_dict,
 )
 from backend.technicals import (
@@ -317,6 +325,119 @@ def _compute_dollar_adv(bars: List[DailyBar], lookback: int = 20) -> Optional[fl
     return round(sum(vals) / len(vals), 2)
 
 
+# Detectors walked per ticker, in display order. Core first (it stays the
+# lead section + the only auto-persisted playbook).
+_PLAYBOOK_DETECTORS = (
+    (PLAYBOOK_KIJUN_PULLBACK, detect_ichimoku_setup),
+    (PLAYBOOK_TK_CROSS, detect_tk_cross_setup),
+    (PLAYBOOK_KUMO_BREAKOUT, detect_kumo_breakout_setup),
+)
+
+
+def scan_ticker_playbooks(
+    *,
+    ticker: str,
+    as_of_date: dt.date,
+    index_membership: str,
+    benzinga_client: Any = None,
+    min_dollar_adv: float = 0.0,
+    use_cache: bool = True,
+    index_bars: Optional[List[DailyBar]] = None,
+    index_state: Optional[Dict[str, Any]] = None,
+    sector_etf: Optional[str] = None,
+    sector_state: Optional[Dict[str, Any]] = None,
+    rs_lookback: int = RS_LOOKBACK_DEFAULT,
+    beta_lookback: int = BETA_LOOKBACK_DEFAULT,
+) -> List[IchimokuSignal]:
+    """
+    Scan a single ticker across ALL Ichimoku playbooks (core Kijun pullback,
+    TK cross, Kumo breakout) on the same cached bars — one bar fetch and one
+    Ichimoku-series computation per ticker, no extra EODHD calls.
+
+    Returns a list of scored IchimokuSignal (zero to three entries, at most
+    one per playbook).
+    """
+    try:
+        bars = fetch_bars_for_ticker(ticker=ticker, as_of_date=as_of_date, use_cache=use_cache)
+        
+        if not bars or len(bars) < 60:
+            return []
+        
+        # Item 7: liquidity filter — skip names that can't absorb desk size.
+        dollar_adv = _compute_dollar_adv(bars)
+        if min_dollar_adv > 0 and (dollar_adv is None or dollar_adv < min_dollar_adv):
+            return []
+        
+        # Check earnings
+        earnings_days = fetch_earnings_days_ahead(ticker, as_of_date, benzinga_client)
+        
+        # Shared detection inputs (Ichimoku series + indicator stack), computed
+        # once and handed to every playbook detector.
+        context, _err = compute_detection_context(bars)
+        if context is None:
+            return []
+        
+        detections = []
+        for _playbook, detector in _PLAYBOOK_DETECTORS:
+            detection = detector(
+                bars,
+                ticker=ticker,
+                index_membership=index_membership,
+                earnings_days_ahead=earnings_days,
+                context=context,
+            )
+            if detection.get("hasSignal"):
+                detections.append(detection)
+        
+        if not detections:
+            return []
+        
+        closes = context["closes"]
+        tenkan_series = context["tenkan_series"]
+
+        # Top-down context: relative strength + beta/corr vs the index proxy.
+        rs_ratio: Optional[float] = None
+        beta: Optional[float] = None
+        corr: Optional[float] = None
+        if index_bars:
+            index_closes = [float(b.close) for b in index_bars if b.close is not None]
+            if index_closes and closes:
+                rs_ratio = compute_relative_strength(
+                    closes, index_closes, lookback=rs_lookback
+                ).get("rsRatio")
+                bc = compute_beta_corr(closes, index_closes, lookback=beta_lookback)
+                beta = bc.get("beta")
+                corr = bc.get("corr")
+        
+        # Build scored signals with freshness classification
+        signals: List[IchimokuSignal] = []
+        for detection in detections:
+            signal = build_ichimoku_signal(
+                ticker=ticker,
+                detection=detection,
+                bars=bars,
+                closes=closes,
+                tenkan_series=tenkan_series,
+                earnings_days_ahead=earnings_days,
+                index_membership=index_membership,
+                dollar_adv=dollar_adv,
+                sector_etf=sector_etf,
+                sector_state=sector_state,
+                index_state=index_state,
+                rs_ratio=rs_ratio,
+                beta=beta,
+                corr=corr,
+            )
+            if signal is not None:
+                signals.append(signal)
+        
+        return signals
+        
+    except Exception as e:
+        LOG.warning(f"Error scanning {ticker}: {e}")
+        return []
+
+
 def scan_ticker(
     *,
     ticker: str,
@@ -333,77 +454,28 @@ def scan_ticker(
     beta_lookback: int = BETA_LOOKBACK_DEFAULT,
 ) -> Optional[IchimokuSignal]:
     """
-    Scan a single ticker for Ichimoku continuation setup.
-    Returns IchimokuSignal if found, None otherwise.
+    Scan a single ticker for the CORE Ichimoku continuation setup (Kijun
+    pullback). Kept for back-compat; the universe scan walks every playbook
+    via scan_ticker_playbooks.
     """
-    try:
-        bars = fetch_bars_for_ticker(ticker=ticker, as_of_date=as_of_date, use_cache=use_cache)
-        
-        if not bars or len(bars) < 60:
-            return None
-        
-        # Item 7: liquidity filter — skip names that can't absorb desk size.
-        dollar_adv = _compute_dollar_adv(bars)
-        if min_dollar_adv > 0 and (dollar_adv is None or dollar_adv < min_dollar_adv):
-            return None
-        
-        # Check earnings
-        earnings_days = fetch_earnings_days_ahead(ticker, as_of_date, benzinga_client)
-        
-        # Detect setup
-        detection = detect_ichimoku_setup(
-            bars,
-            ticker=ticker,
-            index_membership=index_membership,
-            earnings_days_ahead=earnings_days,
-        )
-        
-        if not detection.get("hasSignal"):
-            return None
-        
-        # Compute Ichimoku series for freshness classification
-        from backend.technicals import compute_ichimoku_series
-        ich_series = compute_ichimoku_series(bars)
-        closes = ich_series.get("closes", [])
-        tenkan_series = ich_series.get("tenkan_series", [])
-
-        # Top-down context: relative strength + beta/corr vs the index proxy.
-        rs_ratio: Optional[float] = None
-        beta: Optional[float] = None
-        corr: Optional[float] = None
-        if index_bars:
-            index_closes = [float(b.close) for b in index_bars if b.close is not None]
-            if index_closes and closes:
-                rs_ratio = compute_relative_strength(
-                    closes, index_closes, lookback=rs_lookback
-                ).get("rsRatio")
-                bc = compute_beta_corr(closes, index_closes, lookback=beta_lookback)
-                beta = bc.get("beta")
-                corr = bc.get("corr")
-        
-        # Build scored signal with freshness classification
-        signal = build_ichimoku_signal(
-            ticker=ticker,
-            detection=detection,
-            bars=bars,
-            closes=closes,
-            tenkan_series=tenkan_series,
-            earnings_days_ahead=earnings_days,
-            index_membership=index_membership,
-            dollar_adv=dollar_adv,
-            sector_etf=sector_etf,
-            sector_state=sector_state,
-            index_state=index_state,
-            rs_ratio=rs_ratio,
-            beta=beta,
-            corr=corr,
-        )
-        
-        return signal
-        
-    except Exception as e:
-        LOG.warning(f"Error scanning {ticker}: {e}")
-        return None
+    signals = scan_ticker_playbooks(
+        ticker=ticker,
+        as_of_date=as_of_date,
+        index_membership=index_membership,
+        benzinga_client=benzinga_client,
+        min_dollar_adv=min_dollar_adv,
+        use_cache=use_cache,
+        index_bars=index_bars,
+        index_state=index_state,
+        sector_etf=sector_etf,
+        sector_state=sector_state,
+        rs_lookback=rs_lookback,
+        beta_lookback=beta_lookback,
+    )
+    for signal in signals:
+        if signal.playbook == PLAYBOOK_KIJUN_PULLBACK:
+            return signal
+    return None
 
 
 def scan_single_ticker(
@@ -452,12 +524,16 @@ def scan_single_ticker(
     # Check earnings
     earnings_days = fetch_earnings_days_ahead(t, today, benzinga_client)
     
-    # Full detection
+    # Shared detection inputs for every playbook.
+    context, _err = compute_detection_context(bars)
+    
+    # Full detection (core playbook drives the headline fields)
     detection = detect_ichimoku_setup(
         bars,
         ticker=t,
         index_membership=index_membership,
         earnings_days_ahead=earnings_days,
+        context=context,
     )
     
     result = {
@@ -475,30 +551,29 @@ def scan_single_ticker(
         "indexMembership": index_membership,
         "earningsDaysAhead": earnings_days,
         "notes": detection.get("notes", []),
+        "playbooks": {},
     }
     
-    if detection.get("hasSignal"):
-        from backend.technicals import compute_ichimoku_series
-        ich_series = compute_ichimoku_series(bars)
-        ich_closes = ich_series.get("closes", [])
+    # Top-down context, shared by every playbook's signal build.
+    ich_closes = context["closes"] if context else []
+    rs_ratio: Optional[float] = None
+    beta: Optional[float] = None
+    corr: Optional[float] = None
+    if index_bars and ich_closes:
+        index_closes = [float(b.close) for b in index_bars if b.close is not None]
+        if index_closes:
+            rs_ratio = compute_relative_strength(ich_closes, index_closes).get("rsRatio")
+            bc = compute_beta_corr(ich_closes, index_closes)
+            beta = bc.get("beta")
+            corr = bc.get("corr")
 
-        rs_ratio: Optional[float] = None
-        beta: Optional[float] = None
-        corr: Optional[float] = None
-        if index_bars and ich_closes:
-            index_closes = [float(b.close) for b in index_bars if b.close is not None]
-            if index_closes:
-                rs_ratio = compute_relative_strength(ich_closes, index_closes).get("rsRatio")
-                bc = compute_beta_corr(ich_closes, index_closes)
-                beta = bc.get("beta")
-                corr = bc.get("corr")
-
+    def _build(det: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         signal = build_ichimoku_signal(
             ticker=t,
-            detection=detection,
+            detection=det,
             bars=bars,
             closes=ich_closes,
-            tenkan_series=ich_series.get("tenkan_series", []),
+            tenkan_series=context["tenkan_series"] if context else [],
             earnings_days_ahead=earnings_days,
             index_membership=index_membership,
             dollar_adv=_compute_dollar_adv(bars),
@@ -509,8 +584,33 @@ def scan_single_ticker(
             beta=beta,
             corr=corr,
         )
-        if signal:
-            result["signal"] = signal_to_dict(signal)
+        return signal_to_dict(signal) if signal else None
+
+    if detection.get("hasSignal"):
+        result["signal"] = _build(detection)
+    
+    # Research playbooks: report which fire for this name.
+    if context is not None:
+        for pb, detector in _PLAYBOOK_DETECTORS:
+            if pb == PLAYBOOK_KIJUN_PULLBACK:
+                continue
+            det = detector(
+                bars,
+                ticker=t,
+                index_membership=index_membership,
+                earnings_days_ahead=earnings_days,
+                context=context,
+            )
+            entry: Dict[str, Any] = {
+                "label": PLAYBOOK_LABELS.get(pb, pb),
+                "research": True,
+                "hasSignal": bool(det.get("hasSignal")),
+                "signal": None,
+                "notes": det.get("notes", []),
+            }
+            if det.get("hasSignal"):
+                entry["signal"] = _build(det)
+            result["playbooks"][pb] = entry
     
     return result
 
@@ -518,6 +618,70 @@ def scan_single_ticker(
 # ---------------------------------------------------------------------------
 # Full Universe Scan
 # ---------------------------------------------------------------------------
+
+def _bucketize_signals(
+    signals: List[IchimokuSignal],
+    *,
+    direction: Optional[str],
+    min_rr: float,
+    structure_max: int,
+) -> Dict[str, Any]:
+    """Apply the shared post-scan quality pipeline to one playbook's signals.
+
+    Filter to A+ only (score >= 75) and by direction if specified, enforce
+    the risk:reward floor, split into freshness buckets, and trim structure
+    to a tight, ranked "Approaching" shortlist (closest-to-actionable first,
+    then score) so the desk isn't drowning in names days away from a trigger.
+    """
+    aplus_signals: List[IchimokuSignal] = []
+    sub_rr_count = 0
+    for s in signals:
+        if s.score < APLUS_THRESHOLD:
+            continue
+        if direction and s.direction != direction:
+            continue
+        # Risk:reward floor. reward_1r / risk_dollars must clear min_rr (default
+        # 1:1). A setup can be technically perfect yet have Target 1 nearer than
+        # the stop, which makes for a losing-expectancy trade the desk shouldn't
+        # see. Guard against a zero/None risk so we never divide by zero.
+        if min_rr > 0:
+            risk = s.risk_dollars or 0.0
+            reward = s.reward_1r or 0.0
+            if risk <= 0 or (reward / risk) < min_rr:
+                sub_rr_count += 1
+                continue
+        aplus_signals.append(s)
+
+    aplus_signals.sort(key=lambda x: x.score, reverse=True)
+
+    actionable: List[IchimokuSignal] = []
+    structure: List[IchimokuSignal] = []
+    rejected_count = 0
+    for s in aplus_signals:
+        if s.freshness_bucket == "actionable":
+            actionable.append(s)
+        elif s.freshness_bucket == "structure":
+            structure.append(s)
+        elif s.freshness_bucket == "rejected":
+            rejected_count += 1
+            # Don't include rejected signals in output
+
+    structure.sort(
+        key=lambda x: ((x.distance_to_actionable if x.distance_to_actionable is not None else 999.0), -x.score)
+    )
+    structure_total = len(structure)
+    if structure_max > 0:
+        structure = structure[:structure_max]
+
+    return {
+        "aplus": aplus_signals,
+        "actionable": actionable,
+        "structure": structure,
+        "structure_total": structure_total,
+        "rejected_count": rejected_count,
+        "sub_rr_count": sub_rr_count,
+    }
+
 
 def run_universe_scan(
     *,
@@ -593,11 +757,11 @@ def run_universe_scan(
         needed_etfs, as_of_date=today, use_cache=use_cache
     )
     
-    # Scan in parallel
+    # Scan in parallel — every playbook per ticker on the same cached bars.
     signals: List[IchimokuSignal] = []
     errors: List[str] = []
     
-    def _scan_one(ticker: str) -> Optional[IchimokuSignal]:
+    def _scan_one(ticker: str) -> List[IchimokuSignal]:
         membership = memberships.get(ticker, "sp500")
         
         # Select appropriate index context
@@ -609,7 +773,7 @@ def run_universe_scan(
         s_etf = sector_map.get(ticker)
         s_state = sector_states.get(s_etf) if s_etf else None
         
-        return scan_ticker(
+        return scan_ticker_playbooks(
             ticker=ticker,
             as_of_date=today,
             index_membership=membership,
@@ -630,58 +794,34 @@ def run_universe_scan(
         for future in as_completed(future_to_ticker):
             ticker = future_to_ticker[future]
             try:
-                signal = future.result()
-                if signal is not None:
-                    signals.append(signal)
+                signals.extend(future.result())
             except Exception as e:
                 errors.append(f"{ticker}: {str(e)}")
     
-    # Filter to A+ only (score >= 75) and by direction if specified
-    aplus_signals = []
-    sub_rr_count = 0
-    for s in signals:
-        if s.score < APLUS_THRESHOLD:
-            continue
-        if direction and s.direction != direction:
-            continue
-        # Risk:reward floor. reward_1r / risk_dollars must clear min_rr (default
-        # 1:1). A setup can be technically perfect yet have Target 1 nearer than
-        # the stop, which makes for a losing-expectancy trade the desk shouldn't
-        # see. Guard against a zero/None risk so we never divide by zero.
-        if min_rr > 0:
-            risk = s.risk_dollars or 0.0
-            reward = s.reward_1r or 0.0
-            if risk <= 0 or (reward / risk) < min_rr:
-                sub_rr_count += 1
-                continue
-        aplus_signals.append(s)
-    
-    # Sort by score descending
-    aplus_signals.sort(key=lambda x: x.score, reverse=True)
-    
-    # Classify A+ signals into freshness buckets
-    actionable = []
-    structure = []
-    rejected_count = 0
-    
-    for s in aplus_signals:
-        if s.freshness_bucket == "actionable":
-            actionable.append(s)
-        elif s.freshness_bucket == "structure":
-            structure.append(s)
-        elif s.freshness_bucket == "rejected":
-            rejected_count += 1
-            # Don't include rejected signals in output
-    
-    # Item 1: trim structure to a tight, ranked "Approaching" shortlist.
-    # Sort by distance-to-actionable (closest first), then score; cap the list
-    # so the desk isn't drowning in names that are days away from a trigger.
-    structure.sort(
-        key=lambda x: ((x.distance_to_actionable if x.distance_to_actionable is not None else 999.0), -x.score)
+    # Same quality bar for every playbook: A+ only, direction filter, R:R
+    # floor, freshness bucketing, capped + ranked structure shortlist.
+    core = _bucketize_signals(
+        [s for s in signals if s.playbook == PLAYBOOK_KIJUN_PULLBACK],
+        direction=direction, min_rr=min_rr, structure_max=structure_max,
     )
-    structure_total = len(structure)
-    if structure_max > 0:
-        structure = structure[:structure_max]
+    playbook_blocks: Dict[str, Dict[str, Any]] = {}
+    for pb in RESEARCH_PLAYBOOKS:
+        b = _bucketize_signals(
+            [s for s in signals if s.playbook == pb],
+            direction=direction, min_rr=min_rr, structure_max=structure_max,
+        )
+        playbook_blocks[pb] = {
+            "label": PLAYBOOK_LABELS.get(pb, pb),
+            "research": True,
+            "totalAPlus": len(b["aplus"]),
+            "actionableCount": len(b["actionable"]),
+            "structureCount": len(b["structure"]),
+            "structureTotal": b["structure_total"],
+            "rejectedCount": b["rejected_count"],
+            "subRRRejected": b["sub_rr_count"],
+            "actionable": [signal_to_dict(s) for s in b["actionable"]],
+            "structure": [signal_to_dict(s) for s in b["structure"]],
+        }
     
     # Persist actionable + structure to the tracker store (Redis-aware,
     # preserves desk overrides). Only fresh actionable names auto-enter as
@@ -689,21 +829,24 @@ def run_universe_scan(
     # expects API dicts, not IchimokuSignal dataclasses.
     # The cron breadth job passes persist=False so it can't seed the desk
     # tracker with names nobody looked at.
+    # Research-first: ONLY the core playbook auto-persists. TK cross / Kumo
+    # breakout names enter the tracker via a manual Watch only.
     if persist:
-        _persist_signals([signal_to_dict(s) for s in (actionable + structure)])
+        _persist_signals([signal_to_dict(s) for s in (core["actionable"] + core["structure"])])
     
     elapsed_ms = int((time.time() - start_time) * 1000)
     
     result = {
         "asOfDate": as_of_str,
         "scannedCount": len(universe),
-        "totalAPlus": len(aplus_signals),
-        "actionableCount": len(actionable),
-        "structureCount": len(structure),
-        "structureTotal": structure_total,
-        "rejectedCount": rejected_count,
-        "actionable": [signal_to_dict(s) for s in actionable],
-        "structure": [signal_to_dict(s) for s in structure],
+        "totalAPlus": len(core["aplus"]),
+        "actionableCount": len(core["actionable"]),
+        "structureCount": len(core["structure"]),
+        "structureTotal": core["structure_total"],
+        "rejectedCount": core["rejected_count"],
+        "actionable": [signal_to_dict(s) for s in core["actionable"]],
+        "structure": [signal_to_dict(s) for s in core["structure"]],
+        "playbooks": playbook_blocks,
         "indexState": {
             "spx": index_spx,
             "ndx": index_ndx,
@@ -715,7 +858,7 @@ def run_universe_scan(
             "minDollarAdv": min_dollar_adv,
             "structureMax": structure_max,
             "minRR": min_rr,
-            "subRRRejected": sub_rr_count,
+            "subRRRejected": core["sub_rr_count"],
             "rsLookback": rs_lookback,
             "betaLookback": beta_lookback,
             "errors": errors[:10] if errors else [],
@@ -882,6 +1025,17 @@ def apply_live_price_overlay(
         block = result.get(key)
         if isinstance(block, list):
             sigs.extend([s for s in block if isinstance(s, dict)])
+    # Research playbook sections re-price the same way (one quote per
+    # distinct ticker across all sections — overlay_signal_list de-dups).
+    playbooks = result.get("playbooks")
+    if isinstance(playbooks, dict):
+        for block in playbooks.values():
+            if not isinstance(block, dict):
+                continue
+            for key in ("actionable", "structure"):
+                lst = block.get(key)
+                if isinstance(lst, list):
+                    sigs.extend([s for s in lst if isinstance(s, dict)])
     return overlay_signal_list(sigs, max_workers=max_workers)
 
 
@@ -1051,17 +1205,27 @@ def set_desk_status(
     signal_date: Optional[str] = None,
     note: Optional[str] = None,
     pinned: Optional[bool] = None,
+    signal: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Desk override: mark a name watching/entered/working/broken/exited.
 
     Returns {ok, record|error}. Desk states survive scan refreshes and are
     never clobbered by the auto-evaluator.
+
+    ``signal`` (optional): full signal dict from the card. Research playbooks
+    (TK cross, Kumo breakout) are never auto-persisted by the scan, so their
+    first manual Watch seeds the tracker record from the card payload.
     """
     desk_status = (desk_status or "").strip().lower()
     if desk_status not in DESK_STATUSES:
         return {"ok": False, "error": f"Invalid desk status '{desk_status}'. Allowed: {sorted(DESK_STATUSES)}"}
 
     rec = _find_record(ticker, signal_date)
+    if rec is None and isinstance(signal, dict):
+        sig_ticker = str(signal.get("ticker") or "").upper()
+        if sig_ticker == (ticker or "").upper() and signal.get("signalDate"):
+            _persist_signals([signal])
+            rec = _find_record(ticker, signal_date or signal.get("signalDate"))
     if rec is None:
         return {"ok": False, "error": f"No tracked signal for {ticker}."}
 

@@ -15,6 +15,34 @@ function fmtMoney(x) {
 let lastPayload = null;
 let lastTrackerSignals = null;  // last desk-tracker payload, for row-level insight lookups
 
+// Playbook display metadata. The core playbook (kijun_pullback) keeps the
+// classic sections; the research playbooks get their own sections below and
+// never auto-enter the desk tracker.
+const PLAYBOOK_META = {
+  kijun_pullback: { label: "Kijun Pullback", event: "Reclaim" },
+  tk_cross:       { label: "TK Cross",       event: "Cross" },
+  kumo_breakout:  { label: "Kumo Breakout",  event: "Breakout" },
+};
+
+const PLAYBOOK_UI = {
+  tk_cross: {
+    section: "tkCrossSection", grid: "tkCrossGrid", structGrid: "tkCrossStructureGrid",
+    meta: "tkCrossMeta", toggle: "tkCrossToggle", tickers: "tkCrossTickers", empty: "tkCrossEmpty",
+  },
+  kumo_breakout: {
+    section: "kumoSection", grid: "kumoGrid", structGrid: "kumoStructureGrid",
+    meta: "kumoMeta", toggle: "kumoToggle", tickers: "kumoTickers", empty: "kumoEmpty",
+  },
+};
+
+function playbookOf(signal) {
+  return (signal && signal.playbook) || "kijun_pullback";
+}
+
+function isResearchPlaybook(pb) {
+  return pb === "tk_cross" || pb === "kumo_breakout";
+}
+
 function setLoading(isLoading, statusMsg) {
   const btn = $("runBtn");
   if (!btn) return;
@@ -224,6 +252,8 @@ function renderSignalCard(signal, isStructure = false) {
   const grade = signal.quality?.grade || "C";
   const score = signal.quality?.score ?? 0;
   const status = signal.status || "pending";
+  const playbook = playbookOf(signal);
+  const pbMeta = PLAYBOOK_META[playbook] || PLAYBOOK_META.kijun_pullback;
   
   const levels = signal.levels || {};
   const ichimoku = signal.ichimoku || {};
@@ -241,7 +271,8 @@ function renderSignalCard(signal, isStructure = false) {
   let tagsHtml = "";
   for (const tag of tags.slice(0, 8)) {
     const isPositive = ["Chikou Clear", "Vol Surge", "Strong Close", "Kijun Rising", "Kijun Falling", 
-                        "RSI Confirm", "Cloud Aligned", "Cloud Optimal", "Sector Aligned", "Leadership"].includes(tag);
+                        "RSI Confirm", "Cloud Aligned", "Cloud Optimal", "Sector Aligned", "Leadership",
+                        "Thin-Cloud Escape"].includes(tag);
     const isWarning = ["Earnings Warning"].includes(tag);
     const tagClass = isPositive ? "positive" : (isWarning ? "warning" : "");
     tagsHtml += `<span class="tagChip ${tagClass}">${escapeHtml(tag)}</span>`;
@@ -251,14 +282,15 @@ function renderSignalCard(signal, isStructure = false) {
   const indexBadge = signal.indexMembership === "nasdaq100" ? "NDX" : 
                      signal.indexMembership === "both" ? "S&P/NDX" : "S&P";
   
-  // Build freshness info
+  // Build freshness info (the trigger event differs per playbook:
+  // Tenkan reclaim / TK cross / cloud breakout)
   let freshnessHtml = "";
   if (!isStructure) {
     // Actionable - show positive freshness metrics
     const reclaimBars = freshness.barsSinceReclaim;
     const kijunDist = freshness.kijunDistanceAtr;
     if (reclaimBars !== null && reclaimBars !== undefined) {
-      freshnessHtml += `<span class="freshBadge positive">Reclaim ${reclaimBars} bar${reclaimBars !== 1 ? 's' : ''} ago</span>`;
+      freshnessHtml += `<span class="freshBadge positive">${pbMeta.event} ${reclaimBars} bar${reclaimBars !== 1 ? 's' : ''} ago</span>`;
     }
     if (kijunDist !== null && kijunDist !== undefined) {
       freshnessHtml += `<span class="freshBadge positive">${fmt2(kijunDist)} ATR from Kijun</span>`;
@@ -305,14 +337,27 @@ function renderSignalCard(signal, isStructure = false) {
         <button type="button" class="ikCardBtn ikTrackBtn ${isTracked ? 'isTracked' : ''}" data-ticker="${ticker}" data-act="watching">${isTracked ? escapeHtml(status) : 'Watch'}</button>
       </div>`;
 
+  // Playbook badge on research cards; stop copy differs per playbook
+  // (kijun_pullback + tk_cross stop at the Kijun; kumo_breakout stops at
+  // the far cloud edge).
+  const playbookBadge = isResearchPlaybook(playbook)
+    ? `<span class="playbookBadge">${escapeHtml(pbMeta.label)}</span>` : "";
+  const stopLabel = playbook === "kumo_breakout" ? "Stop (cloud)" : "Stop";
+  const structureNotes = {
+    kijun_pullback: "Watch for next pullback to Kijun",
+    tk_cross: "Watch for the cross to hold — fresh strength through the trigger",
+    kumo_breakout: "Watch for a clean hold beyond the cloud edge",
+  };
+
   return `
-    <div class="signalCard ${isStructure ? 'structureCard' : 'actionableCard'}" data-ticker="${ticker}">
+    <div class="signalCard ${isStructure ? 'structureCard' : 'actionableCard'}" data-ticker="${ticker}" data-playbook="${escapeHtml(playbook)}">
       ${verdictHtml}
       <div class="signalCardHeader">
         <div class="signalCardTicker">
           <span class="signalCardSymbol">${ticker}</span>
           <span class="signalCardDirection ${direction}">${direction}</span>
           <span class="indexBadgeSmall">${indexBadge}</span>
+          ${playbookBadge}
           ${status !== "pending" ? `<span class="signalCardStatus ${status}">${status}</span>` : ""}
         </div>
         <span class="signalCardGrade ${gradeClass}">${grade} (${score})</span>
@@ -326,7 +371,7 @@ function renderSignalCard(signal, isStructure = false) {
           <span class="v">${fmtMoney(levels.entryTrigger)}</span>
         </div>
         <div class="signalCardMetric">
-          <span class="k">Stop</span>
+          <span class="k">${stopLabel}</span>
           <span class="v">${fmtMoney(levels.stopLoss)}</span>
         </div>
         <div class="signalCardMetric">
@@ -366,7 +411,7 @@ function renderSignalCard(signal, isStructure = false) {
       </div>
       ${renderContextRow(signal)}
       ${tagsHtml ? `<div class="signalCardTags">${tagsHtml}</div>` : ""}
-      ${isStructure ? '<div class="structureNote">Watch for next pullback to Kijun</div>' : ""}
+      ${isStructure ? `<div class="structureNote">${structureNotes[playbook] || structureNotes.kijun_pullback}</div>` : ""}
       ${actionsHtml}
     </div>
   `;
@@ -468,6 +513,54 @@ function renderSignals(payload) {
   }
 }
 
+// Research playbook sections (TK Cross, Kumo Breakout): same card grid and
+// quality bar as the core setup, but nothing here auto-enters the tracker —
+// the desk tracks names manually with Watch while the backtest cohorts
+// decide whether each playbook earns trust.
+function renderPlaybooks(payload) {
+  const blocks = payload.playbooks || {};
+  for (const [pb, ui] of Object.entries(PLAYBOOK_UI)) {
+    const section = $(ui.section);
+    if (!section) continue;
+    const block = blocks[pb];
+    if (!block) {
+      // Older cached payloads (pre-playbooks) — keep the section hidden.
+      section.classList.add("hidden");
+      continue;
+    }
+    section.classList.remove("hidden");
+
+    const actionable = block.actionable || [];
+    const structure = block.structure || [];
+
+    const grid = $(ui.grid);
+    if (grid) grid.innerHTML = actionable.map(s => renderSignalCard(s, false)).join("");
+
+    const structGrid = $(ui.structGrid);
+    if (structGrid) {
+      structGrid.innerHTML = structure.map(s => renderSignalCard(s, true)).join("");
+      structGrid.style.display = "none";  // collapsed by default, like core
+    }
+    const toggle = $(ui.toggle);
+    if (toggle) {
+      toggle.style.display = structure.length ? "" : "none";
+      toggle.textContent = `Show approaching (${structure.length})`;
+    }
+
+    const empty = $(ui.empty);
+    if (empty) empty.style.display = (actionable.length || structure.length) ? "none" : "";
+
+    const meta = $(ui.meta);
+    if (meta) {
+      const totalStruct = block.structureTotal ?? structure.length;
+      const vt = actionable.filter(s => (s.verdict && s.verdict.status) === "TRADABLE").length;
+      meta.textContent = `${actionable.length} actionable${vt ? ` (${vt} tradable)` : ""} · ${totalStruct} approaching`;
+    }
+
+    renderTickerStrip(ui.tickers, actionable);
+  }
+}
+
 function renderGateBanner(payload) {
   const banner = $("gateBanner");
   if (!banner) return;
@@ -535,6 +628,7 @@ function render(payload) {
   renderVerdictBanner(payload);
   renderStats(payload);
   renderSignals(payload);
+  renderPlaybooks(payload);
 }
 
 // -----------------------------------------------------------------------------
@@ -579,6 +673,13 @@ async function handleScan(e, opts) {
     if (actionable > 0) statusMsg += ` · ${actionable} actionable now`;
     if (structureTotal > 0) statusMsg += ` · ${structureTotal} approaching`;
     if (rejected > 0) statusMsg += ` · ${rejected} rejected (impulse bars)`;
+    const pbs = payload.playbooks || {};
+    for (const [pb, meta] of Object.entries(PLAYBOOK_META)) {
+      const block = pbs[pb];
+      if (!block) continue;
+      const n = (block.actionableCount || 0) + (block.structureTotal ?? block.structureCount ?? 0);
+      if (n > 0) statusMsg += ` · ${meta.label}: ${n}`;
+    }
     setStatus(statusMsg);
     
     // Newly scanned signals are persisted server-side; refresh the tracker
@@ -616,12 +717,16 @@ function trkPillStyle(status) {
   return map[status] || map.pending;
 }
 
-async function deskTrack(ticker, status, signalDate, note) {
+async function deskTrack(ticker, status, signalDate, note, signal) {
   try {
+    // Research playbook signals aren't auto-persisted by the scan, so the
+    // card's full payload rides along to seed the tracker on first Watch.
+    const body = { ticker, status, signalDate, note };
+    if (signal) body.signal = signal;
     const resp = await fetch("/api/engine4-ichimoku/track", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker, status, signalDate, note }),
+      body: JSON.stringify(body),
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
@@ -684,10 +789,15 @@ function renderTracker(signals) {
     const sd = escapeHtml(r.signalDate || "");
     const st = r.status || "pending";
     const dir = escapeHtml(r.direction || "");
+    // Manually tracked research names carry a playbook badge so the desk
+    // book distinguishes them from core (auto-tracked) continuation names.
+    const pb = playbookOf(r);
+    const pbBadge = isResearchPlaybook(pb)
+      ? `<span class="playbookBadge">${escapeHtml((PLAYBOOK_META[pb] || {}).label || pb)}</span>` : "";
     const opts = TRACKER_STATUSES.map(s => `<option value="${s}" ${s === st ? 'selected' : ''}>${s}</option>`).join("");
     return `
       <div class="trkRow" data-ticker="${t}" data-date="${sd}">
-        <span class="trkSym">${t}</span>
+        <span class="trkSym">${t}</span>${pbBadge}
         <span class="muted" style="font-size:11px;">${dir} · ${sd}</span>
         <span class="trkPill" style="${trkPillStyle(st)}">${st.replace('_', ' ')}</span>
         <select class="trkSelect" data-ticker="${t}" data-date="${sd}">
@@ -768,6 +878,13 @@ async function runBacktest() {
     Object.keys(byGrade).forEach(g => { rows += btRow(`Grade ${g}`, byGrade[g]); });
     const byBucket = data.byBucket || {};
     Object.keys(byBucket).forEach(b => { rows += btRow(`Bucket: ${b}`, byBucket[b]); });
+    // Per-playbook measured edge — the cohort that decides whether the
+    // research playbooks (TK Cross, Kumo Breakout) earn desk trust.
+    const byPlaybook = data.byPlaybook || {};
+    Object.keys(byPlaybook).forEach(p => {
+      const label = (PLAYBOOK_META[p] || {}).label || p;
+      rows += btRow(`Playbook: ${label}`, byPlaybook[p]);
+    });
     const p = data.params || {};
     const win = data.window || {};
     if (body) {
@@ -811,6 +928,21 @@ function init() {
       grid.style.display = hidden ? "" : "none";
       const n = (lastPayload && (lastPayload.structure || []).length) || 0;
       approachingToggle.textContent = hidden ? "Hide approaching" : `Show approaching (${n})`;
+    });
+  }
+  
+  // Research playbook "approaching" toggles — same collapsed-by-default model
+  for (const [pb, ui] of Object.entries(PLAYBOOK_UI)) {
+    const toggle = $(ui.toggle);
+    if (!toggle) continue;
+    toggle.addEventListener("click", () => {
+      const grid = $(ui.structGrid);
+      if (!grid) return;
+      const hidden = grid.style.display === "none";
+      grid.style.display = hidden ? "" : "none";
+      const block = (lastPayload && lastPayload.playbooks && lastPayload.playbooks[pb]) || {};
+      const n = (block.structure || []).length;
+      toggle.textContent = hidden ? "Hide approaching" : `Show approaching (${n})`;
     });
   }
   
@@ -879,26 +1011,46 @@ if (document.readyState === "loading") {
   //   • "Watch" button     → desk tracker (no popup)
   //   • card body          → Position Sizer, near the click (LEFT-ish)
   // No more double-open: the body no longer also fires the insight popup.
+  // Find a rendered signal across the core lists AND the research playbook
+  // blocks. The same ticker can fire multiple playbooks, so the card's
+  // data-playbook attribute disambiguates.
+  function findRenderedSignal(ticker, playbook) {
+    var lists = [].concat(lastPayload.actionable || [], lastPayload.structure || []);
+    var pbs = lastPayload.playbooks || {};
+    Object.keys(pbs).forEach(function (k) {
+      var b = pbs[k] || {};
+      lists = lists.concat(b.actionable || [], b.structure || []);
+    });
+    return lists.find(function (s) {
+      var sPb = s.playbook || "kijun_pullback";
+      return s.ticker === ticker && (!playbook || sPb === playbook);
+    });
+  }
+
   function onCardClick(ev) {
     var card = ev.target.closest(".signalCard");
     if (!card || !lastPayload) return;
     var ticker = card.getAttribute("data-ticker");
-    var allSignals = [].concat(lastPayload.actionable || [], lastPayload.structure || []);
-    var sig = allSignals.find(function(s) { return s.ticker === ticker; });
+    var cardPb = card.getAttribute("data-playbook") || "";
+    var sig = findRenderedSignal(ticker, cardPb);
     if (!sig) return;
 
     // Dedicated insight affordance → LLM, docked right so it never overlaps the sizer.
     if (ev.target.closest(".ikInsightBtn")) {
       ev.stopPropagation();
       var ix = Math.max(20, window.innerWidth - 470);
-      fetchInsight("ik_signal", sig, "Ichimoku: " + ticker + " (" + (sig.direction || "") + ")", ix, 96);
+      var pbLabel = (sig.playbook && sig.playbook !== "kijun_pullback" && PLAYBOOK_META[sig.playbook])
+        ? ", " + PLAYBOOK_META[sig.playbook].label : "";
+      fetchInsight("ik_signal", sig, "Ichimoku: " + ticker + " (" + (sig.direction || "") + pbLabel + ")", ix, 96);
       return;
     }
-    // Desk tracker affordance → mark watching (no popup).
+    // Desk tracker affordance → mark watching (no popup). The full signal
+    // payload rides along so research names (never auto-persisted) can seed
+    // the tracker on first Watch.
     if (ev.target.closest(".ikTrackBtn")) {
       ev.stopPropagation();
       var act = ev.target.closest(".ikTrackBtn").getAttribute("data-act") || "watching";
-      deskTrack(ticker, act, sig.signalDate);
+      deskTrack(ticker, act, sig.signalDate, undefined, sig);
       return;
     }
     // Any other control inside the card: ignore.
@@ -911,6 +1063,11 @@ if (document.readyState === "loading") {
   }
   if (actionableGrid) actionableGrid.addEventListener("click", onCardClick);
   if (structureGrid) structureGrid.addEventListener("click", onCardClick);
+  // Research playbook grids share the same click model.
+  ["tkCrossGrid", "tkCrossStructureGrid", "kumoGrid", "kumoStructureGrid"].forEach(function (id) {
+    var el = $(id);
+    if (el) el.addEventListener("click", onCardClick);
+  });
 
   // ── Desk Tracker rows → check in on a tracked trade with desk insight ──
   // The scan card disappears once a name is no longer surfaced, so the tracker
