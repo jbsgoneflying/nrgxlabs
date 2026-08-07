@@ -335,6 +335,23 @@
         margin-left: 6px;
         white-space: nowrap;
       }
+      /* Per-card entry-protocol note on preview cards (backtest-informed) */
+      .orderNote {
+        margin-top: 6px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        font-size: 11px;
+        line-height: 1.4;
+        background: rgba(255, 149, 0, 0.08);
+        border: 1px solid rgba(255, 149, 0, 0.25);
+        color: #7a4a00;
+      }
+      .orderNote.closeOk {
+        background: rgba(52, 199, 89, 0.08);
+        border-color: rgba(52, 199, 89, 0.3);
+        color: #1b6e35;
+      }
+      .orderNote b { font-weight: 700; }
     </style>
   </head>
   <body>
@@ -391,23 +408,24 @@
       <section class="surface hidden" id="previewSection" style="border:1px solid rgba(255,149,0,0.35); margin-bottom:12px;">
         <div class="sectionHeader">
           <h2 class="sectionTitle">
-            Close Preview — Today's Candle
+            Close Preview — Tomorrow's Order Blotter
             <span class="tipWrap">
               <button class="tipBtn" type="button" aria-label="Close preview help" aria-expanded="false">i</button>
               <div class="tipPanel" role="tooltip">
-                <div class="tipTitle">Close Preview</div>
+                <div class="tipTitle">Close Preview — how to use it</div>
                 <div class="tipBody">
-                  <p>Every playbook re-evaluated as if <b>today's daily candle closed at the current live price</b>. Built for the last 15-20 minutes of the session: if a candidate shows here and holds into the bell, the close is the entry.</p>
+                  <p>Every playbook re-evaluated as if <b>today's daily candle closed at the current live price</b>. Run it in the last 15-30 minutes to build tomorrow's order list — then <b>place stop orders at the entry trigger</b>, don't buy the close.</p>
                   <ul>
+                    <li><b>Why stop orders</b>: 2yr backtest, same 1,051 signals — trigger-confirmed entries made <b>+0.28R/trade</b>; buying the signal-day close was breakeven (−0.00R). The 26% of signals that never trigger are the losers the stop order skips.</li>
+                    <li><b>Kumo Breakout exception</b>: the only playbook where a close entry tested positive (+0.27%/trade) — the cloud break IS the confirmation.</li>
                     <li><b>Same rules</b>: identical detectors, scoring, freshness and regime gate as the main scan</li>
-                    <li><b>Forming candle</b>: the trigger can appear or vanish with the tape — confirm it holds at 4:00 ET</li>
-                    <li><b>Volume caveat</b>: uses the running session volume; a volume-surge tag can still change by the bell</li>
+                    <li><b>Forming candle</b>: the setup can appear or vanish with the tape — confirm it holds at 4:00 ET before placing orders</li>
                     <li><b>Never auto-tracks</b>: preview names enter the Desk Tracker only via manual Watch</li>
                   </ul>
                 </div>
               </div>
             </span>
-            <span class="previewChip">Forming candle — confirm at the bell</span>
+            <span class="previewChip">Place stop orders at the trigger — don't buy the close</span>
           </h2>
           <div class="sectionMeta muted" id="previewMeta">—</div>
         </div>
@@ -731,7 +749,7 @@
     <script src="/static/desk-insight.js?v=2"></script>
     <script src="/static/ui_kit.js?v=7"></script>
     <script src="/static/position_calculator.js?v=4"></script>
-    <script src="/static/ichimoku.js?v=17"></script>
+    <script src="/static/ichimoku.js?v=18"></script>
     <script src="/static/calculator.js"></script>
     <!-- nav.js intentionally not loaded: the NRGX desk is Ichimoku-only. -->
     <script src="/static/raven-chat.js?v=4"></script>

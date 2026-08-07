@@ -348,6 +348,18 @@ function renderSignalCard(signal, isStructure = false) {
   // Close-preview cards evaluate the FORMING candle — flag them so nobody
   // mistakes a preview for a confirmed end-of-day signal.
   const previewBadge = signal.preview ? `<span class="previewBadge">Preview</span>` : "";
+  // Entry protocol on preview cards, informed by the 2yr backtest: the same
+  // 1,051 actionable signals made +0.28R via next-day stop order at the
+  // trigger vs -0.00R bought at the signal-day close. Kumo Breakout was the
+  // one playbook where a close entry tested positive — the cloud break is
+  // itself the confirmation.
+  let orderNoteHtml = "";
+  if (signal.preview) {
+    orderNoteHtml = playbook === "kumo_breakout"
+      ? `<div class="orderNote closeOk"><b>Close entry viable for this playbook</b> — the cloud break is the confirmation (2yr: +0.27%/trade at the close). Stop order @ ${fmtMoney(levels.entryTrigger)} remains the standard.</div>`
+      : `<div class="orderNote"><b>Place next-day stop order @ ${fmtMoney(levels.entryTrigger)}</b> — buying the close tested breakeven over 2yrs; the trigger confirmation is the edge (+0.28R vs −0.00R).</div>`;
+  }
+  const entryLabel = signal.preview ? "Stop order" : "Entry";
   const stopLabel = playbook === "kumo_breakout" ? "Stop (cloud)" : "Stop";
   const structureNotes = {
     kijun_pullback: "Watch for next pullback to Kijun",
@@ -374,7 +386,7 @@ function renderSignalCard(signal, isStructure = false) {
       ${freshnessHtml ? `<div class="signalCardFreshness">${freshnessHtml}</div>` : ""}
       <div class="signalCardBody">
         <div class="signalCardMetric">
-          <span class="k">Entry</span>
+          <span class="k">${entryLabel}</span>
           <span class="v">${fmtMoney(levels.entryTrigger)}</span>
         </div>
         <div class="signalCardMetric">
@@ -419,6 +431,7 @@ function renderSignalCard(signal, isStructure = false) {
       ${renderContextRow(signal)}
       ${tagsHtml ? `<div class="signalCardTags">${tagsHtml}</div>` : ""}
       ${isStructure ? `<div class="structureNote">${structureNotes[playbook] || structureNotes.kijun_pullback}</div>` : ""}
+      ${orderNoteHtml}
       ${actionsHtml}
     </div>
   `;
@@ -759,9 +772,9 @@ async function handleClosePreview() {
     renderPreview(payload);
     const n = ($("previewGrid")?.children || []).length;
     const pv = payload.preview || {};
-    let msg = `Close preview ready — ${n} candidate${n !== 1 ? "s" : ""} would fire at the current price.`;
+    let msg = `Close preview ready — ${n} candidate${n !== 1 ? "s" : ""} for tomorrow's blotter.`;
     if (pv.marketOpen === false) msg += " Market is closed; this equals the last real close.";
-    else msg += " Confirm the candle holds into the bell before entering.";
+    else msg += " Confirm each holds into the bell, then place stop orders at the trigger — don't buy the close.";
     setStatus(msg);
     $("previewSection")?.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (err) {
